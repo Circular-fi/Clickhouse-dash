@@ -1,10 +1,10 @@
 // The Usage tab of the MCP pages (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did.
-// A filter bar at the top (app_mcp_bar.js: Group by key, method or client, a picker for each of the four, the window, Refresh), the tiles of
-// the whole, four charts over time that the Group by groups (app_mcp_charts.js: the requests, the errors, the time of a call and the bytes
-// returned), and a table for each of the four dimensions that the tables list (key, method, client, result). A filter is a value of a
-// dimension: a chip, a picker of the bar, an entry of a chart legend or a row of a table adds or removes it, and every figure of the page
-// follows (the values of one dimension match any of them, the dimensions all of them). The instance is a dimension of the bar and the chips
-// only: ChDash instances that share the usage directory add up (app_mcp_instances.js), and the filter cuts one of them out.
+// A filter bar at the top (app_mcp_bar.js: Group by key, method, client or result, a picker for each of the five, the window, Refresh), the tiles
+// of the whole, and six charts over time (app_mcp_charts.js): the requests, the errors, the rate of the errors, the requests that were refused,
+// the time of a call and the bytes returned. The Group by groups all of them. A filter is a value of a dimension: a chip, a picker of the bar or
+// an entry of a chart legend adds or removes it, and every figure of the page follows (the values of one dimension match any of them, the
+// dimensions all of them). The instance is a dimension of the bar and the chips only: ChDash instances that share the usage directory add up
+// (app_mcp_instances.js), and the filter cuts one of them out.
 // The whole state is in the address (?window=&group=&key=&method=&client=&instance=&result=&type=, one parameter for each value): a link says
 // what it shows, and Back and Forward walk through the filters. Nothing runs on a timer: the usage is read when the page opens, on a change
 // and with Refresh (the pickers of the bar wait for the clicks to pause, once, before they read).
@@ -14,19 +14,26 @@
 //                                         than a restart): the caller hides the tab and says so
 //   ns.mcpOverview.hide()                 hides the tab and stops its reads
 //
-// The server (app_api.js, getMcpUsageOverview) cuts the usage. The tiles and the charts have every filter. The table of a dimension, and the
-// list of its picker, have every filter but their own, so a filtered table still lists what else could be picked, and a value that is picked
-// is always there (at 0 when it has nothing). The legend of a chart is the filter of the dimension that the charts are grouped by; a group
-// that a chart folds into "N more" cannot be picked there but in its table. A dimension that has fewer than two values in the answer, and no
-// filter, is not offered at all (offered()): its list in the bar is off, its rows and its legend entries cannot be picked. The bar and the
-// chips sit under the row of the two pages, out of the panel that scrolls, as the filter bar of System does.
+// The server (app_api.js, getMcpUsageOverview) cuts the usage. The tiles and the charts have every filter. The list of a picker has every filter
+// but its own, so a filtered list still shows what else could be picked, and a value that is picked is always there (at 0 when it has nothing).
+// The legend of a chart is the filter of the dimension that the charts are grouped by; a group that a chart folds into "N more" cannot be picked
+// there but in its list of the bar. One read of the server has all the charts need (a ranking of the groups for each metric, `orders`): each chart
+// shows the 8 groups that rank first for its own metric. The groups of the six charts are the values that were picked when the Group by
+// dimension is filtered, and then the read has no `orders`. A dimension that has fewer than two values in the answer, and no filter, is not
+// offered at all (offered()): its list in the bar is off, and its legend entries cannot be picked. The bar and the chips sit under the row of
+// the two pages, out of the panel that scrolls, as the filter bar of System does.
 //
 // Nothing moves when a filter is added or removed, or when the next answer comes: the chips are one line that is always there (a hint when
-// there is no filter), the cards of the charts keep one height (app_mcp_charts.js), and so do the tiles (mcp.css).
+// there is no filter; the period stays at the right end of it), the cards of the charts keep one height (app_mcp_charts.js), and so do the
+// tiles (mcp.css).
 //
-// The instances: with two or more, the head says "3 instances" (a button that lists them with their last write and their requests in the view),
-// and a file that is left out of the sum, or a name that two ChDash write under, is a warning above the tiles. Both come from the answer's
-// `instances`, which no filter but the instance's own changes, so they stay put while the filters do.
+// The tab has no heading row: its h2 is for screen readers only (the titles of the charts are h3), and the period of the window
+// ("Oct 9 02:00 to Oct 16 01:15") is muted at the right end of the chips row.
+//
+// The instances: the Instance list of the bar is where they are (app_mcp_bar.js: "Instance · All (2)" while two or more are summed and none is
+// picked, and a row for each with when it wrote last and a badge when its file is not read). A file that is left out of the sum, or a name that
+// two ChDash write under, is a warning above the tiles too. Both come from the answer's `instances`, which no filter but the instance's own
+// changes, so they stay put while the filters do.
 
 import { api } from "./app_api.js";
 import { dom, h, shell } from "./app_dom.js";
@@ -37,17 +44,20 @@ import { mcpInstances } from "./app_mcp_instances.js";
 import { router } from "./app_router.js";
 import { badge } from "./app_ui_badge.js";
 import { stat } from "./app_ui_stat.js";
-import { table as tableMod } from "./app_ui_table.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
 const EMPTY = format.EMPTY;
 const SLOT = "mcp.overview";
 const PATH = "/mcp-integration/usage";
-// The dimensions that a filter has, in the order of the address; the charts are grouped by one of the first three (what the bar offers).
+// The dimensions that a filter has, in the order of the address; the charts are grouped by one of key, method, client or result (what the bar
+// offers: the instance and the type are filters only).
 const DIMENSIONS = ["key", "method", "client", "instance", "result", "type"];
-const GROUPS = [{ value: "key", label: "Key" }, { value: "method", label: "Method" }, { value: "client", label: "Client" }];
+const GROUPS = [{ value: "key", label: "Key" }, { value: "method", label: "Method" }, { value: "client", label: "Client" }, { value: "result", label: "Result" }];
 const DEFAULT_GROUP = "method";
+// The groups of the charts are ranked once for each of these metrics, besides the requests (`order`), in the one read of the tab (`orders`): the
+// errors for the errors and their rate, the refused requests, the tool calls for their time, and the bytes returned.
+const RANKED = ["errors", "refused", "calls", "bytes"];
 // The server takes 20 values of a kind at most (a 400 `too_many` above).
 const MAX_VALUES = mcpBar.MAX_VALUES;
 // What the server accepts for a value of each dimension (a 400 `invalid` for the others): the id of a key (the name of a key of the
@@ -63,8 +73,8 @@ const VALID = {
   type: /^(?:call|request|limited|rejected)$/,
 };
 const DIMENSION_LABEL = { key: "Key", method: "Method", client: "Client", instance: "Instance", result: "Result", type: "Type" };
-// The values that an answer lists for a dimension that can be picked (its facet: every filter but its own). The type has no list, row or
-// legend to pick it from, and the instance has no table or legend: its list is in the bar.
+// The values that an answer lists for a dimension that can be picked (its facet: every filter but its own). The type has no list or legend to
+// pick it from, and the instance has no legend: its list is in the bar.
 const FACET = { key: (data) => data.keys, method: (data) => data.methods, client: (data) => data.clients, instance: (data) => data.instances, result: (data) => data.results };
 // The four kinds of request (the `type` of the server): what each one is, for the chip and the tooltip.
 const TYPE_LABEL = { call: "Tool calls", request: "Protocol", limited: "Rate limited", rejected: "Rejected" };
@@ -74,7 +84,7 @@ const TYPE_TITLE = {
   limited: "Refused by the rate limit (429)",
   rejected: "Refused before its message was read: 400, 413 or 415",
 };
-// The methods that are not the name of a tool: what they count (the title of the cell).
+// The methods that are not the name of a tool: what they count (the title of their legend entry).
 const METHOD_NOTE = {
   unread: "Refused before the message was read: the rate limit (429), a body that was too large (413), a content type that is not JSON (415) or a request that was not valid (400)",
   invalid: "A message whose method could not be read: not JSON, a batch, no jsonrpc member, or a method that is not a string",
@@ -90,6 +100,16 @@ const CLIENT_NOTE = {
   unknown: "The client sent no name in initialize and no User-Agent",
   other: "The clients past the caps: a key keeps 16 client names, and ClickHouse Dash 4,096",
 };
+// What a result is, for the title of its legend entry: `ok`, the code that the server makes of a JSON-RPC error ("rpc_error_32601") or of a
+// request that was refused ("429_rate_limited"); the other results are the error codes of the tools.
+function resultNote(value) {
+  if (value === "ok") return "The request succeeded";
+  const code = /^rpc_error_(\d+)$/.exec(value);
+  if (code) return `A JSON-RPC error of the protocol (code -${code[1]})`;
+  const status = /^(\d{3})_/.exec(value);
+  return status ? `Refused before its message was read (HTTP ${status[1]})` : "";
+}
+
 const WINDOW_TEXT = {
   "1h": "the last hour", "6h": "the last 6 hours", "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days",
 };
@@ -110,14 +130,11 @@ const model = {
   error: null,
   loading: false,
   announced: false,
-  // The sort of each table: it stays for the visit of the page and is not in the address.
-  sort: { keys: { key: "requests", dir: "desc" }, methods: { key: "requests", dir: "desc" }, clients: { key: "requests", dir: "desc" }, results: { key: "count", dir: "desc" } },
 };
 // The nodes that the view fills (built once by build()).
-const els = { blocks: {} };
+const els = {};
 let bar = null;
 let charts = null;
-let instances = null;
 // What the caller does when the server says that the usage is off.
 let onOff = null;
 // The chips on screen (their values and names), to draw them again only when they change.
@@ -219,8 +236,8 @@ function clearDimension(dimension) {
 const filterCount = () => DIMENSIONS.reduce((sum, dimension) => sum + model.filters[dimension].length, 0);
 
 // Whether a filter on the dimension is offered: it has two values to choose from in the answer, or a filter is on already (so that it can be
-// taken off). One value, or none, is nothing to choose: its list, its rows and its legend entries stay as they are, but cannot be used.
-// Before the first answer nothing is known, and everything is offered.
+// taken off). One value, or none, is nothing to choose: its list and its legend entries stay as they are, but cannot be used. Before the first
+// answer nothing is known, and everything is offered.
 function offered(dimension) {
   if (!model.data || !FACET[dimension]) return true;
   return model.filters[dimension].length > 0 || FACET[dimension](model.data).length > 1;
@@ -228,15 +245,18 @@ function offered(dimension) {
 
 // --- Reading -------------------------------------------------------------------------------
 
-// The usage for the window, the group and the filters. A newer read cancels the one in flight (util.latest); the figures that are on screen
-// stay (dimmed) until the answer comes. No timer: only a change of the page, or Refresh, reads.
+// The usage for the window, the group and the filters: one read, grouped by the Group by, whose groups are ranked by the requests and once more
+// by each of the other metrics that a chart ranks by (RANKED). When the Group by dimension is filtered its groups are the values that were
+// picked, the same whatever the metric, so no ranking is asked for. A newer read cancels the one in flight (util.latest); the figures that are
+// on screen stay (dimmed) until the answer comes. No timer: only a change of the page, or Refresh, reads.
 async function load() {
   const req = util.latest(SLOT);
   model.loading = true;
   model.error = null;
   render();
   try {
-    const data = await api.getMcpUsageOverview({ window: model.window, group: model.group, filters: model.filters, signal: req.signal });
+    const picked = model.filters[model.group].length > 0;
+    const data = await api.getMcpUsageOverview({ window: model.window, group: model.group, order: "requests", orders: picked ? [] : RANKED, filters: model.filters, signal: req.signal });
     if (!req.isCurrent()) return;
     model.data = data;
   } catch (error) {
@@ -286,7 +306,6 @@ function hide() {
   if (!mounted) return;
   scheduleChange.cancel();
   charts.destroy();
-  instances.destroy();
   // Shown again, the tab reads again and says so: it does not show what it read before.
   model.data = null;
   model.error = null;
@@ -307,12 +326,10 @@ function describe() {
   return `${span.charAt(0).toUpperCase()}${span.slice(1)} · by ${model.group}`;
 }
 
-// The bar and the chips (under the row of the two pages), then the head of the tab (title, dates) and its body: the tiles, the charts, the
-// four tables and the notes.
+// The bar and the chips (under the row of the two pages), then the body of the tab: the warnings, the tiles, the charts and the notes. Its
+// heading is hidden (the page's h1 is "MCP usage", and the titles of the charts are h3).
 function build(root) {
   els.root = root;
-  els.range = h("span", { class: "mcpMuted mcpOverview__range" });
-  instances = mcpInstances.create();
   bar = mcpBar.create({
     groups: GROUPS,
     labelOf: valueLabel,
@@ -329,11 +346,14 @@ function build(root) {
   els.refresh = bar.refresh;
   // The chips row is always there, one line high, so that a filter never moves what is under it: a hint while there is none, then the chips
   // (a list; one line that scrolls sideways when they do not fit) and "Clear filters", a button, which stands beside the list and not in it.
-  els.hint = h("span", { class: "mcpMuted mcpOverview__filtersHint" }, "No filters. Pick a value in a list, a legend or a table.");
+  // The period of the window is at the right end, muted: it never wraps and the chips never cover it. A phone has the room for the first
+  // sentence of the hint beside it, and not for the second (mcp.css).
+  els.hint = h("span", { class: "mcpMuted mcpOverview__filtersHint" }, "No filters.", h("span", { class: "mcpOverview__filtersHintMore" }, " Pick a value in a list or in a legend."));
   els.chips = h("div", { class: "chips mcpOverview__chips", role: "list", "aria-label": "Active filters", hidden: true });
   els.clear = h.html(badge.clearHtml("Clear filters", { "data-chip-clear": true })).firstElementChild;
   els.clear.hidden = true;
-  els.filters = h("div", { class: "chips mcpOverview__filters", hidden: true }, els.hint, els.chips, els.clear);
+  els.period = h("span", { class: "mcpMuted mcpOverview__period", title: "The period that the figures cover" });
+  els.filters = h("div", { class: "chips mcpOverview__filters", hidden: true }, els.hint, els.chips, els.clear, els.period);
   els.filters.addEventListener("click", onChipClick);
   dom.$(".mcpPage__nav", root.closest(".mcpPage")).after(bar.form, els.filters);
   shell.edgeCues(els.chips);
@@ -341,20 +361,15 @@ function build(root) {
   els.state = h("div", { class: "mcpOverview__state" });
   els.tiles = h("div", { class: "statTiles statTiles--boxed mcpOverview__tiles", role: "group", "aria-label": "Totals" });
   els.charts = h("div", { class: "mcpOverview__charts" });
-  charts = mcpCharts.create(els.charts, { pressed: (group, id) => model.filters[group]?.includes(id) === true, onToggle: toggleFilter, offered });
+  charts = mcpCharts.create(els.charts, { pressed: (group, id) => model.filters[group]?.includes(id) === true, onToggle: toggleFilter, offered, note: legendNote });
 
-  // Two columns on a wide window: the keys over the methods (the wide tables), the results over the clients.
-  els.tables = h("div", { class: "mcpOverview__tables" },
-    h("div", { class: "mcpOverview__col" }, blockOf("keys"), blockOf("methods")),
-    h("div", { class: "mcpOverview__col" }, blockOf("results"), blockOf("clients")));
-  els.tables.addEventListener("click", onRowClick);
   els.notes = h("div", { class: "mcpOverview__notes" });
   els.warnings = h("div", { class: "mcpOverview__warnings", hidden: true });
-  els.content = h("div", { class: "mcpOverview__content" }, els.warnings, els.tiles, els.charts, els.tables, els.notes);
+  els.content = h("div", { class: "mcpOverview__content" }, els.warnings, els.tiles, els.charts, els.notes);
   els.body = h("div", { class: "mcpOverview__body" }, els.state, els.content);
 
-  root.replaceChildren(h("section", { class: "pagePart mcpOverview__part", "aria-labelledby": "mcpOverviewTitle" },
-    h("div", { class: "pagePart__head mcpOverview__head" }, h("h2", { class: "pagePart__title", id: "mcpOverviewTitle" }, "Usage of all keys"), els.range, instances.el),
+  root.replaceChildren(h("section", { class: "pagePart", "aria-labelledby": "mcpOverviewTitle" },
+    h("h2", { class: "srOnly", id: "mcpOverviewTitle" }, "Usage of all keys"),
     els.body));
 }
 
@@ -374,7 +389,6 @@ function render() {
     mcpInstances.warn(els.warnings, model.data.instances);
     renderTiles(model.data);
     renderCharts(model.data);
-    for (const id of Object.keys(TABLES)) renderTable(id);
     renderNotes(model.data);
   } else {
     // A read is running: the figures stay, and the legends already show what the click picked (the entries that it leaves out dim).
@@ -389,14 +403,13 @@ function showState(on) {
 }
 
 function syncControls() {
-  bar.sync({ group: model.group, window: model.window, filters: model.filters, data: model.data,
-    offered: { key: offered("key"), method: offered("method"), client: offered("client"), instance: offered("instance") } });
+  bar.sync({ group: model.group, window: model.window, filters: model.filters, data: model.data, me: model.meta?.usage?.instance || "",
+    offered: { key: offered("key"), method: offered("method"), client: offered("client"), result: offered("result"), instance: offered("instance") } });
+  // The period of the answer that is on screen (nothing before the first one), from when the counting started when that is later.
   const data = model.data;
   const from = data && data.since != null && data.from != null ? Math.max(data.from, data.since) : data?.from;
-  els.range.textContent = data && from != null && data.to != null ? format.range(from, data.to) : "";
-  // "3 instances" in the head, from the answer that is on screen (nothing before the first one).
-  instances.update(data ? data.instances : [], { me: model.meta?.usage?.instance || "", now: data?.to ?? NaN,
-    requests: data ? new Map(data.instances.map((row) => [row.instance, row.requests])) : null });
+  const period = data && from != null && data.to != null ? format.range(from, data.to) : "";
+  if (els.period.textContent !== period) els.period.textContent = period;
   renderChips();
 }
 
@@ -406,6 +419,11 @@ function valueLabel(dimension, value) {
   if (dimension === "type") return TYPE_LABEL[value] || value;
   if (dimension === "key") return model.data?.keys.find((key) => key.id === value)?.name || value;
   return value;
+}
+
+// What a method, a client or a result is, for the title of its legend entry (the words that stand for a group of messages say what they are).
+function legendNote(dimension, value) {
+  return dimension === "method" ? METHOD_NOTE[value] || "" : dimension === "client" ? CLIENT_NOTE[value] || "" : dimension === "result" ? resultNote(value) : "";
 }
 
 const chipId = ({ dimension, value }) => `${dimension}=${value}`;
@@ -458,19 +476,13 @@ function onChipClick(event) {
   focusFilters(index);
 }
 
-// A click on a row of a table (or Enter on it) picks its value as a filter, or lets it go.
-function onRowClick(event) {
-  const row = event.target instanceof Element ? event.target.closest("tr[data-dimension]") : null;
-  if (row && !event.target.closest("a, button")) toggleFilter(row.dataset.dimension, row.dataset.value);
-}
-
 // --- Tiles ---------------------------------------------------------------------------------
 
 // The Active keys tile: its value and "of N keys" count keys of one kind, the keys that exist now. A deleted key keeps its usage, so one that
 // had a request in this view is counted apart ("1 deleted"): it is in neither figure, and "7 of 7 keys" is seven keys that exist. The server
-// counts the deleted keys with the others (totals.activeKeys), so the page counts from the rows of the keys table, which have every filter but
-// the one of the keys (applied here). When the server cut that table the rows cannot be counted: the tile says the total of the server and
-// what it counts, instead of a ratio that it cannot know.
+// counts the deleted keys with the others (totals.activeKeys), so the page counts from the rows of the keys facet of the answer, which have every
+// filter but the one of the keys (applied here). When the server cut that list the rows cannot be counted: the tile says the total of the server
+// and what it counts, instead of a ratio that it cannot know.
 function activeKeys(data) {
   const { totals } = data;
   if (data.omitted.keys > 0) {
@@ -522,7 +534,7 @@ function renderTiles(data) {
 
 // --- Charts --------------------------------------------------------------------------------
 
-// The four charts. A window with no request keeps the four cards (the page does not shrink): the Requests card says why there is nothing to
+// The six charts. A window with no request keeps the six cards (the page does not shrink): the Requests card says why there is nothing to
 // draw, with a way out when filters are on, and the others say what they count (nothing).
 function renderCharts(data) {
   const none = !data.totals.requests || !data.series.times.length;
@@ -536,215 +548,13 @@ function renderCharts(data) {
     : { title: `No request in ${span}`, body: "Nothing was counted in this window." });
 }
 
-// --- Tables --------------------------------------------------------------------------------
-
-// A value beside a bar of its share of `of` (the most called key, all the results).
-function share(value, of) {
-  const el = h("span", { class: "mcpOverview__share" });
-  tableMod.shareBar(el, of ? (value / of) * 100 : 0, count(value));
-  return el;
-}
-
-// Errors with their share of the requests that were read; the warning colour when there are some.
-function errorsCell(errors, read) {
-  if (!errors) return "0";
-  return h("span", null, h("span", { class: "mcpWarn" }, count(errors)), read > 0 ? h("span", { class: "mcpMuted" }, ` ${format.percent(errors / read)}`) : null);
-}
-
-const refusals = (row) => row.rateLimited + row.rejected;
-
-function keyCell(row) {
-  const deleted = row.deletedAt != null;
-  return h("span", { class: "mcpOverview__name", title: row.name === row.id ? row.name : `${row.name}\n${row.id}` },
-    h("span", { class: "mcpKeyName" }, row.name),
-    deleted ? badge.el("deleted", { tone: "warn", size: "sm", title: `Deleted ${minute(row.deletedAt)}: its usage stays until the retention ends` }) : null);
-}
-
-// A tool is code; a method of the protocol is muted, with a badge; the words that stand for a group of messages say what they are.
-function methodCell(row) {
-  const note = METHOD_NOTE[row.method] || "";
-  return h("span", { class: "mcpOverview__name", title: note ? `${row.method}\n${note}` : row.method },
-    row.kind === "call" ? h("code", { class: "mcpOverview__method" }, row.method) : h("span", { class: "mcpMuted mcpOverview__method" }, row.method),
-    row.kind === "call" ? null : badge.el(row.kind === "refused" ? "refused" : "protocol", { tone: "neutral", size: "sm" }));
-}
-
-// A client is its name, then the versions that it sent, muted (the latest first). The two names that ClickHouse Dash gives, `unknown` and
-// `other`, are muted, and their title says what they stand for.
-function clientCell(row) {
-  const note = CLIENT_NOTE[row.client] || "";
-  const lines = [row.client, row.versions.length ? `Versions: ${row.versions.join(", ")}` : "", note].filter(Boolean);
-  return h("span", { class: "mcpOverview__name", title: lines.join("\n") },
-    note ? h("span", { class: "mcpMuted mcpOverview__client" }, row.client) : h("strong", { class: "mcpOverview__client" }, row.client),
-    row.versions.length ? h("span", { class: "mcpMuted mcpOverview__versions" }, ` ${row.versions.join(", ")}`) : null);
-}
-
-const when = (t, now) => (t == null ? EMPTY : h("span", { title: format.timeTitle(t) }, format.ago(t, { now, short: true })));
-
-// The tables: what each lists, what a click on a row filters by, and its columns { key, label, title, text (a column of words: it sorts
-// from A, the others from the largest), sort(row), cell(row) }. The first column is the row header.
-const TABLES = {
-  keys: {
-    title: "By key",
-    label: "Usage by key",
-    dimension: "key",
-    noun: "keys",
-    none: "No key sent a request in this view.",
-    rows: (data) => data.keys,
-    omitted: (data) => data.omitted.keys,
-    value: (row) => row.id,
-    columns: (data) => {
-      const most = Math.max(0, ...data.keys.map((row) => row.calls));
-      return [
-        { key: "name", label: "Key", text: true, title: "Sort by name", sort: (row) => row.name.toLowerCase(), cell: keyCell },
-        { key: "requests", label: "Requests", title: "Requests of the key: tool calls, protocol and refused", sort: (row) => row.requests, cell: (row) => count(row.requests) },
-        { key: "calls", label: "Calls", title: "Tool calls, with their share of the most called key", sort: (row) => row.calls, cell: (row) => share(row.calls, most) },
-        { key: "errors", label: "Errors", title: "Errors, and their share of the requests that were read", sort: (row) => row.errors, cell: (row) => errorsCell(row.errors, row.requests - refusals(row)) },
-        { key: "limited", label: "429", title: "Requests that the rate limit refused", sort: (row) => row.rateLimited, cell: (row) => (row.rateLimited ? h("span", { class: "mcpWarn" }, count(row.rateLimited)) : "0") },
-        { key: "avg", label: "Avg time", title: "The average time of a tool call", sort: (row) => row.durationMsAvg, cell: (row) => h("span", { title: row.durationMsMax == null ? "" : `The longest call took ${ms(row.durationMsMax)}` }, ms(row.durationMsAvg)) },
-        { key: "bytes", label: "Returned", title: "The bytes of the answers", sort: (row) => row.bytes, cell: (row) => format.bytes(row.bytes) },
-        { key: "last", label: "Last used", title: "When the key was last used, in any window", sort: (row) => row.lastUsedAt, cell: (row) => when(row.lastUsedAt, data.to) },
-      ];
-    },
-  },
-  methods: {
-    title: "By method",
-    label: "Usage by method",
-    dimension: "method",
-    noun: "methods",
-    none: "No method was called in this view.",
-    rows: (data) => data.methods,
-    omitted: (data) => data.omitted.methods,
-    value: (row) => row.method,
-    columns: () => [
-      { key: "method", label: "Method", text: true, title: "Sort by name", sort: (row) => row.method.toLowerCase(), cell: methodCell },
-      { key: "requests", label: "Requests", title: "Requests that used the method", sort: (row) => row.requests, cell: (row) => count(row.requests) },
-      { key: "errors", label: "Errors", title: "Requests that ended with an error", sort: (row) => row.errors, cell: (row) => (row.errors ? h("span", { class: "mcpWarn" }, count(row.errors)) : "0") },
-      { key: "avg", label: "Avg time", title: "The average time of a request", sort: (row) => row.durationMsAvg, cell: (row) => ms(row.durationMsAvg) },
-      { key: "max", label: "Max", title: "The longest request", sort: (row) => row.durationMsMax, cell: (row) => ms(row.durationMsMax) },
-      { key: "bytes", label: "Returned", title: "The bytes of the answers", sort: (row) => row.bytes, cell: (row) => format.bytes(row.bytes) },
-      { key: "keys", label: "Keys", title: "Keys that used the method", sort: (row) => row.keys, cell: (row) => count(row.keys) },
-    ],
-  },
-  results: {
-    title: "By result",
-    label: "Usage by result",
-    dimension: "result",
-    noun: "results",
-    none: "No result in this view.",
-    rows: (data) => data.results,
-    omitted: (data) => data.omitted.results,
-    value: (row) => row.result,
-    columns: (data) => {
-      const total = data.results.reduce((sum, row) => sum + row.count, 0);
-      return [
-        { key: "result", label: "Result", text: true, title: "Sort by name", sort: (row) => row.result, cell: (row) => h("code", { class: row.result === "ok" ? null : "mcpWarn" }, row.result) },
-        { key: "count", label: "Count", title: "Requests that ended with the result, and their share of all", sort: (row) => row.count, cell: (row) => share(row.count, total) },
-        { key: "keys", label: "Keys", title: "Keys that had the result", sort: (row) => row.keys, cell: (row) => count(row.keys) },
-      ];
-    },
-  },
-  clients: {
-    title: "By client",
-    label: "Usage by client",
-    dimension: "client",
-    noun: "clients",
-    none: "No client sent a request in this view.",
-    // How a client is named (the server counts it by that name): the clientInfo of its initialize, else the product of its User-Agent.
-    note: "A client is named as it says in initialize (clientInfo), else by the product of its User-Agent (the text before the first / or space), else unknown. Other holds the names past the caps: 16 for a key, 4,096 in all. Its versions are those that it sent, the latest first.",
-    rows: (data) => data.clients,
-    omitted: (data) => data.omitted.clients,
-    value: (row) => row.client,
-    columns: (data) => [
-      { key: "client", label: "Client", text: true, title: "Sort by name", sort: (row) => row.client.toLowerCase(), cell: clientCell },
-      { key: "requests", label: "Requests", title: "Requests of the client", sort: (row) => row.requests, cell: (row) => count(row.requests) },
-      { key: "errors", label: "Errors", title: "Errors, and their share of the requests that were read", sort: (row) => row.errors, cell: (row) => errorsCell(row.errors, row.requests - refusals(row)) },
-      { key: "avg", label: "Avg time", title: "The average time of a tool call", sort: (row) => row.durationMsAvg, cell: (row) => h("span", { title: row.durationMsMax == null ? "" : `The longest call took ${ms(row.durationMsMax)}` }, ms(row.durationMsAvg)) },
-      { key: "keys", label: "Keys", title: "Keys that the client used", sort: (row) => row.keys, cell: (row) => count(row.keys) },
-      { key: "last", label: "Last seen", title: "When the keys last saw the client, in any window", sort: (row) => row.lastSeenAt, cell: (row) => when(row.lastSeenAt, data.to) },
-    ],
-  },
-};
-
-// A block of the tables: its title and count, the table (or a sentence) in its box, what the server left out.
-function blockOf(id) {
-  const spec = TABLES[id];
-  const block = {
-    count: h("span", { class: "pagePart__count" }),
-    // The hint is there only while a row can be picked.
-    hint: h("span", { class: "mcpMuted mcpOverview__hint", hidden: true }, "Click a row to filter"),
-    box: h("div", { class: "dataTableWrap mcpOverview__wrap" }),
-    more: h("p", { class: "mcpNote mcpNote--fine", hidden: true }),
-  };
-  block.section = h("section", { class: "mcpOverview__block", "aria-labelledby": `mcpOverviewTitle-${id}` },
-    h("div", { class: "pagePart__head mcpOverview__blockHead" },
-      h("h3", { class: "mcpOverview__blockTitle", id: `mcpOverviewTitle-${id}` }, spec.title), block.count, block.hint),
-    block.box, block.more,
-    spec.note ? h("p", { class: "mcpNote mcpNote--fine" }, spec.note) : null);
-  tableMod.scrollCues(block.box);
-  tableMod.rovingRows(block.box, { onOpen: (row) => toggleFilter(row.dataset.dimension, row.dataset.value), key: (row) => row.dataset.value });
-  els.blocks[id] = block;
-  return block.section;
-}
-
-// The rows in the order of a column; what has no value is last, whichever way the column sorts.
-function sorted(rows, column, dir) {
-  const sign = dir === "asc" ? 1 : -1;
-  return rows.map((row, index) => ({ row, index, value: column.sort(row) })).sort((a, b) => {
-    if (a.value == null || b.value == null) return a.value == null && b.value == null ? a.index - b.index : a.value == null ? 1 : -1;
-    return sign * (a.value < b.value ? -1 : a.value > b.value ? 1 : 0) || a.index - b.index;
-  }).map((item) => item.row);
-}
-
-function setSort(id, column) {
-  const sort = model.sort[id];
-  model.sort[id] = sort.key === column.key ? { key: column.key, dir: sort.dir === "asc" ? "desc" : "asc" } : { key: column.key, dir: column.text ? "asc" : "desc" };
-  renderTable(id);
-  // The header was drawn again: the keyboard stays on the one that it sorted by.
-  dom.$(`th[data-sort-key="${column.key}"] .dataTable__sort`, els.blocks[id].box)?.focus();
-}
-
-function renderTable(id) {
-  const spec = TABLES[id];
-  const block = els.blocks[id];
-  const data = model.data;
-  const rows = data ? spec.rows(data) : [];
-  const omitted = data ? spec.omitted(data) : 0;
-  // A row is a filter only while its dimension is offered (two values, or a filter on); else it is a line to read.
-  const pickable = rows.length > 0 && offered(spec.dimension);
-  block.count.textContent = rows.length ? count(rows.length) : "";
-  block.hint.hidden = !pickable;
-  block.more.hidden = !omitted;
-  block.more.textContent = omitted ? `${count(omitted)} more ${spec.noun} not shown.` : "";
-  if (!rows.length) {
-    h.replace(block.box, h("p", { class: "mcpNote mcpOverview__none" }, spec.none));
-    return;
-  }
-  const columns = spec.columns(data);
-  const sort = model.sort[id];
-  const by = columns.find((column) => column.key === sort.key) || columns[0];
-  const head = columns.map((column) => {
-    const th = h("th", { scope: "col", class: column.text ? null : "num" }, column.label);
-    tableMod.sortHeader(th, { key: column.key, dir: column.key === by.key ? sort.dir : "", title: column.title, onSort: () => setSort(id, column) });
-    return th;
-  });
-  const body = sorted(rows, by, sort.dir).map((row) => {
-    const value = spec.value(row);
-    const on = model.filters[spec.dimension].includes(value);
-    const cells = columns.map((column, index) => (index === 0 ? h("th", { scope: "row" }, column.cell(row)) : h("td", { class: column.text ? null : "num" }, column.cell(row))));
-    // A row that is not offered has no class, tabindex or value: no pointer, no hover, no click, and not in the roving focus (rovingRows).
-    if (!pickable) return h("tr", { class: "mcpOverview__row" }, cells);
-    return h("tr", { class: ["mcpOverview__row", "is-pickable", on && "is-selected"], tabindex: "-1", "aria-selected": on ? "true" : "false", dataset: { dimension: spec.dimension, value } }, cells);
-  });
-  h.replace(block.box, h("table", { class: "dataTable dataTable--compact mcpOverview__table", "aria-label": spec.label },
-    h("thead", null, h("tr", null, head)), h("tbody", null, body)));
-}
-
 // --- Notes ---------------------------------------------------------------------------------
 
 function renderNotes(data) {
   const notes = [];
   if (data.since != null && data.from != null && data.since > data.from) notes.push(`Counted since ${minute(data.since)}.`);
-  notes.push("The rows are those of the tools that build their own SQL: an API tool counts no row.");
+  // No note, no row: the content is a grid, and an empty row would add its gap under the charts.
+  els.notes.hidden = !notes.length;
   h.replace(els.notes, notes.map((text) => h("p", { class: "mcpNote mcpNote--fine" }, text)));
 }
 

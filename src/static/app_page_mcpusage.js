@@ -1,8 +1,8 @@
 // The MCP Usage page (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did, the second page
 // of the MCP section (the first is app_page_mcp.js: the keys). Like it, the page is not tied to a host. This entry reads /api/mcp/meta
 // (ns.api, app_api.js), shows the "Turn MCP on" state when MCP is off and the "Usage is off" state when the usage is (the row of the two pages
-// stays, and nothing of the usage is read), and otherwise hands the panel to the view (app_mcp_overview.js: the filter bar, the chips, the four
-// charts and the tables). #mcpState holds the loading, the error, the "MCP is off" and the "Usage is off" states, the same block as the keys page.
+// stays, and nothing of the usage is read), and otherwise hands the panel to the view (app_mcp_overview.js: the filter bar, the chips, the tiles
+// and the six charts). #mcpState holds the loading, the error, the "MCP is off" and the "Usage is off" states, the same block as the keys page.
 
 import "./app_common.js";
 import { api } from "./app_api.js";

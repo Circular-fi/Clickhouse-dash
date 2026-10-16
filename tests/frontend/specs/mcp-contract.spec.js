@@ -206,9 +206,10 @@ test('the usage of the keys, the usage of a key and its cost: the same shape, th
 // The usage of every key (GET /api/mcp/usage/overview). A list that is empty accepts any shape, so the usage is made first on the real
 // instance, with the key of the config file that reads everything (tests/config/mcp.hcl): an initialize that names a client, tools/list, a
 // tool call, a method that nobody knows and a notification. Then the page's own calls are compared: the answer with nothing asked, a
-// filtered one, one grouped by key, by client and by instance, one cut to an instance, the finest window, and the refusals (the old `split`, a
-// group that does not exist, a value that is not valid, a client or an instance that is not valid, a parameter that is not one, more than 20
-// values).
+// filtered one, one grouped by key, by client and by instance, one cut to an instance, the finest window, the ranking of the groups (`order`,
+// and `orders` with its `series.rankings`, the read that the six charts of the tab make) and the refusals (the old `split`, a group that does
+// not exist, an order that is not one, a value that is not valid, a client or an instance that is not valid, a parameter that is not one, more
+// than 20 values, more than 5 orders).
 const ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeUsage(request) {
@@ -226,7 +227,7 @@ async function makeUsage(request) {
   expect(answers.map((answer) => answer.status())).toEqual([200, 200, 200, 200, 202]);
 }
 
-test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one, a group by key and by client, the same refusals', async ({ page, request }) => {
+test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one, a group by key, by client and by result, the rankings of `orders`, the same refusals', async ({ page, request }) => {
   await makeUsage(request);
   const asked = {
     plain: '/api/mcp/usage/overview',
@@ -238,8 +239,18 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
     byInstance: '/api/mcp/usage/overview?window=24h&group=instance',
     ofInstance: `/api/mcp/usage/overview?window=24h&group=key&instance=${INSTANCE}`,
     ofOtherInstance: '/api/mcp/usage/overview?window=24h&instance=nobody-writes-this',
+    // The ranking of the groups: the metric that picks the 8 biggest (`order`), and more rankings in the same read (`orders`: what the page asks).
+    ordered: '/api/mcp/usage/overview?window=24h&group=method&order=errors',
+    rankings: '/api/mcp/usage/overview?window=7d&group=method&order=requests&orders=errors&orders=refused&orders=calls&orders=bytes',
+    byResultErrors: '/api/mcp/usage/overview?window=24h&group=result&order=errors&orders=errors&orders=bytes',
+    rankedAndFiltered: '/api/mcp/usage/overview?window=24h&group=method&method=tools/list&method=list_hosts&orders=errors&orders=bytes',
+    repeatedOrders: '/api/mcp/usage/overview?window=24h&orders=calls&orders=errors&orders=calls',
     badWindow: '/api/mcp/usage/overview?window=48h',
     badGroup: '/api/mcp/usage/overview?group=nope',
+    badOrder: '/api/mcp/usage/overview?order=bogus',
+    badOrders: '/api/mcp/usage/overview?orders=bogus',
+    // Six values (the number is checked before the values: the sixth one is no order either, and the answer is `too_many`, not `invalid`).
+    tooManyOrders: '/api/mcp/usage/overview?orders=requests&orders=errors&orders=refused&orders=calls&orders=bytes&orders=bogus',
     oldSplit: '/api/mcp/usage/overview?split=method',
     badValue: '/api/mcp/usage/overview?key=BAD!',
     badClient: '/api/mcp/usage/overview?client=%20padded',
@@ -263,8 +274,10 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
   expect(real.byClient.body.group).toBe('client');
   expect(real.byClient.body.series.groups.map((item) => item.id)).toEqual(['chdash-contract']);
   expect(real.byClient.body.clients.map((item) => item.client)).toContain('chdash-contract');
-  // The series has five figures for each group, and a step in seconds (a minute for 1 h, 15 minutes for 24 h).
-  expect(Object.keys(real.byClient.body.series.groups[0]).sort()).toEqual(['bytes', 'calls', 'duration_ms_sum', 'errors', 'id', 'label', 'requests', 'total']);
+  // The series has six figures for each group (the requests that were refused are the sixth), and a step in seconds (a minute for 1 h, 15 minutes
+  // for 24 h).
+  expect(Object.keys(real.byClient.body.series.groups[0]).sort()).toEqual(['bytes', 'calls', 'duration_ms_sum', 'errors', 'id', 'label', 'refused', 'requests', 'total']);
+  expect(Object.keys(real.byClient.body.series.rest).sort()).toEqual(['bytes', 'calls', 'duration_ms_sum', 'errors', 'groups', 'refused', 'requests', 'total']);
   expect(real.byClient.body.series.step).toBe(60);
   expect(real.byKey.body.series.step).toBe(900);
   expect(real.byClient.body.series.t).toHaveLength(60);
@@ -289,10 +302,65 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
   expect(real.ofOtherInstance.body.instances[1]).toMatchObject({ status: 'unknown', written_at: null, requests: 0 });
   expect(real.plain.body).not.toHaveProperty('persisted');
   expect(real.plain.body.keys.every((item) => typeof item.elsewhere === 'boolean')).toBe(true);
+  // The order is echoed (the requests by default), and the series has no `rankings` unless `orders` asks for them.
+  expect(real.plain.body.order).toBe('requests');
+  expect(real.ordered.body.order).toBe('errors');
+  expect(real.plain.body.series).not.toHaveProperty('rankings');
+  expect(real.ordered.body.series).not.toHaveProperty('rankings');
+  // `orders` is the page's read: one ranking for each value, in the order that was asked, each made as `groups` and `rest` are (the steps are
+  // those of the series, which a ranking does not repeat), and the series itself keeps following `order`.
+  const ranked = real.rankings.body.series;
+  expect(real.rankings.body.order).toBe('requests');
+  expect(Object.keys(ranked.rankings)).toEqual(['errors', 'refused', 'calls', 'bytes']);
+  for (const [name, ranking] of Object.entries(ranked.rankings)) {
+    expect(Object.keys(ranking).sort(), name).toEqual(['groups', 'rest']);
+    expect(ranking.groups.length, name).toBeLessThanOrEqual(8);
+    for (const group of ranking.groups) expect(group.refused, name).toHaveLength(ranked.t.length);
+    expect(ranking.rest.requests, name).toHaveLength(ranked.t.length);
+  }
+  expect(ranked.t).toHaveLength(56);
+  expect(ranked.step).toBe(10800);
+  // A method that has none of the metric of a ranking is in its `rest`, even when there are fewer than 8 methods (the instance keeps what the
+  // other specs made too, so the ranking is checked by what it must hold and not by an exact list): each ranking holds every method once, a
+  // group of it has some of its metric, and the contract's own traffic is there (the method that nobody knows made an error, list_hosts a call).
+  const methods = ranked.groups.length + ranked.rest.groups;
+  for (const [name, metric] of [['errors', 'errors'], ['refused', 'refused'], ['calls', 'calls'], ['bytes', 'bytes']]) {
+    const ranking = ranked.rankings[name];
+    expect(ranking.groups.length + ranking.rest.groups, `${name}: every method is in the ranking or in its rest`).toBe(methods);
+    for (const group of ranking.groups) expect(group[metric].some((value) => value > 0), `${name}: ${group.id} has some`).toBe(true);
+    expect(ranking.rest[metric].reduce((a, b) => a + b, 0) >= 0).toBe(true);
+  }
+  expect(ranked.rankings.errors.groups.map((item) => item.id)).toContain('other');
+  expect(ranked.rankings.calls.groups.map((item) => item.id)).toContain('list_hosts');
+  expect(ranked.rankings.errors.groups.map((item) => item.id)).not.toContain('initialize');
+  // By result and by errors the groups are the error codes, and `ok`, which has none, is in `rest`.
+  const codes = real.byResultErrors.body.series;
+  expect(real.byResultErrors.body).toMatchObject({ group: 'result', order: 'errors' });
+  expect(codes.groups.map((item) => item.id)).toContain('rpc_error_32601');
+  expect(codes.groups.map((item) => item.id)).not.toContain('ok');
+  for (const group of codes.groups) expect(group.errors.some((value) => value > 0), group.id).toBe(true);
+  expect(codes.rest.groups).toBeGreaterThanOrEqual(1);
+  expect(codes.rest.errors.reduce((a, b) => a + b, 0), 'ok has no error: the rest has none').toBe(0);
+  expect(Object.keys(codes.rankings)).toEqual(['errors', 'bytes']);
+  expect(codes.rankings.errors).toEqual({ groups: codes.groups, rest: codes.rest });
+  // A dimension that is filtered keeps the values that were picked, in their order, in every ranking (the page then asks for none).
+  const picked = real.rankedAndFiltered.body.series;
+  expect(picked.groups.map((item) => item.id)).toEqual(['tools/list', 'list_hosts']);
+  for (const name of ['errors', 'bytes']) expect(picked.rankings[name]).toEqual({ groups: picked.groups, rest: picked.rest });
+  expect(picked.rest.groups).toBe(0);
+  // A value of `orders` that is repeated counts once, and the rankings come in the order of the request.
+  expect(real.repeatedOrders.status).toBe(200);
+  expect(Object.keys(real.repeatedOrders.body.series.rankings)).toEqual(['calls', 'errors']);
   // The refusals: a group or a value that is not one is 400 invalid; `split` (what `group` was called) and a parameter that is not one are
   // unknown; a kind of filter takes 20 values.
   expect(real.badGroup.status).toBe(400);
   expect(real.badGroup.body).toMatchObject({ error_code: 'validation', field: 'group', reason: 'invalid' });
+  expect(real.badOrder.status).toBe(400);
+  expect(real.badOrder.body).toMatchObject({ error_code: 'validation', field: 'order', reason: 'invalid', message: 'order must be requests, errors, refused, calls or bytes' });
+  expect(real.badOrders.status).toBe(400);
+  expect(real.badOrders.body).toMatchObject({ error_code: 'validation', field: 'orders', reason: 'invalid', message: 'orders must be requests, errors, refused, calls or bytes' });
+  expect(real.tooManyOrders.status).toBe(400);
+  expect(real.tooManyOrders.body).toMatchObject({ error_code: 'validation', field: 'orders', reason: 'too_many' });
   expect(real.oldSplit.status).toBe(400);
   expect(real.oldSplit.body).toMatchObject({ error_code: 'validation', field: 'split', reason: 'unknown' });
   expect(real.badClient.body).toMatchObject({ error_code: 'validation', field: 'client', reason: 'invalid' });

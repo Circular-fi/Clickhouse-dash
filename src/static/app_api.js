@@ -567,8 +567,9 @@ async function getMetricsAttributes(params, { signal } = {}) {
 //   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, others: [the keys that are not in the list of keys: the
 //                                 deleted ones, which keep usage, and those that only another instance knows (`elsewhere`)], instances }
 //   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each step of the window (1 min to 1 day), tools, results, clients
-//   getMcpUsageOverview({window, group, filters})  what every key did, cut by key, method, client, instance, result and type (the Usage tab):
-//                                 totals, a series of five figures for each group of `group` (key, method or client), one table for each
+//   getMcpUsageOverview({window, group, order, orders, filters})  what every key did, cut by key, method, client, instance, result and type
+//                                 (the Usage tab): totals, a series of six figures for each group of `group` (key, method, client or result,
+//                                 the biggest by `order`, and once more by each of `orders`: `series.rankings`), the facet of each
 //                                 dimension, and the instances with their figures (the facet of the filter by instance)
 //   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
 //   deleteMcpKey(id)              id
@@ -947,20 +948,28 @@ async function getMcpKeyUsage(id, { window = "", signal } = {}) {
   };
 }
 
-// The six dimensions that the Usage tab filters by, in the order of its filter parameters (it groups by key, method or client).
+// The six dimensions that the Usage tab filters by, in the order of its filter parameters (it groups by key, method, client or result).
 const MCP_USAGE_DIMENSIONS = ["key", "method", "client", "instance", "result", "type"];
+// The metrics that rank the groups of a series (`order`, and the members of `rankings`).
+const MCP_USAGE_ORDERS = ["requests", "errors", "refused", "calls", "bytes"];
 
 // What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, client, instance, result, type }: lists of
 // values, any of the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every
-// filter; each table of a dimension has all but its own, so a filter shows its alternatives. `series.groups` are the biggest groups of
-// `group` (`rest` is what the others add up to), each with five series of one value for each step of the window (`series.t`): the
-// requests, the errors, the tool calls, the time of the tool calls added up (ms) and the bytes returned. `instances` is the facet of the
-// instance: every instance that the server knows, with the state of its file and its figures (an instance that has no request in the view
-// is there with zeros), not the plain list of the other answers.
-async function getMcpUsageOverview({ window = "", group = "", filters = {}, signal } = {}) {
+// filter; the facet of a dimension (its list of values) has all but its own, so a filter shows its alternatives. `series.groups` are the biggest
+// groups of `group` (`rest` is what the others add up to), the biggest by `order` (requests, errors, refused, calls or bytes: the server's
+// default is requests, and it echoes the one it used as `order`), each with six series of one value for each step of the window (`series.times`):
+// the requests, the errors, the requests that were refused (the rate limit and the refusals before the message was read), the tool calls, the
+// time of the tool calls added up (ms) and the bytes returned. A group that has none of the metric that ranks is in `rest`. `orders` asks for the
+// same groups ranked by more metrics in the same read: `series.rankings` has a { groups, rest } for each one (the steps are those of the series),
+// and is empty without them. When the dimension of `group` is filtered the groups are the values that were picked, whatever the order: the page
+// leaves `orders` out then. `instances` is the facet of the instance: every instance that the server knows, with the state of its file and its
+// figures (an instance that has no request in the view is there with zeros), not the plain list of the other answers.
+async function getMcpUsageOverview({ window = "", group = "", order = "", orders = [], filters = {}, signal } = {}) {
   const params = new URLSearchParams();
   if (window) params.set("window", window);
   if (group) params.set("group", group);
+  if (order) params.set("order", order);
+  for (const value of mcpList(orders)) params.append("orders", value);
   for (const dimension of MCP_USAGE_DIMENSIONS) for (const value of mcpList(filters?.[dimension])) params.append(dimension, value);
   const query = params.toString();
   const payload = await mcpRequest(`/usage/overview${query ? `?${query}` : ""}`, { signal });
@@ -975,20 +984,32 @@ async function getMcpUsageOverview({ window = "", group = "", filters = {}, sign
     const sent = list(raw);
     return kept.map((i) => mcpCount(sent[i]));
   };
-  // The five series of a group, or of what the chart folds into `rest`.
+  // The six series of a group, or of what the chart folds into `rest`.
   const figures = (item) => ({
     requests: values(item?.requests),
     errors: values(item?.errors),
+    refused: values(item?.refused),
     calls: values(item?.calls),
     durationMsSum: values(item?.duration_ms_sum),
     bytes: values(item?.bytes),
   });
-  const rest = series.rest && typeof series.rest === "object" ? series.rest : {};
+  // A ranking: its groups and what the others add up to (the answer's own `groups` and `rest`, and the member of each of `rankings`).
+  const ranked = (item) => ({
+    groups: list(item?.groups).map((group) => ({
+      id: mcpText(group?.id),
+      label: mcpText(group?.label) || mcpText(group?.id),
+      total: mcpCount(group?.total),
+      ...figures(group),
+    })).filter((group) => group.id),
+    rest: { groups: mcpCount(item?.rest?.groups), total: mcpCount(item?.rest?.total), ...figures(item?.rest) },
+  });
+  const rankings = series.rankings && typeof series.rankings === "object" ? series.rankings : {};
   const omitted = payload?.omitted && typeof payload.omitted === "object" ? payload.omitted : {};
   const sent = payload?.filters && typeof payload.filters === "object" ? payload.filters : {};
   return {
     ...mcpUsageWindow(payload),
     group: mcpText(payload?.group) || group || "method",
+    order: mcpText(payload?.order) || order || "requests",
     filters: Object.fromEntries(MCP_USAGE_DIMENSIONS.map((dimension) => [dimension, mcpList(sent[dimension])])),
     totals: {
       requests: mcpCount(totals.requests),
@@ -1006,13 +1027,8 @@ async function getMcpUsageOverview({ window = "", group = "", filters = {}, sign
     series: {
       step: mcpStep(series.step),
       times,
-      groups: list(series.groups).map((item) => ({
-        id: mcpText(item?.id),
-        label: mcpText(item?.label) || mcpText(item?.id),
-        total: mcpCount(item?.total),
-        ...figures(item),
-      })).filter((item) => item.id),
-      rest: { groups: mcpCount(rest.groups), total: mcpCount(rest.total), ...figures(rest) },
+      ...ranked(series),
+      rankings: Object.fromEntries(MCP_USAGE_ORDERS.filter((name) => rankings[name] && typeof rankings[name] === "object").map((name) => [name, ranked(rankings[name])])),
     },
     keys: list(payload?.keys).map((item) => ({
       id: mcpText(item?.id),

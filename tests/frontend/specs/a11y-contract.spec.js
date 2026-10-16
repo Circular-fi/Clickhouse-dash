@@ -284,12 +284,12 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
 });
 
-// The Usage tab of the MCP pages has a filter bar (Group by and four lists of check boxes, the window, Refresh), four charts with their
-// legends, filter chips and four tables. Usage is made first on the instance, with the key of the config file that reads everything (an
-// initialize that names a client, tools/list, a tool call, a method that nobody knows and a notification), so that every part has something
-// to show. Both themes: the muted hints and the warning colours are on the tab. The instance of the contract is one key, one instance and a
-// few clients, whatever ran on it before: a list that has one value is off (disabled in place, a pick cannot be made), and a row of a table that
-// has one value is not a filter, so what is offered is asked of the page and not assumed.
+// The Usage tab of the MCP pages has a filter bar (Group by and five lists of check boxes, the window, Refresh), six charts with their
+// legends (a list, or the Values table) and filter chips; it has no table. Usage is made first on the instance, with the key of the config file
+// that reads everything (an initialize that names a client, tools/list, a tool call, a method that nobody knows and a notification), so that
+// every part has something to show. Both themes: the muted hints and the warning colours are on the tab. The instance of the contract is one
+// key, one instance and a few clients, whatever ran on it before: a list that has one value is off (disabled in place, a pick cannot be made),
+// and a legend entry of a dimension that has one value is not a filter, so what is offered is asked of the page and not assumed.
 const MCP_ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeMcpUsage(request, base) {
@@ -304,31 +304,41 @@ async function makeMcpUsage(request, base) {
 }
 
 for (const theme of THEMES) {
-  test(`axe (${theme}): the MCP Usage tab has no violation, with its bar, its lists, its legends, its chips and its tables`, async ({ page, request }) => {
+  test(`axe (${theme}): the MCP Usage tab has no violation, with its bar, its lists, its six charts and their legends (the list and the Values table) and its chips`, async ({ page, request }) => {
     const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
     requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
     await makeMcpUsage(request, base);
     await useTheme(page, theme);
     await page.goto(`${base}/mcp-integration/usage`);
     await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7, { timeout: 20_000 });
+    await expect(page.locator('.mcpOverview__card')).toHaveCount(6);
     await expect(page.locator('.mcpOverview__chart .chartCore__legendItem').first()).toBeVisible();
     await page.waitForTimeout(1500);
     const violations = async () => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
+    const settled = () => expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
     expect(await violations()).toEqual([]);
-    // A legend entry and a row of a table are filters: the chips, the pressed entry and the marked row have no violation either.
-    await page.locator('.mcpOverview__chart .chartCore__legendItem[aria-pressed="false"]').first().click();
+    // A legend entry is a filter: the chip, the pressed entry and the dimmed ones have no violation either (the methods of the contract are
+    // several, so their entries can be pressed; a dimension with one value locks its entries, which is its own state below).
+    await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendItem[aria-pressed="false"]').first().click();
     await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(1);
-    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
-    // The rows that can be picked: the method table has every filter but its own, so the other methods are rows to pick whatever the legend chose.
-    await page.locator('tr.is-pickable[data-dimension="method"]:not(.is-selected)').first().click();
-    await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(2);
-    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+    await settled();
     await page.waitForTimeout(600);
-    expect(await violations()).toEqual([]);
+    expect(await violations(), 'a legend entry pressed').toEqual([]);
+    // The Values table of the legends (the charts that drew switch together; the method that was picked has no error, no refusal and no call on
+    // this instance, so the cards of those say that they have nothing to draw): a table with a name, a scope on each header, and its entries are
+    // buttons.
+    const drawn = await page.locator('.mcpOverview__chart .chartCore').count();
+    expect(drawn).toBeGreaterThanOrEqual(2);
+    await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendMode').click();
+    await expect(page.locator('.mcpOverview__chart .chartCore__legendTable')).toHaveCount(drawn);
+    await page.waitForTimeout(400);
+    expect(await violations(), 'the Values tables').toEqual([]);
+    await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendMode').click();
+    await expect(page.locator('.mcpOverview__chart .chartCore__legendTable')).toHaveCount(0);
     // The lists of the bar are dialogs of check boxes, open: they have no violation, and a pick leaves none either (the chips and the box). A list
     // that has one value is off: it cannot be opened (its button is disabled, with its title), and that state has no violation either.
     const off = [];
-    for (const dimension of ['key', 'method', 'client', 'instance']) {
+    for (const dimension of ['key', 'method', 'client', 'result', 'instance']) {
       if (await page.locator(`#mcpPickerButton-${dimension}`).isDisabled()) {
         off.push(dimension);
         continue;
@@ -341,11 +351,11 @@ for (const theme of THEMES) {
       await expect(page.locator(`#mcpPickerMenu-${dimension}`)).toBeHidden();
     }
     expect(await violations(), `the lists that are off (${off.join(', ') || 'none'})`).toEqual([]);
-    // A pick in a list is one more chip (the lists keep every filter but their own: the client that the others leave may be none, or one).
+    // A pick in a list is one more chip (the lists keep every filter but their own: the result that the others leave may be none, or one).
     const chipsBefore = await page.locator('.mcpOverview__chips .chip').count();
-    if (!(await page.locator('#mcpPickerButton-client').isDisabled())) {
-      await page.locator('#mcpPickerButton-client').click();
-      const boxes = page.locator('#mcpPickerMenu-client input[type="checkbox"]:not(:checked)');
+    if (!(await page.locator('#mcpPickerButton-result').isDisabled())) {
+      await page.locator('#mcpPickerButton-result').click();
+      const boxes = page.locator('#mcpPickerMenu-result input[type="checkbox"]:not(:checked)');
       if (await boxes.count()) {
         await boxes.first().check();
         await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(chipsBefore + 1);
@@ -354,49 +364,53 @@ for (const theme of THEMES) {
     }
     // The page reads when the clicks of a list pause.
     await page.waitForTimeout(600);
-    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
-    // Group by, the window and the four charts: pressed states, a list of one choice, and the empty chart of a window that has nothing.
+    await settled();
+    // Group by (a list of four choices, the result among them), the window and the six charts grouped by another dimension: pressed states, and
+    // the empty chart of a window that has nothing to draw.
     await page.locator('#mcpGroupButton').click();
-    await expect(page.locator('.mcpBar__groupPicker .tracePicker__option[data-value="client"]')).toBeVisible();
+    await expect(page.locator('.mcpBar__groupPicker .tracePicker__option')).toHaveText(['Key', 'Method', 'Client', 'Result']);
     await page.waitForTimeout(300);
     expect(await violations(), 'Group by').toEqual([]);
     await page.locator('.mcpBar__groupPicker .tracePicker__option[data-value="client"]').click();
     await expect(page.locator('#mcpGroupButton')).toHaveText('Group by · Client');
     await page.locator('.mcpBar__windows').getByRole('button', { name: '24 h' }).click();
-    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+    await settled();
     await page.waitForTimeout(600);
     expect(await violations()).toEqual([]);
+    await page.locator('#mcpGroupButton').click();
+    await page.locator('.mcpBar__groupPicker .tracePicker__option[data-value="result"]').click();
+    await expect(page.locator('#mcpGroupButton')).toHaveText('Group by · Result');
+    await settled();
+    await page.waitForTimeout(600);
+    expect(await violations(), 'grouped by result: the error codes in the legends and the Error rate axis').toEqual([]);
   });
 }
 
-// The instances that share the usage directory (docs/mcp-integration-page.md, "Instances"): the note "2 instances" with its list, the Instance list
-// of the bar and its badges, the warnings above the tiles (a file that was skipped, a name that two ChDash write under), and the state "Usage is
-// off". The instance of the contract has one directory, one instance and the usage on, so none of these can be made there: they run against the
-// in-memory server of the page specs (helpers/mcp-fake.js), which mcp-contract.spec.js keeps in the shape of the real answers.
+// The instances that share the usage directory (docs/mcp-integration-page.md, "Instances"): the Instance list of the bar of the Usage tab (it says
+// how many instances the usage sums, and when each one wrote) and its badges, the warnings above the tiles (a file that was skipped, a name that
+// two ChDash write under), the note "Summed over 2 instances" in the usage of a key with its list in a popover (the Keys page), and the state
+// "Usage is off". The instance of the contract has one directory, one instance and the usage on, so none of these can be made there: they run
+// against the in-memory server of the page specs (helpers/mcp-fake.js), which mcp-contract.spec.js keeps in the shape of the real answers.
 const mcpViolations = async (page) => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
 const mcpSettled = (page) => expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
 
 for (const theme of THEMES) {
-  test(`axe (${theme}): the MCP Usage tab with two instances has no violation, with the note and its list and the Instance list open`, async ({ page }) => {
+  test(`axe (${theme}): the MCP Usage tab with two instances has no violation, with the Instance list open (it says that the usage is a sum, and when each instance wrote)`, async ({ page }) => {
     await useTheme(page, theme);
     await install(page, newServer());
     await page.goto('/mcp-integration/usage');
     await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
     await mcpSettled(page);
-    await expect(page.locator('.mcpInstances__button')).toHaveText('2 instances');
+    // The tab has no note and no popover of its own ("Summed over 2 instances" is the head of the usage of a key): the Instance list says it.
+    await expect(page.locator('.mcpInstances')).toHaveCount(0);
+    await expect(page.locator('#mcpPickerButton-instance')).toHaveText('Instance · All (2)');
     expect(await mcpViolations(page), 'the tab').toEqual([]);
-    // The note opens a list of the instances in a popover: the focus goes in, Escape closes it and gives the focus back.
-    await page.locator('.mcpInstances__button').click();
-    await expect(page.locator('.mcpInstancesList')).toBeVisible();
-    await page.waitForTimeout(300);
-    expect(await mcpViolations(page), 'the list of the instances').toEqual([]);
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.mcpInstancesList')).toBeHidden();
-    await expect(page.locator('.mcpInstances__button')).toBeFocused();
-    // The Instance list of the bar is offered with two instances: a dialog of check boxes, then a pick and its chip.
+    // The Instance list is offered with two instances: a dialog of check boxes, a row of two lines for each instance (this one first in the
+    // sense that it is marked), then a pick and its chip.
     await expect(page.locator('#mcpPickerButton-instance')).toBeEnabled();
     await page.locator('#mcpPickerButton-instance').click();
     await expect(page.locator('#mcpPickerMenu-instance')).toBeVisible();
+    await expect(page.locator('#mcpPickerMenu-instance .mcpPicker__meta')).toHaveText(['this instance · wrote 30 s ago', 'wrote 1 min ago']);
     await page.waitForTimeout(300);
     expect(await mcpViolations(page), 'the Instance list').toEqual([]);
     await page.locator('#mcpPickerMenu-instance input[type="checkbox"]').first().check();
@@ -424,15 +438,37 @@ for (const theme of THEMES) {
     await expect(page.locator('.mcpOverview__warnings .uiBanner--warn')).toHaveCount(2);
     await expect(page.locator('.mcpOverview__warnings .uiBanner--warn').first()).toHaveAttribute('role', 'status');
     expect(await mcpViolations(page), 'the warnings').toEqual([]);
+    // The Instance list has each of the three files, with its badge (conflict, skipped) and its last write ("no write yet" for a file that has none).
     await page.locator('#mcpPickerButton-instance').click();
     await expect(page.locator('#mcpPickerMenu-instance')).toBeVisible();
+    await expect(page.locator('#mcpPickerMenu-instance .badge')).toHaveText(['conflict', 'skipped', 'skipped']);
+    await expect(page.locator('#mcpPickerMenu-instance .mcpPicker__meta')).toHaveText(['this instance · wrote 30 s ago', 'no write yet', 'wrote 3 min ago']);
     await page.waitForTimeout(300);
     expect(await mcpViolations(page), 'the Instance list with the badges of the files that are not read').toEqual([]);
     await page.keyboard.press('Escape');
-    await page.locator('.mcpInstances__button').click();
+  });
+
+  // The Keys page says that the usage of a key is a sum, in its details: "Summed over 2 instances" is a button that opens the list of the
+  // instances in a popover, and a file that is left out is a warning under it.
+  test(`axe (${theme}): the usage of a key with two instances has no violation, with the note, its popover and the warning about a file that is left out`, async ({ page }) => {
+    const server = newServer();
+    server.instances = [INSTANCES()[0], { instance: 'chdash-1', written_at: '2026-10-14T09:58:50Z', status: 'skipped', reason: 'invalid' }];
+    await useTheme(page, theme);
+    await install(page, server);
+    await page.goto('/mcp-integration');
+    await expect(page.locator('#mcpKeysBody tbody tr[data-key-id]').first()).toBeVisible();
+    await page.locator('#mcpKeysBody tbody tr[data-key-id] [data-action="open"]').first().click();
+    await expect(page.locator('.mcpUsage .mcpUsage__body')).toBeVisible();
+    await expect(page.locator('.mcpUsage .mcpInstances__button')).toHaveText('Summed over 2 instances');
+    await page.waitForTimeout(500);
+    expect(await mcpViolations(page), 'the usage of a key').toEqual([]);
+    await page.locator('.mcpUsage .mcpInstances__button').click();
     await expect(page.locator('.mcpInstancesList')).toBeVisible();
     await page.waitForTimeout(300);
-    expect(await mcpViolations(page), 'the list of the instances with its badges').toEqual([]);
+    expect(await mcpViolations(page), 'the list of the instances').toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mcpInstancesList')).toBeHidden();
+    await expect(page.locator('.mcpUsage .mcpInstances__button')).toBeFocused();
   });
 
   test(`axe (${theme}): the usage that is off has no violation: the state of the Usage tab and the keys without their Used column`, async ({ page }) => {

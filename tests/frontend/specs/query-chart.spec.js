@@ -345,7 +345,7 @@ test('drag zooms the x axis, double-click and Reset zoom restore it', async ({ p
   await expect(root).toHaveAttribute('data-zoomed', 'false');
 });
 
-test('legend isolates on click, toggles on Ctrl+click, and lists min / max / mean / last', async ({ page }) => {
+test('legend isolates on click, toggles on Ctrl+click, and lists total / min / max / mean / last', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, EXAMPLE);
   await showChart(mainToggle(page));
@@ -373,13 +373,18 @@ test('legend isolates on click, toggles on Ctrl+click, and lists min / max / mea
   await items.nth(2).click({ modifiers: ['Control'] });
   await expect(root).toHaveAttribute('data-series-drawn', '3');
 
-  // Values mode: a table of calculations over the visible range.
+  // Values mode: a table of calculations over the visible range. The button says which: the total, the min, the max, the mean and the last.
+  await expect(chart.locator('.chartCore__legendMode')).toHaveAttribute('title', 'Show total / min / max / mean / last per series');
   await chart.locator('.chartCore__legendMode').click();
   const table = chart.locator('.chartCore__legendTable');
   await expect(table).toBeVisible();
-  await expect(table.locator('thead th')).toHaveText(['Series', 'Min', 'Max', 'Mean', 'Last']);
-  await expect(table.locator('tbody tr').first().locator('td')).toHaveText(['0', '9,999', '4,999.5', '9,999']);
-  await expect(table.locator('tbody tr').nth(1).locator('td')).toHaveText(['-10', '9,989', '4,989.5', '9,989']);
+  await expect(table.locator('thead th')).toHaveText(['Series', 'Total', 'Min', 'Max', 'Mean', 'Last']);
+  // The total is the sum of the series over the range: the numbers 0..9,999 add up to 49,995,000, minus(number, 10) is 10 less for each of the
+  // 10,000 rows (49,895,000) and plus(number, 2) is 2 more for each (50,015,000).
+  await expect(table.locator('tbody tr').first().locator('td')).toHaveText(['49,995,000', '0', '9,999', '4,999.5', '9,999']);
+  await expect(table.locator('tbody tr').nth(1).locator('td')).toHaveText(['49,895,000', '-10', '9,989', '4,989.5', '9,989']);
+  await expect(table.locator('tbody tr').nth(2).locator('td').first()).toHaveText('50,015,000');
+  await expect(chart.locator('.chartCore__legendMode')).toHaveAttribute('title', 'Show the legend as a list');
   expect(await page.evaluate(() => localStorage.getItem('chdash.chart.legendMode'))).toBe('table');
   // The legend items of the table still isolate.
   await table.locator('.chartCore__legendItem').nth(1).click();
@@ -388,6 +393,52 @@ test('legend isolates on click, toggles on Ctrl+click, and lists min / max / mea
   await chart.locator('.chartCore__legendMode').click();
   await expect(table).toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem('chdash.chart.legendMode'))).toBe('list');
+});
+
+// The Values table of the legend is the figures of the range that the plot shows (docs/ui-foundations.md, "The legend"): its Total, Min, Max,
+// Mean and Last follow a zoom and come back with the reset. A NULL is no value: the Total adds the values that exist and the Mean is over them.
+test('the legend table reads the range that the plot shows: a zoom changes its Total, Min, Max, Mean and Last, the reset brings them back, and a NULL is no value', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, EXAMPLE);
+  await showChart(mainToggle(page));
+  const chart = mainChart(page);
+  const root = core(chart);
+  await chart.locator('.chartCore__legendMode').click();
+  const first = chart.locator('.chartCore__legendTable tbody tr').first().locator('td');
+  const figures = async () => (await first.allTextContents()).map((text) => Number(text.replace(/,/g, '')));
+  await expect(first).toHaveText(['49,995,000', '0', '9,999', '4,999.5', '9,999']);
+  // A drag from 40 % to 60 % of the plot zooms on the rows in between: the numbers 4,000 to 5,999 (a pixel is about 8 rows, so the edges are
+  // within a few pixels of them).
+  const box = await plotBox(chart);
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 3 });
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, { steps: 3 });
+  await page.mouse.up();
+  await expect(root).toHaveAttribute('data-zoomed', 'true');
+  await expect.poll(async () => (await figures())[0], { message: 'the total follows the zoom' }).toBeLessThan(15_000_000);
+  const [total, min, max, mean, last] = await figures();
+  expect(Math.abs(total - 9_999_000), 'about 2,000 rows of about 5,000').toBeLessThan(200_000);
+  expect(Math.abs(min - 4000)).toBeLessThanOrEqual(20);
+  expect(Math.abs(max - 6000)).toBeLessThanOrEqual(20);
+  expect(Math.abs(mean - (min + max) / 2)).toBeLessThanOrEqual(1);
+  expect(last).toBe(max);
+  // The rows of the other series follow it too: minus(number, 10) is 10 below the first one.
+  const second = chart.locator('.chartCore__legendTable tbody tr').nth(1).locator('td');
+  expect(Number((await second.nth(1).textContent()).replace(/,/g, ''))).toBe(min - 10);
+  // The reset brings the whole range back.
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(root).toHaveAttribute('data-zoomed', 'false');
+  await expect(first).toHaveText(['49,995,000', '0', '9,999', '4,999.5', '9,999']);
+
+  // A NULL is no value: z has one value every second row (0, 2, ... 98) and a NULL on the last row, so its Total adds the 50 values that exist,
+  // its Mean is over them (49, not 24.5), and the Last is the last value that exists.
+  await runSuccessfulQuery(page, 'SELECT number AS x, toFloat64(number) AS y, if(number % 2 = 1, NULL, toFloat64(number)) AS z FROM numbers(100)');
+  const rows = chart.locator('.chartCore__legendTable tbody tr');
+  await expect(rows.first().locator('th')).toHaveText('y');
+  await expect(rows.first().locator('td')).toHaveText(['4,950', '0', '99', '49.5', '99']);
+  await expect(rows.nth(1).locator('th')).toHaveText('z');
+  await expect(rows.nth(1).locator('td')).toHaveText(['2,450', '0', '98', '49', '98']);
 });
 
 test('x axis picker: Auto, row number or an explicit column', async ({ page }) => {

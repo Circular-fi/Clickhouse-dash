@@ -2366,7 +2366,9 @@ test('the usage of a key leads to the Usage tab, cut by the key, in the window t
   await expect(page.locator('.mcpBar__windows [aria-pressed="true"]')).toHaveText('24 h');
   await expect(page.locator('.mcpOverview__chips .chip')).toHaveText('Key=ci-bot');
   await expect(page.locator('#mcpPickerButton-key')).toHaveText('Key · ci-bot');
-  expect(callsTo(server, '/usage/overview')).toEqual(['?window=24h&group=method&key=ui_0a1b2c3d4e5f']);
+  // One read, grouped by method and ranked for each chart (`orders`: the tab draws six charts, each one with the groups that rank first for its
+  // own metric); the key is the only filter, and it is not the dimension that the charts are grouped by, so the rankings are asked.
+  expect(callsTo(server, '/usage/overview')).toEqual(['?window=24h&group=method&order=requests&orders=errors&orders=refused&orders=calls&orders=bytes&key=ui_0a1b2c3d4e5f']);
 });
 
 test('a long name in the tables read ends in an ellipsis in its column, with the whole name in its title', async ({ page }) => {

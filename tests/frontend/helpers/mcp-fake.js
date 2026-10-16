@@ -274,11 +274,16 @@ export function costOf(server, id, window) {
 // result. The answers are computed from them by the rules of the contract (docs/mcp-integration-page.md, "The Usage tab"): the window is
 // `points` steps of its own (1 h by the minute ... 90 d by the day) and a cell is in the step that holds its minute; every filter cuts the totals
 // and the series; a facet (keys, methods, results, types, clients, instances) has all the filters but its own, lists a value that a filter picks
-// whatever its count, and keeps 200 rows (the instances are every instance that the server knows, with zeros when it has no request); the series has five figures for each group (the requests, the errors, the tool calls and their time, the
-// bytes), the 8 biggest groups of the dimension that it groups by (the values that are picked, when that dimension is filtered) and the others
-// summed as `rest`. The checks are in the order of the real route (the window, a name that is not a parameter, the group, then each dimension:
-// de-duplicated, at most 20, valid), and a key has one last use for every window and every filter (mcp-contract.spec.js compares the shapes
-// with the real answers). A spec changes `server.cells` (a list of what the keys did) or `server.overview` (the whole answer).
+// whatever its count, and keeps 200 rows (the instances are every instance that the server knows, with zeros when it has no request); the series has
+// six figures for each group (the requests, the errors, the requests that were refused, the tool calls and their time, the bytes), the 8 biggest
+// groups of the dimension that it groups by, the biggest by `order` (requests, errors, refused, calls or bytes; requests when it is left out, and
+// echoed in the answer), or the values that are picked when that dimension is filtered, and the others summed as `rest`; a group that has none of
+// the metric that ranks is in `rest`. `orders` (the same five names, at most 5, a repeated one counts once) adds `series.rankings`: one member for
+// each, in the order of the request, made as `groups` and `rest` are for that order (the steps are those of `series`, which a ranking does not
+// repeat); without `orders` there is no `rankings`. The checks are in the order of the real route (the window, a name that is not a parameter, the
+// group, the order, the orders, then each dimension: de-duplicated, at most 20, valid), and a key has one last use for every window and every
+// filter (mcp-contract.spec.js compares the shapes with the real answers). A spec changes `server.cells` (a list of what the keys did) or
+// `server.overview` (the whole answer).
 // A cell: [key id, minute, kind, client, method, result, count, the time of the calls added up (ms), the longest (ms), rows, bytes, instance].
 // A client that a cell leaves out is `unknown`; the instance is the one whose file holds the cell (this one, `chdash-0`, by default).
 export const cell = (keyId, at, kind, client, method, result, count, ms = 0, max = 0, rows = 0, bytes = 0, instance = 'chdash-0') => ({ key: keyId, at: Date.parse(`${at}:00Z`), kind, client, method, result, count, ms, max, rows, bytes, instance });
@@ -340,6 +345,8 @@ const PROTOCOL = [
   'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel', 'other', 'invalid',
 ];
 const TYPES = ['call', 'request', 'limited', 'rejected'];
+// What the groups of the series are ranked by.
+const ORDERS = ['requests', 'errors', 'refused', 'calls', 'bytes'];
 // A facet keeps this many rows; a value that a filter picks is never cut.
 const FACET_ROWS = 200;
 const invalid = (field, reason, message) => ({ status: 400, body: { error_code: 'validation', message, retryable: false, field, reason } });
@@ -355,10 +362,16 @@ export function overviewOf(server, params) {
   const window = params.get('window') || server.meta.usage.default_window;
   if (!server.meta.usage.windows.includes(window)) return invalid('window', 'invalid', `window must be one of ${server.meta.usage.windows.join(', ')}`);
   for (const name of new Set(params.keys())) {
-    if (!['window', 'group', ...DIMENSIONS].includes(name)) return invalid(name, 'unknown', `unknown parameter: ${name}`);
+    if (!['window', 'group', 'order', 'orders', ...DIMENSIONS].includes(name)) return invalid(name, 'unknown', `unknown parameter: ${name}`);
   }
   const group = params.has('group') ? params.get('group') : 'method';
   if (!DIMENSIONS.includes(group)) return invalid('group', 'invalid', 'group must be key, method, client, instance, result or type');
+  const order = params.has('order') ? params.get('order') : 'requests';
+  if (!ORDERS.includes(order)) return invalid('order', 'invalid', 'order must be requests, errors, refused, calls or bytes');
+  // The orders of the rankings: the repeated values once each (the first one keeps its place), at most 5 (the number is checked before the values).
+  const orders = [...new Set(params.getAll('orders'))];
+  if (orders.length > ORDERS.length) return invalid('orders', 'too_many', `orders takes at most ${ORDERS.length} values`);
+  if (orders.some((name) => !ORDERS.includes(name))) return invalid('orders', 'invalid', 'orders must be requests, errors, refused, calls or bytes');
   // Each dimension: the repeated values once each (the first one stays), at most 20, each one valid.
   const filters = {};
   for (const dimension of DIMENSIONS) {
@@ -377,6 +390,8 @@ export function overviewOf(server, params) {
   const cut = (skip) => inWindow.filter((c) => DIMENSIONS.every((dimension) => dimension === skip || !filters[dimension].length || filters[dimension].includes(valueOf(dimension, c))));
   const isCall = (c) => c.kind === 'call';
   const errorOf = (c) => c.result !== 'ok' && (c.kind === 'call' || c.kind === 'request');
+  // A refused request: the rate limit (429) and the refusals before the message was read (400, 413, 415).
+  const refusedOf = (c) => c.kind === 'limited' || c.kind === 'rejected';
   const figures = (list) => {
     const calls = list.filter(isCall);
     return {
@@ -406,24 +421,35 @@ export function overviewOf(server, params) {
   const seriesOf = (list) => ({
     requests: metric(list, (c) => c.count),
     errors: metric(list, (c) => c.count, errorOf),
+    refused: metric(list, (c) => c.count, refusedOf),
     calls: metric(list, (c) => c.count, isCall),
     duration_ms_sum: metric(list, (c) => c.ms, isCall),
     bytes: metric(list, (c) => c.bytes),
   });
   const labelOf = (id) => (group === 'key' ? names.get(id) || id : id);
   const groupIds = filters[group].length ? filters[group] : [...new Set(all.map((c) => valueOf(group, c)))];
-  const built = groupIds.map((id) => {
-    const list = all.filter((c) => valueOf(group, c) === id);
-    return { id, label: labelOf(id), total: sum(list, (c) => c.count), ...seriesOf(list) };
-  });
-  const ordered = filters[group].length ? built : built.sort((a, b) => b.total - a.total || (a.id < b.id ? -1 : 1));
-  const shown = filters[group].length ? ordered : ordered.slice(0, 8);
-  const folded = filters[group].length ? [] : ordered.slice(8);
+  // What a group is ranked by: its total of the metric that an order names.
+  const rankOf = (list, by) => sum(by === 'errors' ? list.filter(errorOf) : by === 'refused' ? list.filter(refusedOf) : by === 'calls' ? list.filter(isCall) : list,
+    (c) => (by === 'bytes' ? c.bytes : c.count));
+  const built = groupIds.map((id) => ({ id, list: all.filter((c) => valueOf(group, c) === id) }));
+  const lineOf = ({ id, list }) => ({ id, label: labelOf(id), total: sum(list, (c) => c.count), ...seriesOf(list) });
+  // The groups of a ranking and what the others add up to: the 8 with the most of the metric (the same total: the smaller id first), and a group
+  // that has none of it is in `rest`, even when there are fewer than 8; the values that are picked, in their order, when the dimension is filtered.
+  const rankingOf = (by) => {
+    if (filters[group].length) return { groups: built.map(lineOf), rest: { groups: 0, total: 0, ...seriesOf([]) } };
+    const ordered = built.map((item) => ({ item, rank: rankOf(item.list, by) })).sort((a, b) => b.rank - a.rank || (a.item.id < b.item.id ? -1 : 1));
+    const shown = ordered.filter((entry, i) => i < 8 && entry.rank > 0).map((entry) => entry.item);
+    const folded = ordered.filter((entry, i) => !(i < 8 && entry.rank > 0)).map((entry) => entry.item);
+    return {
+      groups: shown.map(lineOf),
+      rest: { groups: folded.length, total: sum(folded, (item) => sum(item.list, (c) => c.count)), ...seriesOf(folded.flatMap((item) => item.list)) },
+    };
+  };
   const series = {
     step,
     t: Array.from({ length: points }, (_, i) => iso(from + i * stepMs)),
-    groups: shown,
-    rest: { groups: folded.length, total: sum(folded, (g) => g.total), ...seriesOf(all.filter((c) => folded.some((g) => g.id === valueOf(group, c)))) },
+    ...rankingOf(order),
+    ...(orders.length ? { rankings: Object.fromEntries(orders.map((by) => [by, rankingOf(by)])) } : {}),
   };
 
   // The facets: every filter but their own, the rows that have requests and the values that a filter picks, the most requests first.
@@ -480,7 +506,7 @@ export function overviewOf(server, params) {
   return {
     status: 200,
     body: {
-      ...usageWindow(server, window), group, filters, totals, series, keys, methods, results, types, clients, instances,
+      ...usageWindow(server, window), group, order, filters, totals, series, keys, methods, results, types, clients, instances,
       omitted: { keys: omitted.key, methods: omitted.method, results: omitted.result, clients: omitted.client, instances: omitted.instance },
     },
   };

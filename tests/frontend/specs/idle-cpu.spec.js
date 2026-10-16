@@ -79,8 +79,8 @@ for (const path of PAGES) {
   });
 }
 
-// The MCP pages need a server with MCP on (the instance of mcp-contract.spec.js). The Usage tab has a chart, filters and tables: nothing of
-// it runs on a timer, so it rests as the others do.
+// The MCP pages need a server with MCP on (the instance of mcp-contract.spec.js). The Usage tab has six charts with their legends, a filter bar
+// and its chips (it has no table): nothing of it runs on a timer, so it rests as the others do.
 for (const path of ['/mcp-integration', '/mcp-integration/usage']) {
   test(`the MCP page ${path} at rest: the same`, async ({ page }) => {
     const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
@@ -90,6 +90,31 @@ for (const path of ['/mcp-integration', '/mcp-integration/usage']) {
     expectAtRest(await restingWindow(page, path), path);
   });
 }
+
+// The Usage tab with something to draw: the usage is made first, with the key of the config file that reads everything (tests/config/mcp.hcl), so
+// that the charts are canvases with legends and not empty cards. Then the legends go to their Values mode (a table in each chart, which scrolls
+// inside its card) and a filter is on: six canvases, six tables and a chip rest as the others do (no timer, no animation, no layout).
+test('the MCP Usage tab at rest with its charts drawn, their legends as tables and a filter: the same', async ({ page, request }) => {
+  const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+  requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
+  const post = (data) => request.post(`${base}/mcp`, {
+    headers: { Authorization: 'Bearer a11da7a0-0000-4000-8000-000000000001', 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, data,
+  });
+  await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'idle-cpu', version: '1.0' } } });
+  await post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_hosts', arguments: {} } });
+  await post({ jsonrpc: '2.0', id: 3, method: 'nothing/known' });
+  await page.goto(`${base}/mcp-integration/usage`);
+  const requests = page.locator('.mcpOverview__chart[data-chart="requests"]');
+  await expect(requests.locator('.chartCore')).toBeVisible({ timeout: 20_000 });
+  await requests.locator('.chartCore__legendMode').click();
+  await expect(page.locator('.mcpOverview__chart .chartCore__legendTable').first()).toBeVisible();
+  // A filter: the first legend entry of the table (the keyboard-reachable button), then the page has read again.
+  await requests.locator('.chartCore__legendTable .chartCore__legendItem').first().click();
+  await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(1);
+  await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.mcpOverview__tiles .statTile').first()).toBeVisible();
+  expectAtRest(await restingWindow(page, '/mcp-integration/usage (tables, a filter)'), '/mcp-integration/usage (tables, a filter)');
+});
 
 test('a trace page at rest: the same', async ({ page }) => {
   await mockTraceResults(page);

@@ -132,13 +132,21 @@
 .chartCore__legendItem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A hidden series: its name muted and struck through, its swatch kept at
-   full colour (the line it would draw); a totals legend (a filter) marks only
-   the series a filter leaves out. */
-.chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"],
+   full colour (the line it would draw); a totals legend and a legend that
+   filters (legendClick "filter") mark only the series a filter leaves out,
+   and in the table the figures of such a row dim with its name. */
+.chartCore__legendItem:not(.chartCore__legendItem--total, .chartCore__legendItem--filter)[aria-pressed="false"],
 .chartCore__legendItem.is-off { color: var(--muted); }
 
-.chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"] span,
+.chartCore__legendItem:not(.chartCore__legendItem--total, .chartCore__legendItem--filter)[aria-pressed="false"] span,
 .chartCore__legendItem.is-off span { text-decoration: line-through; }
+
+.chartCore__legendTable tr.is-off td { color: var(--muted); }
+
+/* An entry that is no filter (legendDisabled): no pointer, no hover. */
+.chartCore__legendItem:disabled { cursor: default; }
+
+.chartCore__legendItem:disabled:hover { border-color: transparent; }
 
 .chartCore__legendMode {
   flex: 0 0 auto;
