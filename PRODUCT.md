@@ -16,7 +16,7 @@ Operators of ClickHouse servers: data engineers, SRE and platform engineers who 
 
 ## Product Purpose
 
-ClickHouse Dash is a lightweight, real-time dashboard for ClickHouse. One self-contained binary serves a web UI to write and run queries with streamed results, keep a shared query library, explore databases and tables (sizes, parts, DDL, lineage), read OpenTelemetry traces, logs and metrics stored in ClickHouse, watch the server itself, and hand AI assistants scoped access through MCP keys. Success for this page: a visitor understands what it is from the video, believes it is light and complete, and downloads `v1.0.5`.
+ClickHouse Dash is a lightweight, real-time dashboard for ClickHouse. One self-contained binary serves a web UI to write and run queries with streamed results, keep a shared query library, explore databases and tables (sizes, parts, DDL, lineage), read OpenTelemetry traces, logs and metrics stored in ClickHouse, watch the server itself, and hand AI assistants scoped access through MCP keys. Success for this page: a visitor understands what it is from the video, believes it is light and complete, and downloads `v1.0.6`.
 
 ## Positioning
 
