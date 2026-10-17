@@ -186,7 +186,7 @@ A host has two ClickHouse users. The health check proves one thing about them: t
 - **The system user** is checked for `SELECT` on the system tables that the Explorer and the System page read. These tables are `system.parts`, `system.disks`, `system.dictionaries`, `system.metrics`, `system.asynchronous_metrics`, `system.clusters` and `system.query_log`. It is also checked for the OpenTelemetry tables that are enabled for the host (the `observability` block, with the host override). ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns` (the rows are filtered by the grants), so the audit does not report them.
 - **The runner** is checked for `SELECT` on at least one table. This can be a database-wide grant or a table-level grant. It is also checked for `SELECT` on `system.functions`, `system.documentation` and `system.dictionaries` (the Functions page and `SHOW DICTIONARIES`).
 - **The MCP user** (`mcp_uri`, when `mcp.enabled`) is checked the same way: `SELECT` on at least one table, and on `system.documentation` (`explorer_functions`). Every tool of Traces, Logs and Metrics reads the OpenTelemetry tables with the system user. That user is checked for them as above, and for `system.data_skipping_indices` when Logs or Metrics are enabled. The findings are in `access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`, `mcp_audited`, `mcp_connected` and `mcp_error`. An MCP user that cannot connect refuses the keys that name the host. A missing grant removes some tools from the keys of the host. The MCP page shows these tools in grey (`docs/mcp.md`).
-- **The privilege `displaySecretsInShowAndSelect`.** The runner and the MCP user are checked for this privilege (`CHECK GRANT displaySecretsInShowAndSelect ON *.*`). A user that holds it is a finding. Refer to [Secrets in the DDL texts](#secrets-in-the-ddl-texts).
+- **The privilege `displaySecretsInShowAndSelect`.** The runner and the MCP user are checked for this privilege (`CHECK GRANT displaySecretsInShowAndSelect ON *.*`). A user that holds it is a finding. This finding is an alert only. Refer to [Secrets in the DDL texts](#secrets-in-the-ddl-texts).
 - **A system user that cannot connect** is reported too, though the host stays healthy.
 
 The audit has its own thread and a budget of 60 seconds for each host. It never delays the health check of a host. A finding never stops the start. It appears in three places:
@@ -239,7 +239,15 @@ What to do:
   A `readonly` constraint on the setting has the same effect: `SETTINGS format_display_secrets_in_show_and_select = 0 READONLY`.
 - Leave the server setting `display_secrets_in_show_and_select` off when no user needs it.
 
-The access audit checks the privilege of the runner and of the MCP user every 10 minutes. It does not check the profile, so it reports each holder, also when a constraint locks the setting. A holder is a finding: the log line `access.finding`, `warnings` in `GET /api/hosts` and the fields `runner_shows_secrets` and `mcp_shows_secrets`. A finding never stops the start.
+The access audit checks the privilege of the runner and of the MCP user every 10 minutes. It does not check the profile, so it reports each holder, also when a constraint locks the setting. A holder is a finding: the log line `access.finding`, `warnings` in `GET /api/hosts` and the fields `runner_shows_secrets` and `mcp_shows_secrets`.
+
+This finding is an alert only. The operator can keep the privilege on purpose, for example on a cluster where the runner must read the clear DDL. ChDash then does these things:
+
+- It starts and serves. The host stays healthy.
+- It accepts the MCP keys of the host and the new keys for the host.
+- It serves the DDL texts as the runner or the MCP user reads them. It does not mask them again.
+
+To stop the alert, revoke the privilege. A constraint on the setting does not stop the alert.
 
 ## Authorization model
 

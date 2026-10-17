@@ -619,3 +619,23 @@ def test_the_audit_reports_an_mcp_user_that_may_display_secrets():
     ok = hosts()["ok"]["access"]
     assert ok["mcp_shows_secrets"] is False and ok["runner_shows_secrets"] is False
 
+
+def test_a_holder_of_display_secrets_is_an_alert_only():
+    """The operator can keep the privilege on purpose (user decision 2026-10-18). The audit reports it, and nothing else changes: the host stays
+    healthy, the Explorer serves the DDL texts as the runner reads them, and the MCP user of the host takes new keys."""
+    _audited_host("secretsrunner")
+    _audited_host("secretstool")
+    known = hosts()
+    assert known["secretsrunner"]["healthy"] is True and known["secretstool"]["healthy"] is True
+    table = get("/api/explorer/table", "secretsrunner", database="chdash_ui", table="weather_observations")
+    assert table.status_code == 200, table.text[:300]
+    made = create_key("secretstool", ["list_tables", "explorer_table"], name="secrets-alert-only")
+    assert made.status_code == 201, made.text
+    try:
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "list_tables", "arguments": {"host": "secretstool", "database": "chdash_ui"}}}
+        answer = SESSION.post(f"{BASE}/mcp", json=body, headers={"Authorization": f"Bearer {made.json()['secret']}"}, timeout=60)
+        assert answer.status_code == 200, answer.text
+        assert answer.json()["result"]["isError"] is False, answer.text[:300]
+    finally:
+        mcp("DELETE", f"/api/mcp/keys/{made.json()['key']['id']}")
