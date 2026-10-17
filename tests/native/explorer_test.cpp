@@ -2514,6 +2514,61 @@ void test_a_grant_on_some_databases_cuts_the_graph_and_the_storage_map() {
   CHECK(storage.find("\"total_bytes\":10,") != std::string::npos);
 }
 
+// The card of a table and the definition of a graph object name other databases: the related objects, the target of a Distributed
+// table, the target of an MV, a Buffer or a Distributed table. A grant on some databases keeps only those (docs/access.md).
+void test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition() {
+  ExplorerTableDetail detail;
+  detail.summary.database = "tenant_a";
+  detail.summary.name = "dist";
+  detail.distributed_cluster = "c";
+  detail.distributed_database = "tenant_z";
+  detail.distributed_table = "hidden_ledger";
+  ExplorerDependencyInfo own;
+  own.database = "tenant_a";
+  own.table = "visible";
+  own.relation = "upstream";
+  ExplorerDependencyInfo other;
+  other.database = "tenant_z";
+  other.table = "ledger_mv";
+  other.relation = "downstream";
+  detail.dependencies = {own, other};
+  CHECK(table_detail_databases(detail) == (std::vector<std::string>{"tenant_a", "tenant_z"}));
+
+  const ExplorerTableDetail cut = keep_table_detail_databases(detail, {"tenant_a"});
+  CHECK_EQ(cut.dependencies.size(), size_t(1));
+  CHECK_EQ(cut.dependencies[0].table, std::string("visible"));
+  CHECK(cut.distributed_database.empty() && cut.distributed_table.empty());
+  CHECK_EQ(cut.distributed_cluster, std::string("c"));
+  const std::string json = table_json("local", cut, false, 0);
+  CHECK(json.find("tenant_z") == std::string::npos);
+  CHECK(json.find("hidden_ledger") == std::string::npos);
+  CHECK(json.find("ledger_mv") == std::string::npos);
+  // A grant on both databases keeps the card as it is.
+  const ExplorerTableDetail whole = keep_table_detail_databases(detail, {"tenant_a", "tenant_z"});
+  CHECK_EQ(whole.dependencies.size(), size_t(2));
+  CHECK_EQ(whole.distributed_table, std::string("hidden_ledger"));
+
+  ExplorerGraphNode node;
+  node.id = "table:tenant_a.dist";
+  node.database = "tenant_a";
+  node.name = "dist";
+  node.kind = "distributed";
+  ExplorerGraphDefinition definition;
+  definition.target_database = "tenant_z";
+  definition.target_table = "hidden_ledger";
+  definition.target_visible = true;
+  definition.distributed_cluster = "c";
+  const ExplorerGraphDefinition hidden = keep_definition_databases(definition, {"tenant_a"});
+  CHECK(!hidden.target_visible && hidden.target_database.empty() && hidden.target_table.empty());
+  CHECK_EQ(hidden.distributed_cluster, std::string("c"));
+  const std::string text = definition_json("local", node, hidden, false);
+  CHECK(text.find("tenant_z") == std::string::npos);
+  CHECK(text.find("hidden_ledger") == std::string::npos);
+  CHECK(text.find("\"target\":null") != std::string::npos);
+  const ExplorerGraphDefinition kept = keep_definition_databases(definition, {"tenant_z"});
+  CHECK(kept.target_visible && kept.target_table == "hidden_ledger");
+}
+
 }  // namespace
 
 int main() {
@@ -2572,6 +2627,7 @@ int main() {
   RUN(test_the_masked_ddl_texts_are_read_as_the_runner);
   RUN(test_the_catalog_key_of_a_database_filter_never_aliases_the_whole_catalog);
   RUN(test_a_grant_on_some_databases_cuts_the_graph_and_the_storage_map);
+  RUN(test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

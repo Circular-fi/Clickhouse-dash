@@ -661,6 +661,7 @@ The route uses the same snapshot as `/api/explorer/graph`. This means runner ACL
 - The request runs no SQL.
 - An object outside `AllowedObjectSet` is `404 unknown_object`.
 - The response reports a destination outside the set only as `target_visible: false`. It never reports it by name.
+- In the `authzen` mode, a destination in a database that the PDP does not give to the human is also `target_visible: false` ([access.md](access.md#limits-of-a-grant-on-one-database)).
 
 The texts are the DDL of the object itself. The exposure is the same as in the Browse DDL tab. The side panel of an edge shows the definition of the object that defines the edge. That object is one of these objects:
 

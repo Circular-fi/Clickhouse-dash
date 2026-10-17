@@ -83,6 +83,40 @@ ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const s
   return out;
 }
 
+std::vector<std::string> table_detail_databases(const ExplorerTableDetail& detail) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  const auto add = [&](const std::string& database) {
+    if (!database.empty() && seen.insert(database).second) out.push_back(database);
+  };
+  for (const auto& dependency : detail.dependencies) add(dependency.database);
+  add(detail.distributed_database);
+  return out;
+}
+
+ExplorerTableDetail keep_table_detail_databases(const ExplorerTableDetail& detail, const std::unordered_set<std::string>& readable) {
+  ExplorerTableDetail out = detail;
+  out.dependencies.clear();
+  for (const auto& dependency : detail.dependencies) {
+    if (dependency.database.empty() || readable.count(dependency.database) != 0) out.dependencies.push_back(dependency);
+  }
+  if (!out.distributed_database.empty() && readable.count(out.distributed_database) == 0) {
+    out.distributed_database.clear();
+    out.distributed_table.clear();
+  }
+  return out;
+}
+
+ExplorerGraphDefinition keep_definition_databases(const ExplorerGraphDefinition& definition, const std::unordered_set<std::string>& readable) {
+  ExplorerGraphDefinition out = definition;
+  if (!out.target_database.empty() && readable.count(out.target_database) == 0) {
+    out.target_visible = false;
+    out.target_database.clear();
+    out.target_table.clear();
+  }
+  return out;
+}
+
 GraphScopeRequest read_graph_scope(const httplib::Request& req) {
   GraphScopeRequest scope;
   if (req.has_param("database")) scope.database = req.get_param_value("database");

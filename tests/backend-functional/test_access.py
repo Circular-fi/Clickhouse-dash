@@ -382,6 +382,47 @@ def test_a_grant_on_one_database_keeps_only_that_database_in_each_answer():
     assert full.status_code == 200 and len(full.json()["databases"]) > 1, full.text[:300]
 
 
+CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "").rstrip("/")
+
+
+def clickhouse(sql: str) -> None:
+    response = SESSION.post(CLICKHOUSE_URL, data=sql.encode(), timeout=60,
+                            auth=(os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test")))
+    assert response.status_code == 200, response.text
+
+
+@needs_access
+@pytest.mark.skipif(not CLICKHOUSE_URL, reason="CLICKHOUSE_URL is not set")
+def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
+    # The card of a table and the definition of a graph object name other databases: the related objects and the target of a
+    # Distributed table. A grant on the database of the table keeps only what it names in that database (user decision 2026-10-18).
+    clickhouse("CREATE DATABASE IF NOT EXISTS chdash_access_cross")
+    clickhouse("CREATE TABLE IF NOT EXISTS chdash_access_cross.to_ui AS chdash_ui.weather_observations "
+               "ENGINE = Distributed(chdash_cluster, chdash_ui, weather_observations)")
+    try:
+        answer(default=False, allow=["explorer.read@database:chdash_access_cross"])
+        tok = token("cross-tenant")
+        card = call("GET", "/api/explorer/table?host_id=local&database=chdash_access_cross&table=to_ui&refresh=1", tok=tok)
+        assert card.status_code == 200, card.text[:300]
+        detail = card.json()
+        assert detail["distributed"]["cluster"] == "chdash_cluster", detail.get("distributed")
+        assert detail["distributed"]["database"] == "" and detail["distributed"]["table"] == "", detail["distributed"]
+        assert all(d["database"] != "chdash_ui" for d in detail["dependencies"]), detail["dependencies"]
+        definition = call("GET", "/api/explorer/graph/definition?host_id=local&database=chdash_access_cross&table=to_ui&refresh=1", tok=tok)
+        assert definition.status_code == 200, definition.text[:300]
+        assert definition.json()["target_visible"] is False and definition.json()["target"] is None, definition.text[:300]
+        asked_databases = {e["resource"]["id"] for e in asked("explorer.read") if e["resource"]["type"] == "database"}
+        assert "chdash_ui" in asked_databases, asked_databases
+        # With a grant on the two databases, the targets are there.
+        answer(default=False, allow=["explorer.read@database:chdash_access_cross", "explorer.read@database:chdash_ui"])
+        card = call("GET", "/api/explorer/table?host_id=local&database=chdash_access_cross&table=to_ui", tok=tok).json()
+        assert card["distributed"]["database"] == "chdash_ui" and card["distributed"]["table"] == "weather_observations", card["distributed"]
+        definition = call("GET", "/api/explorer/graph/definition?host_id=local&database=chdash_access_cross&table=to_ui", tok=tok).json()
+        assert definition["target"] == {"database": "chdash_ui", "table": "weather_observations"}, definition
+    finally:
+        clickhouse("DROP DATABASE IF EXISTS chdash_access_cross SYNC")
+
+
 def make_mcp_key(tok: str, name: str, tools: list[str], databases: list[str]) -> requests.Response:
     body = {"name": name, "hosts": ["local"], "tools": tools, "databases": databases}
     return call("POST", "/api/mcp/keys", tok=tok, headers={"Sec-Fetch-Site": "same-origin"}, json=body)

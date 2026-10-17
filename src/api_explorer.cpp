@@ -109,7 +109,14 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   if (!open_explorer_route(cfg_, health_.get(), req, res, host_id, &route)) return;
   const auto answer = explorer_service_.table(current_request_context(), *route.host, route.host_id, database, table, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
-  send_json(res, explorer::table_json(route.host_id, *answer.value->value, answer.value->stale, explorer::kTableDetailCacheTtlMs));
+  // The related objects and the target of a Distributed table can be in other databases. A grant on some databases keeps only those
+  // (docs/access.md): one batch asks each database of the card.
+  const ExplorerTableDetail& detail = *answer.value->value;
+  if (const auto readable = access_readable_databases({"explorer.read"}, explorer::table_detail_databases(detail))) {
+    return send_json(res, explorer::table_json(route.host_id, explorer::keep_table_detail_databases(detail, *readable), answer.value->stale,
+                                               explorer::kTableDetailCacheTtlMs));
+  }
+  send_json(res, explorer::table_json(route.host_id, detail, answer.value->stale, explorer::kTableDetailCacheTtlMs));
 }
 
 void Server::handle_explorer_functions(const httplib::Request& req, httplib::Response& res) {
@@ -181,7 +188,15 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   if (!open_explorer_route(cfg_, health_.get(), req, res, param_of(req, "host_id"), &route)) return;
   const auto answer = explorer_service_.definition(current_request_context(), *route.host, route.host_id, database, table, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
-  send_json(res, explorer::definition_json(route.host_id, *answer.value->node, *answer.value->definition, answer.value->stale));
+  // The target (MV TO, Buffer, Distributed) can be in another database. Without a grant on it, the target is not visible (docs/access.md).
+  const ExplorerGraphDefinition& definition = *answer.value->definition;
+  if (!definition.target_database.empty()) {
+    if (const auto readable = access_readable_databases({"explorer.read"}, {definition.target_database})) {
+      return send_json(res, explorer::definition_json(route.host_id, *answer.value->node, explorer::keep_definition_databases(definition, *readable),
+                                                      answer.value->stale));
+    }
+  }
+  send_json(res, explorer::definition_json(route.host_id, *answer.value->node, definition, answer.value->stale));
 }
 
 } // namespace chdash
