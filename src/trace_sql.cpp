@@ -596,7 +596,7 @@ std::string rank_probe_sql(const TraceScope& scope, int64_t before_ns) {
 }
 
 std::vector<std::pair<std::string, std::string>> trace_ids_params(const std::vector<std::string>& ids) {
-  return {{"ids", sql::quote_array(ids)}};
+  return {{"ids", sql::hex_id_array(ids)}};
 }
 
 std::string summary_sql(const TraceScope& scope, int64_t first_span_ns, int64_t span_end_ns, size_t limit) {

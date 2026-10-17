@@ -55,8 +55,10 @@ Each release has the archives, a `SHA256SUMS` file and a build provenance attest
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-gh attestation verify chdash_<version>_linux_amd64.tar.gz --repo Circular-fi/Clickhouse-dash
+gh attestation verify chdash_<version>_linux_amd64.tar.gz --repo Circular-fi/Clickhouse-dash --signer-workflow Circular-fi/Clickhouse-dash/.github/workflows/release.yaml
 ```
+
+The option `--signer-workflow` is required. With `--repo` alone, the command also accepts an attestation that another workflow of the repository signed. Only the release workflow builds the archives.
 
 A release starts only after the tests pass on the commit that it builds. The section "Validate release builds" in `CONTRIBUTING.md` describes the release chain.
 

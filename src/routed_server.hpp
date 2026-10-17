@@ -10,13 +10,25 @@
 #include <functional>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace chdash {
 
+// A bump of cpp-httplib needs a new review of process_and_close_socket below: it repeats the loop of the library with one change.
+static_assert(std::string_view(CPPHTTPLIB_VERSION) == "0.54.1", "RoutedServer::process_and_close_socket repeats the code of cpp-httplib 0.54.1: review it for the new version");
+
 class RoutedServer : public httplib::Server {
 public:
+  RoutedServer() {
+    // cpp-httplib reports a request line or the headers that it cannot parse to the error logger, in the thread that serves the connection,
+    // just before it answers 400. The flag lets process_and_close_socket close the connection after that answer.
+    set_error_logger([](const httplib::Error& error, const httplib::Request*) {
+      if (error == httplib::Error::InvalidRequestLine || error == httplib::Error::InvalidHeaders) unparsable_request() = true;
+    });
+  }
+
   using httplib::Server::Delete;
   using httplib::Server::Get;
   using httplib::Server::Patch;
@@ -53,6 +65,41 @@ public:
   }
 
 private:
+  // True from the report of a request that cannot be parsed, until the next request of the thread starts.
+  static bool& unparsable_request() {
+    static thread_local bool flag = false;
+    return flag;
+  }
+
+  // The loop of cpp-httplib that serves one connection, with one change. The library answers 400 with "Connection: close" to a bad request line or to
+  // bad headers, but it keeps the connection and reads the next bytes as a new request. A gateway that reuses the connection would then have bytes
+  // of one request read as another. The connection closes after any request that cannot be parsed. The other refusals of the library close it already.
+  bool process_and_close_socket(socket_t sock) override {
+    std::string remote_addr;
+    int remote_port = 0;
+    httplib::detail::get_remote_ip_and_port(sock, remote_addr, remote_port);
+
+    std::string local_addr;
+    int local_port = 0;
+    httplib::detail::get_local_ip_and_port(sock, local_addr, local_port);
+
+    bool websocket_upgraded = false;
+    const bool ret = serve_guarded([&]() {
+      return httplib::detail::process_server_socket(
+          svr_sock_, sock, keep_alive_max_count_, keep_alive_timeout_sec_, read_timeout_sec_, read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
+          [&](httplib::Stream& strm, bool close_connection, bool& connection_closed) {
+            unparsable_request() = false;
+            const bool answered = process_request(strm, remote_addr, remote_port, local_addr, local_port, close_connection, connection_closed, nullptr,
+                                                  &websocket_upgraded);
+            if (unparsable_request()) connection_closed = true;
+            return answered;
+          });
+    });
+
+    httplib::detail::drain_and_close_socket(sock);
+    return ret;
+  }
+
   struct Route {
     std::string method;
     std::regex pattern;

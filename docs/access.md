@@ -106,7 +106,7 @@ ChDash publishes its actions at `GET /.well-known/access-actions`, without a tok
 |---|---|---|
 | `query.run.read` | `service`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta` |
 | `query.run.write` | `service`, `database` | The same routes. Without it, the statements of a run run with `readonly = 1`. |
-| `query.export` | `service`, `database` | `POST /api/export/run`, `/api/export/stream` |
+| `query.export` | `service`, `database` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. |
 | `library.read` | `service` | `GET /api/query-library...` |
 | `library.write` | `service` | `POST`, `PATCH` and `DELETE /api/query-library...` |
 | `explorer.read` | `service`, `database` | `/api/explorer/...`, except `/api/explorer/ops/...` |
@@ -145,18 +145,21 @@ Rules:
 - Each call has `Authorization: Bearer <pdp token>`, `X-Request-ID` (the request id of the request that asks) and a `traceparent`.
 - **Fail closed.** No answer before `pdp.timeout`, a connection error, a status that is not `200`, a body that is larger than 256 KiB, and a body that is not a valid answer give the decision `false` for each question of the call. ChDash writes the line `access.pdp_failed` and never keeps a failure.
 - ChDash keeps an answer of the PDP for `pdp.cache_ttl` at most. The key is the subject, the action and the resource. A change of the policy applies after `cache_ttl` at most.
+- The cache holds 16384 answers and 8 MiB at most (the bytes of the keys, and a fixed part for each answer). The client chooses the `database` parameter, so a bound of bytes is necessary. When the cache is full, ChDash removes the expired answers. If the cache is still full, ChDash empties it. An answer that is larger than the whole budget is not kept. These bounds are not settings.
 - ChDash sends one batch for a page: `GET /api/version` holds the decisions of the subject for all the actions on the service (`features.access`). The questions that are in the cache do not go to the PDP.
 
 ## Enforcement
 
 - ChDash checks the decision of each route before the route runs, also when the page does not show the action.
 - If the decision is `false`, ChDash sends status `403` with `{"error_code": "forbidden", "action": "<action>", "message": "The action <action> is not allowed."}`. The answer does not give the reason of the PDP.
-- A run without `query.run.write` runs each statement with `readonly = 1`. ClickHouse then refuses a statement that changes data or settings, also a `SETTINGS` clause and `SET`. ChDash sends `readonly = 1` also when it cannot read the settings profile of the runner (fail closed). A run needs `query.run.read` or `query.run.write`: without the two, the answer is `403` with the action `query.run.read`. The same rule applies to Deep Analyze and to the statements of an export (an export needs `query.export`).
+- A run without `query.run.write` runs each statement with `readonly = 1`. ClickHouse then refuses a statement that changes data or settings, also a `SETTINGS` clause and `SET`. ChDash sends `readonly = 1` also when it cannot read the settings profile of the runner (fail closed). A run needs `query.run.read` or `query.run.write`: without the two, the answer is `403` with the action `query.run.read`. The same rule applies to Deep Analyze and to the statements of an export. An export also needs `query.export`: without it, the answer is `403` with the action `query.export`.
 - The pages hide what the subject cannot do. `GET /api/version` gives the decisions in `features.access`, and the pages read them: the System page needs `system.read`, the Traces, Logs and Metrics pages need `observability.read`, the query library needs `library.read` (and `library.write` to change it), and the MCP page needs `mcp.keys.read` or `mcp.usage.read`. `GET /api/mcp/meta` says `can_manage = false` without `mcp.keys.write`, so the MCP page shows no New key and no Delete. The Explorer and the Query page stay visible: a grant on one database can let the user open it.
 
 ### Limits of a grant on one database
 
 - A grant on a database applies to the Explorer route that names this database. The catalog of all the databases (`GET /api/explorer/catalog` without `database`) needs `explorer.read` on the service.
+- Some answers name other databases than the one of the request: the storage map (`GET /api/explorer/storage`), the graph (`GET /api/explorer/graph`, a lineage crosses databases) and the names of the editor (`GET /api/meta` with `databases`, `tables` or `columns`). ChDash asks the PDP, in one batch, for the service and for each database of the answer: `explorer.read` for the storage map and the graph, `query.run.read` and `query.run.write` for the names. The answer keeps only the databases with a `true` decision on the database or on the service. A node of the graph that names no database (a shard or a replica of a cluster) stays when it links to a node that stays.
+- The focus of the graph (`focus_database`) names its own database. Without a `true` decision on the service or on that database, the answer is `403` with the action `explorer.read`.
 - The Query page names no database. Thus a grant of `query.run.read` on one database does not let the user run a query: ChDash asks for the service. The SQL of a query can name any table, so a decision for one database cannot limit what the SQL reads. The grants of the ClickHouse runner user of each host stay the limit of the data.
 
 ## Logs and traces
@@ -167,7 +170,9 @@ Rules:
 
 ## The MCP endpoint
 
-`POST /mcp` needs no identity token. It keeps its keys (contract section 3, [mcp.md](mcp.md)). The API tools of MCP call the routes of the API in the process (the context of an MCP call): these calls need no identity token and ask no PDP. The keys, their tools, their scope and the MCP ClickHouse user limit them.
+`POST /mcp` needs no identity token. It keeps its keys (contract section 3, [mcp.md](mcp.md)). The API tools of MCP call the routes of the API in the process (the context of an MCP call): these calls need no identity token and ask no PDP for each route. The keys, their tools, their scope and the MCP ClickHouse user limit them.
+
+A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use. The key keeps its creator. On each request of the key, ChDash asks the PDP for the creator again: when one action is `false`, the key gets the `401` of a key that does not exist. A key of the configuration is not checked.
 
 ## Deviation from AuthZEN: no TLS
 

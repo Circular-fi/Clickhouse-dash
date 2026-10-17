@@ -9,6 +9,7 @@
 #include "host_util.hpp"
 #include "time_util.hpp"
 #include "json_text.hpp"
+#include "meta_cache_key.hpp"
 #include "sql_literal.hpp"
 
 #include <clickhouse/exceptions.h>
@@ -814,7 +815,18 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     return true;
   };
 
+  // The catalogs of the databases, the tables and the columns name databases. A grant on some databases keeps only their items
+  // (docs/access.md): one batch asks each database of the catalog, for query.run.read and query.run.write.
+  auto readable_items = [&](const std::string& type, const MetaCatalog& cat) -> std::optional<std::unordered_set<std::string>> {
+    if (type != "databases" && type != "tables" && type != "columns") return std::nullopt;
+    std::vector<std::string> databases;
+    databases.reserve(cat.items.size());
+    for (const auto& item : cat.items) databases.push_back(type == "databases" ? item.name : item.database);
+    return access_readable_databases({"query.run.read", "query.run.write"}, databases);
+  };
+
   auto write_catalog = [&](const std::string& type, const MetaCatalog& cat, bool stale) {
+    const auto readable = readable_items(type, cat);
     write_json_key(w, type);
     w.StartObject();
     w.Key("updated_at_ms"); w.Uint64(cat.updated_at_ms);
@@ -827,6 +839,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     w.Key("items");
     w.StartArray();
     for (const auto& item : cat.items) {
+      if (readable && readable->count(type == "databases" ? item.name : item.database) == 0) continue;
       w.StartObject();
       w.Key("name"); write_json_text(w, item.name);
       if (!item.database.empty()) { w.Key("database"); write_json_text(w, item.database); }
@@ -927,10 +940,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       const MetaCredentialScope scope = metadata_uses_runner_credentials(t)
         ? MetaCredentialScope::Runner
         : MetaCredentialScope::System;
-      std::string cache_key = host_id + "::" + meta_credential_scope_name(scope) + "::" + t;
-      if (t == "columns" && scoped_columns) {
-        cache_key += "::" + column_database + "::" + column_table;
-      }
+      const std::string cache_key = meta_catalog_cache_key(host_id, meta_credential_scope_name(scope), t, scoped_columns, column_database, column_table);
       auto fetch = [&](MetaCatalog& out, std::string& err_code, std::string& err_msg) -> bool {
         return fetch_catalog(t, out, err_code, err_msg);
       };

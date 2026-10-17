@@ -315,6 +315,26 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Max');
 });
 
+// The kind of a panel comes from the address. Only a metric type (gauge, sum, histogram, exponential_histogram, summary) picks a badge
+// class. Any other text is dropped, and the page never turns it into markup.
+test('metrics: a kind in the address that is not a metric type never becomes markup', async ({ page, request }) => {
+  const range = await windowParams(request, 3);
+  const kind = '"><a id="kindprobe" href="https://attacker.invalid/x">x</a><span class="';
+  await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'queue.depth', kind }));
+  const panel = page.locator('.metricsPanel').first();
+  await expect(panel.locator('.metricsPanel__name')).toHaveText('queue.depth');
+  await expect(page.locator('#kindprobe')).toHaveCount(0);
+  await expect(panel.locator('.metricsPanel__badges a')).toHaveCount(0);
+  // The badge that the page shows keeps a class of its own: no class comes from the address.
+  const classes = await panel.locator('.metricsPanel__badges .metricsBadge').first().getAttribute('class');
+  expect(classes).not.toContain('"');
+  expect(classes).not.toContain('kindprobe');
+  // A kind that is a property of Object.prototype is not a metric type either.
+  await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'queue.depth', kind: 'constructor' }));
+  await expect(page.locator('.metricsPanel').first().locator('.metricsPanel__name')).toHaveText('queue.depth');
+  await expect(page.locator('.metricsPanel').first().locator('.metricsPanel__badges')).not.toContainText('function');
+});
+
 test('metrics: an exemplar dot opens its trace with the span selected', async ({ page, request }) => {
   const range = await windowParams(request, 1);
   await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'http.server.request.duration', kind: 'histogram', agg: 'p99' }));

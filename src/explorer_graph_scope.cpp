@@ -23,6 +23,66 @@ struct ExplorerGraphIndex {
 
 namespace explorer {
 
+ExplorerGraph keep_graph_databases(const ExplorerGraph& scoped, const std::unordered_set<std::string>& readable) {
+  ExplorerGraph out;
+  out.generated_at_ms = scoped.generated_at_ms;
+  out.metric_scope = scoped.metric_scope;
+  out.refreshable_views_available = scoped.refreshable_views_available;
+  out.truncated = scoped.truncated;
+  out.unavailable_sections = scoped.unavailable_sections;
+  out.unavailable_issues = scoped.unavailable_issues;
+  std::unordered_set<std::string> kept;
+  std::unordered_set<std::string> unnamed;
+  for (const auto& node : scoped.nodes) {
+    if (node.database.empty()) unnamed.insert(node.id);
+    else if (readable.count(node.database) != 0) kept.insert(node.id);
+  }
+  // An edge stays when its two ends stay. A node with no database (a shard, a replica of a cluster) stays when a path of edges
+  // links it to a node of a readable database, through other nodes with no database only.
+  std::unordered_map<std::string, std::vector<std::string>> links;
+  for (const auto& edge : scoped.edges) {
+    links[edge.from].push_back(edge.to);
+    links[edge.to].push_back(edge.from);
+  }
+  std::deque<std::string> queue(kept.begin(), kept.end());
+  while (!queue.empty()) {
+    const std::string current = std::move(queue.front());
+    queue.pop_front();
+    const auto it = links.find(current);
+    if (it == links.end()) continue;
+    for (const auto& next : it->second) {
+      if (unnamed.count(next) != 0 && kept.insert(next).second) queue.push_back(next);
+    }
+  }
+  for (const auto& node : scoped.nodes) {
+    if (kept.count(node.id) != 0) out.nodes.push_back(node);
+  }
+  for (const auto& edge : scoped.edges) {
+    if (kept.count(edge.from) != 0 && kept.count(edge.to) != 0) out.edges.push_back(edge);
+  }
+  return out;
+}
+
+std::vector<std::string> graph_databases(const ExplorerGraph& graph) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  for (const auto& node : graph.nodes) {
+    if (!node.database.empty() && seen.insert(node.database).second) out.push_back(node.database);
+  }
+  return out;
+}
+
+ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const std::unordered_set<std::string>& readable) {
+  ExplorerStorageMap out;
+  out.generated_at_ms = map.generated_at_ms;
+  out.metric_scope = map.metric_scope;
+  out.table_limit_per_database = map.table_limit_per_database;
+  for (const auto& database : map.databases) {
+    if (readable.count(database.name) != 0) out.databases.push_back(database);
+  }
+  return out;
+}
+
 GraphScopeRequest read_graph_scope(const httplib::Request& req) {
   GraphScopeRequest scope;
   if (req.has_param("database")) scope.database = req.get_param_value("database");

@@ -8,6 +8,7 @@
 #include "api_error.hpp"
 #include "json_text.hpp"
 #include "log.hpp"
+#include "mcp_scope.hpp"
 #include "mcp_trace.hpp"
 #include "request_context.hpp"
 
@@ -15,7 +16,9 @@
 #include <rapidjson/writer.h>
 
 #include <chrono>
+#include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace chdash {
@@ -193,9 +196,12 @@ bool Server::check_access(const httplib::Request& req, httplib::Response& res, c
       return false;
     }
     case AccessRuleKind::Export: {
-      const auto decisions = access_decide({AccessQuestion{"query.export", service}, AccessQuestion{"query.run.write", service}});
+      // An export runs SQL: it needs query.export and, as a run, query.run.read or query.run.write.
+      const auto decisions = access_decide({AccessQuestion{"query.export", service}, AccessQuestion{"query.run.read", service},
+                                            AccessQuestion{"query.run.write", service}});
       if (!decisions[0].allowed) return deny("query.export");
-      state.read_only = !decisions[1].allowed;
+      if (!decisions[1].allowed && !decisions[2].allowed) return deny("query.run.read");
+      state.read_only = !decisions[2].allowed;
       return false;
     }
   }
@@ -209,6 +215,66 @@ bool Server::access_allows(httplib::Response& res, const char* action, const std
   if (access_decide({AccessQuestion{action, resource}}).front().allowed) return true;
   refuse_forbidden(res, action);
   return false;
+}
+
+void Server::access_forbidden(httplib::Response& res, const std::string& action) { refuse_forbidden(res, action); }
+
+bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions) {
+  const AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp() || questions.empty()) return true;
+  const auto decisions = access_decide(questions);
+  for (size_t i = 0; i < questions.size(); ++i) {
+    if (decisions[i].allowed) continue;
+    refuse_forbidden(res, questions[i].action);
+    return false;
+  }
+  return true;
+}
+
+std::optional<std::unordered_set<std::string>> Server::access_readable_databases(const std::vector<const char*>& actions,
+                                                                                const std::vector<std::string>& databases) {
+  const AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return std::nullopt;
+  std::vector<std::string> names;
+  std::unordered_set<std::string> seen;
+  for (const auto& database : databases) {
+    if (seen.insert(database).second) names.push_back(database);
+  }
+  // One batch: each action on the service, then each action on each database.
+  std::vector<AccessQuestion> questions;
+  questions.reserve(actions.size() * (names.size() + 1));
+  for (const char* action : actions) questions.push_back(AccessQuestion{action, {"service", cfg_.access.audience}});
+  for (const auto& name : names) {
+    for (const char* action : actions) questions.push_back(AccessQuestion{action, {"database", name}});
+  }
+  const auto decisions = access_decide(questions);
+  for (size_t i = 0; i < actions.size(); ++i) {
+    if (decisions[i].allowed) return std::nullopt;
+  }
+  std::unordered_set<std::string> out;
+  for (size_t n = 0; n < names.size(); ++n) {
+    for (size_t a = 0; a < actions.size(); ++a) {
+      if (decisions[actions.size() * (n + 1) + a].allowed) {
+        out.insert(names[n]);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+std::string Server::mcp_key_refused_action(const McpKey& key, const std::string& request_id) {
+  if (!cfg_.access.enforced() || key.source != "ui") return {};
+  if (key.creator.empty() || !pdp_) return "creator";
+  const auto questions = mcp_key_access_questions(key.tools, key.databases, cfg_.access.audience);
+  if (questions.empty()) return {};
+  PdpCallContext context;
+  context.request_id = request_id;
+  const auto decisions = pdp_->decide(key.creator, questions, context);
+  for (size_t i = 0; i < questions.size(); ++i) {
+    if (!decisions[i].allowed) return questions[i].action;
+  }
+  return {};
 }
 
 bool Server::access_permits(const char* action) {

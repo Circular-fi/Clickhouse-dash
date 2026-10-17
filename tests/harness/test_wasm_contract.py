@@ -181,3 +181,55 @@ def test_the_worker_and_the_loader_use_no_eval_and_no_network_beyond_the_kernel_
         text = read(f"src/static/{name}")
         assert not re.search(r"\beval\s*\(|new Function\s*\(", text), name
         assert not re.search(r"https?://", text), name
+
+
+def _check_fixture(builder, tmp_path, monkeypatch, committed: bytes, rebuilt: bytes, lock_toolchain: str, lock_source: str = "s"):
+    """A committed kernel, a rebuild of it and the lock of the change under test. Returns what `build_wasm.py --check` decides."""
+    out = tmp_path / "committed"
+    built = tmp_path / "built"
+    out.mkdir(parents=True)
+    built.mkdir(parents=True)
+    (out / "k.wasm").write_bytes(committed)
+    (built / "k.wasm").write_bytes(rebuilt)
+    lock_file = tmp_path / "wasm.lock.json"
+    lock_file.write_text(json.dumps({"toolchain": lock_toolchain, "kernels": {"k": {"source_sha256": lock_source}}}), encoding="utf-8")
+    monkeypatch.setattr(builder, "OUT", out)
+    monkeypatch.setattr(builder, "LOCK", lock_file)
+    rebuild_lock = {"toolchain": "Alpine clang version 18.1.6", "kernels": {"k": {"source_sha256": "s"}}}
+    options = type("Options", (), {"check": True})()
+    return builder.finish(options, built, rebuild_lock)
+
+
+def test_the_rebuild_check_fails_on_any_difference_whatever_the_lock_of_the_change_says(tmp_path, monkeypatch, capsys):
+    # Why: the lock is part of the change under test. A tampered binary with a lock that names another compiler must not pass as a warning.
+    builder = tool("build_wasm")
+    monkeypatch.delenv("CHDASH_WASM_STRICT", raising=False)
+    monkeypatch.delenv("CHDASH_WASM_LENIENT", raising=False)
+    same = "Alpine clang version 18.1.6"
+    assert _check_fixture(builder, tmp_path / "a", monkeypatch, b"\0asm-A", b"\0asm-A", same) == 0
+    assert _check_fixture(builder, tmp_path / "b", monkeypatch, b"\0asm-A", b"\0asm-B", same) == 1
+    assert _check_fixture(builder, tmp_path / "c", monkeypatch, b"\0asm-A", b"\0asm-B", "an edited toolchain text") == 1
+    capsys.readouterr()
+
+
+def test_the_rebuild_check_is_lenient_only_when_the_caller_says_so(tmp_path, monkeypatch, capsys):
+    builder = tool("build_wasm")
+    monkeypatch.delenv("CHDASH_WASM_STRICT", raising=False)
+    monkeypatch.setenv("CHDASH_WASM_LENIENT", "1")
+    assert _check_fixture(builder, tmp_path / "a", monkeypatch, b"\0asm-A", b"\0asm-B", "an edited toolchain text") == 0
+    assert "WARNING" in capsys.readouterr().out
+    # An identical rebuild needs no opt-out. A lock that does not match the sources fails even when the caller is lenient.
+    assert _check_fixture(builder, tmp_path / "b", monkeypatch, b"\0asm-A", b"\0asm-A", "an edited toolchain text") == 0
+    assert _check_fixture(builder, tmp_path / "c", monkeypatch, b"\0asm-A", b"\0asm-A", "Alpine clang version 18.1.6", lock_source="other") == 1
+    capsys.readouterr()
+
+
+def test_the_release_checks_the_kernels_before_it_builds_what_it_attests():
+    # Why: the archives embed the committed .wasm files byte for byte. A release that did not rebuild them from src/wasm would attest bytes that no review linked to the source.
+    release = (ROOT / ".github/workflows/release.yaml").read_text(encoding="utf-8")
+    check = release.split("\n  wasm-check:\n", 1)[1].split("\n  build:\n", 1)[0]
+    assert "python3 tools/build_wasm.py --verify" in check and "python3 tools/build_wasm.py --docker --check" in check
+    assert "needs: prepare" in check and "ref: ${{ needs.prepare.outputs.sha }}" in check and "persist-credentials: false" in check
+    assert "CHDASH_WASM_LENIENT" not in check
+    build = release.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
+    assert "needs: [prepare, wasm-check]" in build

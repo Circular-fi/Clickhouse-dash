@@ -656,7 +656,8 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
     QueryLibraryState candidate = state_;
     const ImportOutcome outcome = import_into(
         candidate, doc, host, options_.max_query_bytes,
-        [this](char prefix, const QueryLibraryState& state) { return new_id_locked(prefix, state); }, now_ms());
+        // The import checks the uniqueness of an id in an index. A scan of the state for each new id made the import slower with its size.
+        [](char prefix, const QueryLibraryState&) { return std::string(1, prefix) + "_" + random_hex(8); }, now_ms());
     if (outcome.changed()) {
       candidate.revision = state_.revision + 1;
       commit_locked(std::move(candidate));

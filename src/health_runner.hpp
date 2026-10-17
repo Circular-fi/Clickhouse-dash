@@ -54,10 +54,16 @@ struct HostAccess {
   std::vector<std::string> system_missing;
   // The runner has SELECT on no table that the Explorer could show.
   bool runner_reads_nothing = false;
+  // The runner holds the privilege displaySecretsInShowAndSelect (CHECK GRANT). The Explorer serves the DDL texts as the runner. With the server
+  // setting display_secrets_in_show_and_select and the setting format_display_secrets_in_show_and_select, such a user reads the secrets that
+  // ClickHouse masks for the other users (docs/configuration.md, "Secrets in the DDL texts").
+  bool runner_shows_secrets = false;
   // The MCP user (mcp_uri), when MCP is on and the host has one.
   std::string mcp_user;
   std::vector<std::string> mcp_missing;
   bool mcp_reads_nothing = false;
+  // The MCP user holds the privilege displaySecretsInShowAndSelect. The API tools serve the DDL texts as the MCP user.
+  bool mcp_shows_secrets = false;
   // The MCP user was tried. This means that the host answered, MCP is on, and the host has an mcp_uri. The result says whether the MCP user connected.
   // Not audited means unknown. The host was down at the last check, or MCP is off.
   bool mcp_audited = false;

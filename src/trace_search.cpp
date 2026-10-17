@@ -137,7 +137,7 @@ std::vector<RankedTrace> rank_traces_by_start(ChExecutor& db, const TraceScope& 
   double fraction = range_ns > 16 * kMinSliceNs ? 1.0 / 16.0 : 1.0;
   size_t pad = 16;
   ChParams params;
-  if (!bounds.excluded.empty()) params.emplace_back("excluded", sql::quote_array(bounds.excluded));
+  if (!bounds.excluded.empty()) params.emplace_back("excluded", sql::hex_id_array(bounds.excluded));
 
   while (true) {
     const bool whole = fraction >= 1.0;

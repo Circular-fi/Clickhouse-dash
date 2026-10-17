@@ -140,8 +140,10 @@ void test_literals() {
   CHECK_EQ(sql::quote_ident("x\\` UNION SELECT 1 --"), std::string("`x\\\\\\` UNION SELECT 1 --`"));
   CHECK_EQ(sql::quote_ident(""), std::string("``"));
   CHECK_EQ(sql::quote_qualified("db", "t"), std::string("`db`.`t`"));
-  CHECK_EQ(sql::quote_array({}), std::string("[]"));
-  CHECK_EQ(sql::quote_array({"a", "b'c"}), std::string("['a', 'b\\'c']"));
+  CHECK_EQ(sql::hex_id_array({}), std::string("[]"));
+  CHECK_EQ(sql::hex_id_array({"ab", "b'c", "0F", "x", "", "a\\b"}), std::string("['ab', '0F']"));
+  CHECK(sql::is_hex_trace_id("3bf7651916cd43dd8448eb211c80319c") && !sql::is_hex_trace_id("3bf7651916cd43dd8448eb211c80319g"));
+  CHECK(!sql::is_hex_trace_id(std::string(65, 'a')) && sql::is_hex_trace_id(std::string(64, 'a')));
   CHECK_EQ(sql::quote_list({}), std::string("''"));
   CHECK_EQ(sql::quote_list({"a", "b"}), std::string("'a', 'b'"));
   CHECK_EQ(sql::like_escape("50%_off\\"), std::string("50\\%\\_off\\\\"));

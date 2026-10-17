@@ -725,6 +725,19 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     return;
   }
   const McpKey& key = auth.key;
+  // A key of the page in the authzen mode works only while the PDP gives its creator each action that the tools of the key use
+  // (docs/mcp.md, "Keys and the access of humans"). Such a key gets the answer of a key that does not exist (contract 3.3); the
+  // log tells why.
+  if (const std::string refused = mcp_key_refused_action(key, current_request_context().request_id); !refused.empty()) {
+    log_event(LogLevel::Warn, "mcp.key_refused",
+              {{"key", key.id}, {"creator", key.creator.empty() ? std::string("-") : key.creator}, {"action", refused}});
+    if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
+    res.set_header("Connection", "close");
+    res.status = 401;
+    res.set_content(kMcpUnauthorizedBody, "application/json");
+    log_call("401");
+    return;
+  }
   record.key = key.id;
   record.key_source = key.source;
   if (!key.subject.empty()) record.subject = key.subject;
@@ -1314,7 +1327,14 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         if (input.max_rows && refuse("max_rows", *input.max_rows, caps.max_rows, "the number of rows")) return;
         if (input.timeout_seconds && refuse("timeout_seconds", *input.timeout_seconds, caps.timeout_seconds, "the time of a query")) return;
       }
-      const auto result = store.create(input, now);
+      // In the authzen mode, a key never has more than its creator: the PDP must give the creator each action that the tools of the
+      // key use, on the databases of its scope (docs/mcp.md, "Keys and the access of humans"). The key keeps its creator.
+      if (cfg_.access.enforced()) {
+        const auto questions = mcp_key_access_questions(input.tools.value_or(std::vector<std::string>{}),
+                                                        input.databases.value_or(std::vector<std::string>{}), cfg_.access.audience);
+        if (!access_allows_all(res, questions)) return;
+      }
+      const auto result = store.create(input, now, access_subject());
       if (!result.key) return write_failure(result);
       audit("-", "keys/create", "", "ok:" + result.key->id, 0, 0);
       write_key_response(201, result, true);

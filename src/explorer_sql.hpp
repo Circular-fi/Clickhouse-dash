@@ -58,6 +58,8 @@ SqlStatement storage_tables_sql(const std::vector<std::string>& databases);
 // ---- the card of a table ----
 
 SqlStatement table_summary_sql(const std::string& database, const std::string& table);
+// engine_full of one table. ClickHouse masks the secrets of this text for each user. Read it as the runner (explorer_table.cpp).
+SqlStatement table_engine_full_sql(const std::string& database, const std::string& table);
 SqlStatement buffer_target_rows_sql(const std::string& database, const std::string& table);
 SqlStatement dictionary_size_sql(const std::string& database, const std::string& table);
 SqlStatement table_parts_sql(const std::string& database, const std::string& table);
@@ -69,6 +71,7 @@ SqlStatement table_part_ingress_sql(const std::string& database, const std::stri
 SqlStatement table_replica_detail_sql(const std::string& database, const std::string& table);
 SqlStatement table_replica_base_sql(const std::string& database, const std::string& table);
 
+// create_table_query of one table. ClickHouse masks the secrets of this text for each user. Read it as the runner (explorer_detail.cpp).
 SqlStatement table_ddl_sql(const std::string& database, const std::string& table);
 SqlStatement columns_sql(const std::string& database, const std::string& table);
 SqlStatement describe_sql(const std::string& database, const std::string& table, bool with_subcolumns);

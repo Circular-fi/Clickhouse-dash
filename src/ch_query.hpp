@@ -149,9 +149,9 @@ void ch_select(clickhouse::Client& client, const std::string& sql,
 //
 // Query parameters ({name:Type} in the SQL, set with SetParam) work the same way. A value sent apart from the text is never parsed as SQL. The text does not change with it.
 // Use SqlParams (sql_params.hpp) for what a user wrote, or for a name that can hold a quote mark or a backslash. Use one String parameter for each value.
-// An Array(String) is the text of sql::quote_array (sql_literal.hpp).
+// An Array(String) is the text of sql::hex_id_array (sql_literal.hpp).
 //
-// That text is right only for values without a quote mark or a backslash (the hexadecimal trace ids).
+// That text is right only for values without a quote mark or a backslash, so it keeps only hexadecimal trace ids.
 using ChParams = std::vector<std::pair<std::string, std::string>>;
 void ch_select(clickhouse::Client& client, const std::string& sql, const ChParams& params,
                const std::function<void(const clickhouse::Block&)>& on_block);

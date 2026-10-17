@@ -110,6 +110,19 @@ static std::string join_list(const std::vector<std::string>& items) {
   return out;
 }
 
+// The privilege that lets a user read the secrets that ClickHouse masks in create_table_query, engine_full and as_select. It is a global privilege.
+static const char* const kDisplaySecretsGrant = "displaySecretsInShowAndSelect ON *.*";
+
+// The finding for a user of ChDash that holds the privilege. The Explorer and the API tools of MCP serve the DDL texts as this user: the text that
+// the user sees is the text that a caller gets. The text of the finding names the three conditions of ClickHouse and the two ways to close it.
+static std::string display_secrets_warning(const std::string& who, const std::string& user) {
+  const std::string target = user.empty() ? std::string("<user>") : user;
+  return "The " + who + " holds the privilege displaySecretsInShowAndSelect. The Explorer shows the DDL texts as this user. When the server setting "
+         "display_secrets_in_show_and_select is on and the setting format_display_secrets_in_show_and_select is 1, this user reads the secrets that "
+         "ClickHouse masks, and the callers of ChDash get them. Revoke it: REVOKE displaySecretsInShowAndSelect ON *.* FROM " + target +
+         "; Or lock the setting in the settings profile of this user: format_display_secrets_in_show_and_select = 0 CONST.";
+}
+
 static std::string user_of(const std::string& uri) {
   const auto parsed = parse_clickhouse_uri(uri, nullptr);
   return parsed ? parsed->user : std::string();
@@ -210,6 +223,11 @@ static HostAccess audit_access(
                              " can read no table: the Explorer, the Query page and the Functions page show nothing. Grant SELECT on the databases that it must show: GRANT SELECT ON <database>.* TO " +
                              (out.runner_user.empty() ? std::string("<user>") : out.runner_user) + ";");
     }
+    {
+      bool known = false;
+      out.runner_shows_secrets = check_grant(*runner, kDisplaySecretsGrant, &known, budget);
+      if (out.runner_shows_secrets) out.warnings.push_back(display_secrets_warning(describe("runner", out.runner_user), out.runner_user));
+    }
     const auto missing = [&](const char* table) {
       return std::find(out.runner_missing.begin(), out.runner_missing.end(), std::string("SELECT ON ") + table) != out.runner_missing.end();
     };
@@ -251,11 +269,16 @@ static HostAccess audit_access(
         const bool granted = check_grant(*mcp, "SELECT ON " + table, &known, budget);
         if (known && !granted) out.mcp_missing.push_back("SELECT ON " + table);
       }
+      {
+        bool known = false;
+        out.mcp_shows_secrets = check_grant(*mcp, kDisplaySecretsGrant, &known, budget);
+      }
       out.mcp_reads_nothing = reads_a_table(*mcp, budget) == std::optional<bool>(false);
       if (out.mcp_reads_nothing) {
         out.warnings.push_back("The " + who + " can read no table: every tool of MCP answers with nothing. GRANT SELECT ON <database>.* TO " +
                                (out.mcp_user.empty() ? std::string("<user>") : out.mcp_user) + ";");
       }
+      if (out.mcp_shows_secrets) out.warnings.push_back(display_secrets_warning(who, out.mcp_user));
       if (!out.mcp_missing.empty()) {
         std::vector<std::string> tables;
         for (const auto& grant : out.mcp_missing) tables.push_back(grant.substr(10));

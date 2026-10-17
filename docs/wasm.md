@@ -45,8 +45,8 @@ The repository holds the built `.wasm` files. This choice has these effects:
 - A normal checkout builds and runs with no wasm toolchain. The release workflow needs no compiler.
 - A pull request shows the sizes of the binaries.
 - The lock file `src/wasm/wasm.lock.json` stores the SHA-256 of each source set and of each binary. The test `tests/harness/test_wasm_contract.py` fails when a source changed and the binary did not.
-- `python3 tools/build_wasm.py --check` rebuilds the kernels and compares them with the committed files. The CI workflow, the release workflow and `tests/Dockerfile.source` run it. The image build fails when the bytes differ.
-- When the compiler release differs from the one in the lock, the check prints a warning and does not fail. Set `CHDASH_WASM_STRICT=1` to make it fail.
+- `python3 tools/build_wasm.py --check` rebuilds the kernels and compares them with the committed files. The CI workflow, the release workflow (the job `wasm-check`, before the build) and `tests/Dockerfile.source` run it. The image build and the release fail when one byte differs.
+- The check is strict. The lock is part of the change under test, so it never makes the check less strict. When the compiler release differs from the one in the lock, the check fails and says so. Rebuild with `python3 tools/build_wasm.py --docker`. For a local test with another compiler release, set `CHDASH_WASM_LENIENT=1`. The check then prints a warning and does not fail on bytes that differ. A lock that does not match the sources fails in all cases. Never set this variable in a workflow.
 
 ### Rebuild
 
@@ -63,6 +63,7 @@ Without Docker, install `clang-18` and `lld`. Then run `python3 tools/build_wasm
 
 - `wasm.load(name)` fetches `static/wasm/<name>.wasm`. It uses `WebAssembly.instantiateStreaming`. If that fails, it reads the bytes and calls `WebAssembly.instantiate`. It never rejects. A failure gives `null`.
 - `wasm.get(name)` returns the kernel if it is ready now.
+- A kernel computes sizes in 32 bits (`wasm32`). For example, the token array of the highlighter takes 20 bytes for each UTF-16 code unit, so a text of 214,748,364 units makes the size wrap. `putU16`, `putBytes`, `putI32` and `putF64` therefore refuse an array of more than `wasm.maxInputUnits` items (16,777,216) with a `RangeError`, before they copy one item. The caller keeps its JavaScript path.
 - The server sends `.wasm` as `application/wasm`. The staged build adds `?v=<hash>` to the address, and a `.gz` copy for clients that accept gzip.
 - A kernel has its own memory. `kernel.scope(fn)` frees all allocations of `fn` when it returns.
 - `wasm.worker(name, adapterFile)` runs the same kernel in a Worker. It returns `{ call(op, args, transfer), close() }`, or `null` if Workers or the kernel are not available.

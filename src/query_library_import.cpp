@@ -5,11 +5,85 @@
 #include "query_library_rules.hpp"
 
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace chdash {
 namespace qlib {
+
+namespace {
+
+// The most renames of one name in one import: "name (2)" to "name (1000)". A query after that is refused (413).
+constexpr int kMaxRenamesOfOneName = 1000;
+// A suffix " (n)" has at most this many bytes (" (1000)"). The base of a rename is cut so that the whole name fits.
+constexpr size_t kMaxSuffixBytes = 7;
+
+// The key of a name in a folder of one host. It compares the name without the case of ASCII letters, as the rules of the tree do.
+// The folder is part of the key with its length, so that no name joins the folder.
+std::string name_key(const std::optional<std::string>& folder, const std::string& name) {
+  std::string key = folder ? std::to_string(folder->size()) + ":" + *folder : std::string("-");
+  key.push_back('\0');
+  key += fold_ascii(name);
+  return key;
+}
+
+// What an import reads again and again about the state. It is built once for an import, and kept up to date as the import adds folders and
+// queries. Each lookup is then one hash probe. The linear scans of the state made the work of an import grow with the square or the cube of its size,
+// under the lock of the library.
+struct ImportIndex {
+  std::unordered_map<std::string, size_t> folder_at;           // folder id -> position in `folders`, for the folders of every host
+  std::unordered_map<std::string, std::string> folder_by_name;  // name_key(parent, name) -> folder id, for the folders of the host
+  std::unordered_set<std::string> query_names;                  // name_key(folder, name), for the queries of the host
+  std::unordered_set<std::string> used_ids;                     // every folder id and query id of the state
+  std::unordered_map<std::string, int> next_rename;             // name_key(folder, base of the name) -> the next suffix to try
+  std::unordered_map<std::string, int> depth;                   // folder id -> the number of folders from the root to it (memo)
+
+  ImportIndex(const QueryLibraryState& state, const std::string& host) {
+    folder_at.reserve(state.folders.size());
+    for (size_t i = 0; i < state.folders.size(); ++i) {
+      const auto& f = state.folders[i];
+      folder_at.emplace(f.id, i);
+      used_ids.insert(f.id);
+      if (f.host_id == host) folder_by_name.emplace(name_key(f.parent_id, f.name), f.id);
+    }
+    for (const auto& q : state.queries) {
+      used_ids.insert(q.id);
+      if (q.host_id == host) query_names.insert(name_key(q.folder_id, q.name));
+    }
+  }
+
+  const QueryLibraryFolder* folder(const QueryLibraryState& state, const std::string& id) const {
+    const auto it = folder_at.find(id);
+    return it == folder_at.end() ? nullptr : &state.folders[it->second];
+  }
+
+  // The number of folders on the path from `id` up to the root, `id` included (folder_depth of the rules, with a memo).
+  int depth_of(const QueryLibraryState& state, const std::optional<std::string>& id) {
+    if (!id) return 0;
+    std::vector<const QueryLibraryFolder*> chain;
+    int known = 0;
+    std::optional<std::string> current = id;
+    while (current) {
+      const auto memo = depth.find(*current);
+      if (memo != depth.end()) {
+        known = memo->second;
+        break;
+      }
+      const auto* f = folder(state, *current);
+      if (!f) break;
+      chain.push_back(f);
+      if (chain.size() > state.folders.size()) break;  // defensive; cycles are rejected on load
+      current = f->parent_id;
+    }
+    int value = known;
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) depth[(*it)->id] = ++value;
+    return value;
+  }
+};
+
+}  // namespace
 
 ImportOutcome import_into(QueryLibraryState& candidate, const rapidjson::Document& doc, const std::string& host, size_t max_query_bytes,
                           const NewId& new_id, int64_t now) {
@@ -77,6 +151,15 @@ ImportOutcome import_into(QueryLibraryState& candidate, const rapidjson::Documen
     }
   }
 
+  ImportIndex seen(candidate, host);
+  // A new id that no folder and no query of the state has. The index holds the ids, so the check is one probe, not a scan of the state.
+  const auto fresh_id = [&](char prefix) {
+    for (;;) {
+      std::string id = new_id(prefix, candidate);
+      if (seen.used_ids.insert(id).second) return id;
+    }
+  };
+
   std::unordered_map<std::string, std::string> folder_map;  // import id -> server id
   size_t imported_folders = 0;
   size_t merged_folders = 0;
@@ -86,30 +169,31 @@ ImportOutcome import_into(QueryLibraryState& candidate, const rapidjson::Documen
     if (item.parent) {
       const auto mapped = folder_map.find(*item.parent);
       if (mapped != folder_map.end()) parent = mapped->second;
-      else if (const auto* known = find_folder(candidate, *item.parent); known && known->host_id == host) parent = *item.parent;
+      else if (const auto* known = seen.folder(candidate, *item.parent); known && known->host_id == host) parent = *item.parent;
     }
-    const std::string folded = fold_ascii(item.name);
-    const QueryLibraryFolder* existing = nullptr;
-    for (const auto& f : candidate.folders) {
-      if (f.host_id == host && f.parent_id == parent && fold_ascii(f.name) == folded) { existing = &f; break; }
-    }
-    if (existing && copy) {
+    const std::string folder_key = name_key(parent, item.name);
+    const auto existing = seen.folder_by_name.find(folder_key);
+    if (existing != seen.folder_by_name.end() && copy) {
       throw validation(item.field + ".name", "duplicate", "a folder named \"" + item.name + "\" already exists there");
     }
-    if (existing) {
-      folder_map[item.import_id] = existing->id;
+    if (existing != seen.folder_by_name.end()) {
+      folder_map[item.import_id] = existing->second;
       ++merged_folders;
       continue;
     }
     if (candidate.folders.size() >= kQueryLibraryMaxFolders) throw too_large("folders", "too many folders");
-    ensure_depth(candidate, parent, 1, item.field + ".parent_id");
+    if (seen.depth_of(candidate, parent) + 1 > kQueryLibraryMaxFolderDepth) {
+      throw validation(item.field + ".parent_id", "depth", "folders can be nested at most " + std::to_string(kQueryLibraryMaxFolderDepth) + " levels deep");
+    }
     QueryLibraryFolder f;
-    f.id = new_id('f', candidate);
+    f.id = fresh_id('f');
     f.host_id = host;
     f.parent_id = parent;
     f.name = item.name;
     f.created_at_ms = f.updated_at_ms = now;
     folder_map[item.import_id] = f.id;
+    seen.folder_at.emplace(f.id, candidate.folders.size());
+    seen.folder_by_name.emplace(folder_key, f.id);
     candidate.folders.push_back(std::move(f));
     ++imported_folders;
   }
@@ -133,7 +217,7 @@ ImportOutcome import_into(QueryLibraryState& candidate, const rapidjson::Documen
       const std::string ref = json_text(*v);
       const auto mapped = folder_map.find(ref);
       if (mapped != folder_map.end()) q.folder_id = mapped->second;
-      else if (const auto* known = find_folder(candidate, ref); known && known->host_id == host) q.folder_id = ref;
+      else if (const auto* known = seen.folder(candidate, ref); known && known->host_id == host) q.folder_id = ref;
     }
     const std::string key = import_key(q.name, q.sql);
     if (!keys.insert(key).second && !copy) {
@@ -142,16 +226,26 @@ ImportOutcome import_into(QueryLibraryState& candidate, const rapidjson::Documen
     }
     if (candidate.queries.size() >= kQueryLibraryMaxQueries) throw too_large("queries", "too many saved queries");
     if (copy) {
-      const std::string folded = fold_ascii(q.name);
-      for (const auto& other : candidate.queries) {
-        if (other.host_id == host && other.folder_id == q.folder_id && fold_ascii(other.name) == folded) {
-          throw validation(field + ".name", "duplicate", "a query named \"" + q.name + "\" already exists there");
+      if (seen.query_names.count(name_key(q.folder_id, q.name)) != 0) {
+        throw validation(field + ".name", "duplicate", "a query named \"" + q.name + "\" already exists there");
+      }
+    } else if (seen.query_names.count(name_key(q.folder_id, q.name)) != 0) {
+      // The name is taken in the folder. Take the first " (n)" that is free. The next suffix to try is kept for each name, so the work of all the
+      // renames of one name is linear. The key of the counter cuts the name where a rename cuts it: two long names that end the same after the cut
+      // share the counter. The number of renames of one name is bounded.
+      int& n = seen.next_rename.try_emplace(name_key(q.folder_id, truncate_utf8(q.name, kQueryLibraryMaxNameBytes - kMaxSuffixBytes)), 2).first->second;
+      for (;; ++n) {
+        if (n > kMaxRenamesOfOneName) throw too_large(field + ".name", "too many queries with the name \"" + q.name + "\" in the import");
+        const std::string suffix = " (" + std::to_string(n) + ")";
+        std::string renamed = truncate_utf8(q.name, kQueryLibraryMaxNameBytes - suffix.size()) + suffix;
+        if (seen.query_names.count(name_key(q.folder_id, renamed)) == 0) {
+          q.name = std::move(renamed);
+          break;
         }
       }
-    } else {
-      q.name = unique_query_name(candidate, host, q.folder_id, q.name);
     }
-    q.id = new_id('q', candidate);
+    seen.query_names.insert(name_key(q.folder_id, q.name));
+    q.id = fresh_id('q');
     const auto created = read_opt_int(member(item, "created_at_ms"), field + ".created_at_ms");
     const auto updated = read_opt_int(member(item, "updated_at_ms"), field + ".updated_at_ms");
     q.created_at_ms = created.value_or(now);

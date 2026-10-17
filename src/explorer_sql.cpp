@@ -239,6 +239,14 @@ SqlStatement table_summary_sql(const std::string& database, const std::string& t
   return out;
 }
 
+SqlStatement table_engine_full_sql(const std::string& database, const std::string& table) {
+  SqlStatement out;
+  const std::string db = out.params.text(database);
+  const std::string tbl = out.params.text(table);
+  out.sql = "SELECT toString(engine_full) FROM system.tables WHERE database = " + db + " AND name = " + tbl + " LIMIT 1";
+  return out;
+}
+
 SqlStatement buffer_target_rows_sql(const std::string& database, const std::string& table) {
   SqlStatement out;
   const std::string db = out.params.text(database);

@@ -151,3 +151,21 @@ GRANT SELECT ON system.numbers TO chdash_mcp_ro1;
 GRANT SELECT ON system.databases TO chdash_mcp_ro1;
 GRANT SELECT ON system.tables TO chdash_mcp_ro1;
 GRANT SELECT ON system.columns TO chdash_mcp_ro1;
+
+-- A runner and an MCP user that hold the privilege displaySecretsInShowAndSelect (tests/config/privileges.hcl, hosts "secretsrunner" and
+-- "secretstool"). With the server setting display_secrets_in_show_and_select and the setting format_display_secrets_in_show_and_select, such a user
+-- reads the secrets that ClickHouse masks in create_table_query, engine_full and as_select. The access audit must report the privilege.
+CREATE USER IF NOT EXISTS chdash_runner_secrets IDENTIFIED WITH plaintext_password BY 'runner_secrets_test';
+CREATE USER IF NOT EXISTS chdash_tool_secrets IDENTIFIED WITH plaintext_password BY 'tool_secrets_test';
+ALTER USER chdash_runner_secrets IDENTIFIED WITH plaintext_password BY 'runner_secrets_test';
+ALTER USER chdash_tool_secrets IDENTIFIED WITH plaintext_password BY 'tool_secrets_test';
+REVOKE ALL ON *.* FROM chdash_runner_secrets;
+REVOKE ALL ON *.* FROM chdash_tool_secrets;
+GRANT SELECT ON chdash_ui.* TO chdash_runner_secrets;
+GRANT SHOW DATABASES ON *.* TO chdash_runner_secrets;
+GRANT SHOW TABLES ON *.* TO chdash_runner_secrets;
+GRANT SHOW COLUMNS ON *.* TO chdash_runner_secrets;
+GRANT displaySecretsInShowAndSelect ON *.* TO chdash_runner_secrets;
+GRANT SELECT ON chdash_ui.* TO chdash_tool_secrets;
+GRANT displaySecretsInShowAndSelect ON *.* TO chdash_tool_secrets;
+

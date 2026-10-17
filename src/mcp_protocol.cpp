@@ -315,7 +315,22 @@ bool mcp_error_retryable(const std::string& code) {
   return code == "timeout" || code == "unavailable" || code == "api_unavailable";
 }
 
-McpToolOutcome mcp_tool_error(const std::string& code, const std::string& message) {
+std::string mcp_error_message(const std::string& code) {
+  std::string text;
+  if (code == "timeout") text = "the statement took longer than its time limit";
+  else if (code == "unavailable") text = "ClickHouse could not be reached";
+  else if (code == "permission_denied") text = "the ClickHouse user of MCP lacks a grant for this statement";
+  else if (code == "readonly") text = "ClickHouse refused the statement: the MCP user only reads";
+  else if (code == "memory_limit") text = "the statement used more memory than its limit";
+  else if (code == "read_limit") text = "the statement read more rows or bytes than its limit";
+  else if (code == "not_found") text = "a database, a table, a column or a function of the statement does not exist or is not visible";
+  else if (code == "syntax_error") text = "ClickHouse could not parse the statement";
+  else if (code == "cancelled") text = "the statement was stopped";
+  else text = "the statement failed";
+  return text + " (" + code + "); the text of ClickHouse is in error.untrusted.detail";
+}
+
+McpToolOutcome mcp_tool_error(const std::string& code, const std::string& message, const std::string& untrusted_detail) {
   McpToolOutcome out;
   out.is_error = true;
   out.error_code = code;
@@ -327,6 +342,12 @@ McpToolOutcome mcp_tool_error(const std::string& code, const std::string& messag
   w.Key("code"); put(w, code);
   w.Key("message"); put(w, message);
   w.Key("retryable"); w.Bool(mcp_error_retryable(code));
+  if (!untrusted_detail.empty()) {
+    w.Key("untrusted");
+    w.StartObject();
+    w.Key("detail"); put(w, untrusted_detail);
+    w.EndObject();
+  }
   w.EndObject();
   w.EndObject();
   out.json.assign(sb.GetString(), sb.GetSize());
@@ -745,9 +766,9 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
         result.outcome = mcp_tool_error("internal_error", "the tool failed; see the ChDash log");
       }
     }
-    // The data of the result has its control characters replaced.
+    // The data of the result has its control characters replaced, also in an error.
     // data_notice comes first when the result has an untrusted object (contract 5.2).
-    if (!result.outcome.is_error) mcp_frame_untrusted(result.outcome.json);
+    mcp_frame_untrusted(result.outcome.json);
     const bool structured = modern || protocol_has_structured_content(request_version);
     result.body = tool_call_body(*id, result.outcome, structured, modern);
     return result;

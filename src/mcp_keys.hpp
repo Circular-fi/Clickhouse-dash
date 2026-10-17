@@ -37,6 +37,7 @@ inline constexpr size_t kMcpNameMaxBytes = 32;
 inline constexpr const char* kMcpNamePattern = "^[a-z0-9][a-z0-9_-]{0,31}$";
 inline constexpr int kMcpKeyFileVersion = 1;
 inline constexpr size_t kMcpMaxUiKeys = 1000;
+inline constexpr size_t kMcpCreatorMaxBytes = 256;  // the longest `sub` of an identity token (access_identity.cpp)
 
 using McpHash = std::array<uint8_t, 32>;
 
@@ -48,6 +49,9 @@ struct McpKey {
   std::string secret_hint;  // the first characters of the token; empty for a key of a file that did not keep them
   // The user for whom the key operates (mcp_key.subject). An empty value means none.
   std::string subject;
+  // A UI key: the subject of the access of humans that made the key (the `sub` of its identity token). Empty in the open mode.
+  // In the authzen mode, the key works only while the PDP gives this subject every action that the tools of the key use.
+  std::string creator;
   std::vector<std::string> hosts;
   std::vector<std::string> tools;
   std::vector<std::string> databases;
@@ -213,7 +217,8 @@ public:
   std::vector<McpKey> list();
 
   // The secret is given once, in the Result of create. The store keeps only its hash.
-  Result create(const McpKeyInput& input, int64_t now);
+  // `creator` is the subject of the access of humans that makes the key (empty in the open mode).
+  Result create(const McpKeyInput& input, int64_t now, const std::string& creator = std::string());
   Result remove(const std::string& id);
 
   // The comparison of the hash of `token` with every key takes constant time.

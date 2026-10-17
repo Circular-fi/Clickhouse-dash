@@ -8,6 +8,7 @@
 //   wasm.ops[name]            the functions of a kernel's adapter: ops[name].fn(kernel, args) -> result
 //   wasm.worker(name) { call(op, args, transfer) -> Promise, close() }: the same kernel in a Worker, with the adapter app_wasm_<name>.js
 //   wasm.stats                counters (loads, failures, streaming fallbacks) for the tests
+//   wasm.maxInputUnits        the most items that putU16, putBytes, putI32 and putF64 copy into a kernel (a larger input throws a RangeError)
 //
 // A kernel is { name, exports, view(), mark(), release(m), scope(fn), alloc(bytes), putU16(text), putBytes(u8),
 // putI32(a), putF64(a) }. Pointers are byte offsets into the instance memory. view() returns fresh typed views
@@ -28,6 +29,15 @@ const imports = () => ({
 });
 
 const urlOf = assetUrl;
+
+// The most items (UTF-16 code units, numbers or bytes) that the page copies into a kernel in one array. The kernels compute sizes in 32 bits (wasm32).
+// A kernel multiplies a count by the size of its records without a check: the token array of the highlighter takes 20 bytes for each code unit,
+// so a text of 214,748,364 units makes that size wrap, and the kernel then writes past its allocation. The page refuses an input above this limit
+// before it copies one item. The caller then keeps its JavaScript path. The limit is far above the inputs of the page (a query is at most 64 MiB).
+const MAX_INPUT_UNITS = 1 << 24;
+const checkInput = (name, count) => {
+  if (count > MAX_INPUT_UNITS) throw new RangeError(`The input of the WebAssembly kernel ${name} is too large (${count} items, the limit is ${MAX_INPUT_UNITS})`);
+};
 
 function wrap(name, instance) {
   const exports = instance.exports;
@@ -68,22 +78,26 @@ function wrap(name, instance) {
     // The UTF-16 code units of a string: { ptr, length }. Lone surrogates survive, so offsets stay JavaScript string indexes.
     putU16(text) {
       const s = String(text);
+      checkInput(name, s.length);
       const ptr = alloc(s.length * 2);
       const u16 = new Uint16Array(memory.buffer, ptr, s.length);
       for (let i = 0; i < s.length; i += 1) u16[i] = s.charCodeAt(i);
       return { ptr, length: s.length };
     },
     putBytes(bytes) {
+      checkInput(name, bytes.byteLength);
       const ptr = alloc(bytes.byteLength);
       new Uint8Array(memory.buffer, ptr, bytes.byteLength).set(bytes);
       return ptr;
     },
     putI32(values) {
+      checkInput(name, values.length);
       const ptr = alloc(values.length * 4);
       new Int32Array(memory.buffer, ptr, values.length).set(values);
       return ptr;
     },
     putF64(values) {
+      checkInput(name, values.length);
       const ptr = alloc(values.length * 8);
       new Float64Array(memory.buffer, ptr, values.length).set(values);
       return ptr;
@@ -219,4 +233,4 @@ function worker(name, opsFile = `app_wasm_${name}.js`) {
   return entry.ready;
 }
 
-export const wasm = { supported, load, get, ops, worker, stats, urls, instantiate: (bytes) => WebAssembly.instantiate(bytes, imports()).then((r) => wrap("bytes", r.instance)) };
+export const wasm = { supported, load, get, ops, worker, stats, urls, maxInputUnits: MAX_INPUT_UNITS, instantiate: (bytes) => WebAssembly.instantiate(bytes, imports()).then((r) => wrap("bytes", r.instance)) };

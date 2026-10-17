@@ -138,6 +138,41 @@ test('toHtml and the editor overlay give the same HTML on both paths, and short 
   expect(result.minChars).toBeGreaterThan(200);
 });
 
+// The kernels compute sizes in 32 bits (wasm32). The token array of the highlighter takes 20 bytes for each code unit, so a text of 214,748,364 units
+// or more makes that size wrap. The adapter refuses a text that is too long before it copies one unit into the memory of the kernel.
+// The page then keeps its JavaScript path.
+test('a text that is too long for the kernel is refused by the adapter and stays on the JavaScript path', async ({ page }) => {
+  test.setTimeout(60_000);
+  await openApp(page);
+  expect((await loadKernel(page)).loaded).toBe(true);
+  const result = await page.evaluate(() => {
+    const kernel = window.ChDash.wasm.get('highlight');
+    const limit = window.ChDash.wasm.maxInputUnits;
+    const out = { limit, refused: null, memoryBefore: kernel.memory.buffer.byteLength, fits: null };
+    try {
+      kernel.putU16('x'.repeat(limit + 1));
+      out.refused = false;
+    } catch (error) {
+      out.refused = error instanceof RangeError;
+    }
+    out.memoryAfter = kernel.memory.buffer.byteLength;
+    // The text that fits is copied, and the kernel answers.
+    const small = window.ChDash.wasm.ops.highlight.run(kernel, { text: 'SELECT 1' });
+    out.fits = small.status === 0 && small.count > 0;
+    // The lexer of the page answers with its own path for the text that is refused: no exception comes out of toHtml.
+    const html = window.ChDash.highlight.toHtml('x'.repeat(Math.min(limit + 1, 3_000_000)));
+    out.htmlLength = html.length;
+    return out;
+  });
+  expect(result.limit).toBeGreaterThan(1_000_000);
+  expect(result.limit).toBeLessThan(214_748_364);
+  expect(result.refused).toBe(true);
+  // The refusal came before any growth of the memory of the kernel.
+  expect(result.memoryAfter).toBe(result.memoryBefore);
+  expect(result.fits).toBe(true);
+  expect(result.htmlLength).toBeGreaterThan(0);
+});
+
 test('without the kernel (the file is blocked) long SQL is still coloured by JavaScript', async ({ page }) => {
   await page.route('**/wasm/highlight.wasm*', (route) => route.abort());
   await openApp(page);

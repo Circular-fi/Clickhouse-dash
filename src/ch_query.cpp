@@ -157,9 +157,9 @@ class Runner {
     }
 
     // A strict read-only statement (the access of humans, docs/access.md) never runs without readonly = 1.
-    // It never runs on a connection that refused the settings of ChDash before.
+    // It always gets all the settings of its scope, also on a connection that refused the settings of ChDash before.
     // It never runs without a profile.
-    // It never runs in the second attempt below.
+    // It never runs in the second attempt below, and it never changes the state of the connection.
     const bool strict = limits && limits->read_only_strict;
     bool profile_read_only = false;
     std::vector<std::pair<std::string, std::string>> settings;
@@ -170,7 +170,7 @@ class Runner {
       }
       if (state) {
         profile_read_only = state->profile.known && state->profile.readonly == 1;
-        if (!state->settings_refused) settings = ch_query_settings(*limits, state->profile, std::chrono::steady_clock::now());
+        if (strict || !state->settings_refused) settings = ch_query_settings(*limits, state->profile, std::chrono::steady_clock::now());
       }
     }
     if (strict && !profile_read_only &&
@@ -197,19 +197,13 @@ class Runner {
       // "Cannot modify 'x' setting in readonly mode" names the setting.
       //
       // "Cannot execute query in readonly mode" means that the statement itself is refused (readonly = 2 and a write). It must stay an error.
+      //
+      // A strict statement fails closed. The error can come from a SETTINGS clause of the statement itself, which names a setting
+      // that ChDash also sent. Such an error must not remove the bounds of the later statements of the connection, which other
+      // subjects can lease.
+      if (strict) throw;
       if (!is_setting_refusal(error.GetCode(), error.what(), sent)) throw;
       update_state(client_, [](ConnectionState& value) { value.settings_refused = true; });
-      if (strict && !profile_read_only) {
-        // Once more with readonly = 1 alone. When the server refuses it too, the statement fails (fail closed).
-        clickhouse::Query read_only = query;
-        if (query.GetQuerySettings().count("readonly") == 0) {
-          clickhouse::QuerySettingsField field;
-          field.value = "1";
-          read_only.SetSetting("readonly", field);
-        }
-        execute(read_only);
-        return;
-      }
       execute(query);
     }
   }

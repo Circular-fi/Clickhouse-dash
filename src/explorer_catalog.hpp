@@ -406,9 +406,10 @@ struct ExplorerPreview {
 
 class AclView;
 
-// The identities of the two connections, given by acl_identity_key of their URIs. The caches use these identities as keys (DdlTextCache).
+// The identity of the runner, given by acl_identity_key of its URI. The caches use it as a key (DdlTextCache).
+// ClickHouse masks the secrets of the DDL texts for each user, so the texts are the view of the runner. The system account has no identity here:
+// it gives no text.
 struct ExplorerIdentities {
-  std::string system;
   std::string runner;
 };
 

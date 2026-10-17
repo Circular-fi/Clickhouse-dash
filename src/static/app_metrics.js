@@ -34,8 +34,14 @@ const KIND_LABEL = {
 const KIND_BADGE = { gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exp. histogram", summary: "Summary" };
 // The kind and the unit of a metric are muted text, without fill. The catalog lists them on every row.
 // Colour is kept for signal.
-const metaText = (text, title, className) => `<span class="metricsMeta ${className}" title="${esc(title)}">${esc(text)}</span>`;
-const kindText = (kind, text, title = "") => metaText(text, title || KIND_LABEL[kind] || kind, `metricsBadge metricsBadge--${kind}`);
+const metaText = (text, title, className) => `<span class="metricsMeta ${esc(className)}" title="${esc(title)}">${esc(text)}</span>`;
+// A metric type is one of the keys of KIND_LABEL. The address can carry any text as the kind of a panel. Only a known kind picks a badge class.
+// The check uses the own keys of the table, so a name such as "constructor" is not a kind.
+const knownKind = (kind) => (Object.prototype.hasOwnProperty.call(KIND_LABEL, kind) ? kind : "");
+const kindText = (kind, text, title = "") => {
+  const known = knownKind(kind);
+  return metaText(text, title || KIND_LABEL[known] || kind, known ? `metricsBadge metricsBadge--${known}` : "metricsBadge");
+};
 const AGG_LABEL = {
   avg: "Average", min: "Min", max: "Max", last: "Last value", sum: "Sum", rate: "Rate (per second)", increase: "Increase",
   count_rate: "Count rate (per second)", count: "Count",
@@ -237,7 +243,7 @@ function panelFromParams(params) {
   return newPanel({
     service: params.get("service") || "",
     metric: params.get("metric") || "",
-    kind: params.get("kind") || "",
+    kind: knownKind(params.get("kind") || ""),
     agg: params.get("agg") || "",
     groupBy: String(params.get("group_by") || "").split(",").map((s) => s.trim()).filter(Boolean),
     filters,

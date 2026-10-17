@@ -448,6 +448,10 @@ void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> l
   w.Key("subject");
   if (key.subject.empty()) w.Null();
   else write_string(w, key.subject);
+  // The subject that made a UI key in the authzen mode. The value is null for a key of the configuration and in the open mode.
+  w.Key("creator");
+  if (key.creator.empty()) w.Null();
+  else write_string(w, key.creator);
   write_optional_time(w, "expires_at", key.expires_at);
   write_optional_time(w, "created_at", key.created_at);
   write_optional_time(w, "last_used_at", last_used);
@@ -469,6 +473,9 @@ std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {
     w.Key("name"); write_string(w, key.name);
     w.Key("secret_sha256"); write_string(w, mcp_hash_hex(key.secret_hash));
     w.Key("secret_hint"); write_string(w, key.secret_hint);
+    if (!key.creator.empty()) {
+      w.Key("creator"); write_string(w, key.creator);
+    }
     write_string_list(w, "hosts", key.hosts);
     write_string_list(w, "tools", key.tools);
     write_string_list(w, "databases", key.databases);
@@ -557,6 +564,11 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
       file_error("keys[" + std::to_string(index) + "] holds a secret in clear: ChDash stores only its hash. Delete the file and make the keys again");
     }
     key.secret_hint = file_string(item, "secret_hint", index, false);
+    key.creator = file_string(item, "creator", index, false);
+    if (key.creator.size() > kMcpCreatorMaxBytes ||
+        std::any_of(key.creator.begin(), key.creator.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7f; })) {
+      file_error("keys[" + std::to_string(index) + "].creator must be a subject of at most 256 bytes with no control character");
+    }
     if (!valid_ui_id(key.id)) file_error("keys[" + std::to_string(index) + "].id must look like ui_0a1b2c3d4e5f");
     if (!mcp_valid_key_name(key.name)) file_error("keys[" + std::to_string(index) + "].name is not a valid key name");
     if (key.secret_hint.size() > 32) {
@@ -726,7 +738,7 @@ std::vector<McpKey> McpKeyStore::list() {
   return out;
 }
 
-McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
+McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now, const std::string& creator) {
   std::lock_guard<std::mutex> writing(write_mu_);
   std::unique_lock<std::mutex> lock(mu_);
   if (!manage_from_ui()) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
@@ -735,6 +747,7 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
 
   McpKey key;
   key.source = "ui";
+  key.creator = creator;
   apply_input(input, &key);
   if (auto err = mcp_validate_key(key, options_.context)) return invalid(*err);
   // Only the running server knows this.

@@ -32,8 +32,10 @@ access {
 
 mcp {
   enabled = true
+  # The page makes keys too: test_access.py checks that a key never has more than its creator.
+  storage_file = "/tmp/chdash-access-mcp-keys.json"
   keys {
-    mode = "static"
+    mode = "hybrid"
   }
   mcp_key "access" {
     token_file = "/run/secrets/chdash-test/mcp-key-second-host"

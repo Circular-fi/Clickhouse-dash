@@ -6,6 +6,7 @@
 //   - sends Authorization: Bearer <token>, X-Request-ID and a traceparent;
 //   - fails closed: no answer before the timeout, a status that is not 200 or a body that is not an answer gives false;
 //   - keeps an answer of the PDP for cache_ttl at most (subject, action and resource are the key), never a failure;
+//   - bounds the cache by a count of entries and by a count of bytes (cache_entries and cache_bytes);
 //   - writes one log line access.decision for each decision (subject, action, resource, decision, source).
 
 #include <chrono>
@@ -83,6 +84,9 @@ struct PdpOptions {
   // 0: no cache.
   std::chrono::milliseconds cache_ttl{30000};
   size_t cache_entries = 16384;
+  // The largest sum of the bytes of the entries (cache_entry_bytes). The client chooses the resource id, so a count of entries
+  // alone does not bound the memory.
+  size_t cache_bytes = 8 * 1024 * 1024;
   // The largest body of an answer.
   size_t max_answer_bytes = 256 * 1024;
 };
@@ -99,6 +103,12 @@ public:
   static std::string request_body(const std::string& subject, const std::vector<AccessQuestion>& questions);
   // The decisions of an answer, in the order of the questions; false when the body is not a valid answer for `count` questions.
   static bool parse_answer(const std::string& body, size_t count, std::vector<bool>* decisions);
+  // The bytes that one entry of the cache counts: its key and a fixed part for the node of the map.
+  static size_t cache_entry_bytes(const std::string& key);
+
+  // The entries and the bytes that the cache holds now. For the tests.
+  size_t cached_entries();
+  size_t cached_bytes();
 
 private:
   std::string cache_key(const std::string& subject, const AccessQuestion& question) const;
@@ -108,6 +118,7 @@ private:
   std::function<void(const PdpCall&)> on_call_;
   std::mutex mu_;
   std::unordered_map<std::string, std::pair<bool, std::chrono::steady_clock::time_point>> cache_;
+  size_t cache_used_bytes_ = 0;  // the sum of cache_entry_bytes of the keys of cache_
 };
 
 } // namespace chdash

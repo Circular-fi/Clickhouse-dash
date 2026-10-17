@@ -85,7 +85,11 @@ struct McpToolOutcome {
   std::string error_code;
 };
 
-McpToolOutcome mcp_tool_error(const std::string& code, const std::string& message);
+// `message` is text that ChDash writes. `untrusted_detail` is text that ChDash did not write (an error of ClickHouse or of a
+// route): when it is not empty, the error object holds it as untrusted.detail (contract 5.2).
+McpToolOutcome mcp_tool_error(const std::string& code, const std::string& message, const std::string& untrusted_detail = std::string());
+// The message of a tool error, from its code only. ChDash writes it: it never holds the text of ClickHouse.
+std::string mcp_error_message(const std::string& code);
 // A failure that a retry can repair: timeout, unavailable, api_unavailable.
 bool mcp_error_retryable(const std::string& code);
 

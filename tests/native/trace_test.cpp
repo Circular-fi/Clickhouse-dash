@@ -516,14 +516,14 @@ void test_index_without_filters_takes_the_newest_traces() {
   FakeDb db;
   const auto a = scope_of(kAStart, kAEnd);
   db.on("GROUP BY TraceId LIMIT 20001",
-        {{"t1", "1789210799000000000"}, {"t2", "1789210798000000000"}, {"t3", "1789210797000000000"}, {"t4", "1789210796000000000"}}, 1);
-  db.on("AS trace_bounds", summary_rows({"t1", "t2", "t3"}));
+        {{"e1", "1789210799000000000"}, {"e2", "1789210798000000000"}, {"e3", "1789210797000000000"}, {"e4", "1789210796000000000"}}, 1);
+  db.on("AS trace_bounds", summary_rows({"e1", "e2", "e3"}));
   const SearchOutcome out = search_with(db, a, false, 3);
   CHECK_EQ(out.search_path, std::string("trace_index"));
   CHECK_EQ(out.rank_by, std::string("newest_index_row"));
   CHECK(out.fallback_reason.empty());
   CHECK_EQ(out.rows.size(), size_t(3));
-  CHECK_EQ(out.rows[0].trace_id, std::string("t1"));
+  CHECK_EQ(out.rows[0].trace_id, std::string("e1"));
   CHECK_EQ(out.rows[0].operation, std::string("GET /home"));
   CHECK_EQ(out.rows[0].service_stats.size(), size_t(2));
   // The services of a trace, by span count and then by name.
@@ -539,19 +539,19 @@ void test_index_without_filters_takes_the_newest_traces() {
   // The statement takes the three traces of the page as its parameter.
   CHECK_EQ(db.params[1].size(), size_t(1));
   CHECK_EQ(db.params[1][0].first, std::string("ids"));
-  CHECK_EQ(db.params[1][0].second, std::string("['t1', 't2', 't3']"));
-  CHECK(db.sqls[1].find("'t1'") == std::string::npos);
+  CHECK_EQ(db.params[1][0].second, std::string("['e1', 'e2', 'e3']"));
+  CHECK(db.sqls[1].find("'e1'") == std::string::npos);
 }
 
 void test_a_filter_tests_the_traces_of_the_index_in_pages() {
   FakeDb db;
   const auto service = scope_of(kAStart, kAEnd, kServiceFilter);
   db.on("GROUP BY TraceId LIMIT 20001",
-        {{"t1", "1789210797855243093"}, {"t2", "1789210000000000000"}, {"t3", "1789209500000000000"}, {"t4", "1789209000000000000"},
-         {"t5", "1789208771633818901"}},
+        {{"e1", "1789210797855243093"}, {"e2", "1789210000000000000"}, {"e3", "1789209500000000000"}, {"e4", "1789209000000000000"},
+         {"e5", "1789208771633818901"}},
         1);
-  db.on("AS batch_bounds", {{"t2"}, {"t4"}});
-  db.on("AS trace_bounds", summary_rows({"t2", "t4"}));
+  db.on("AS batch_bounds", {{"e2"}, {"e4"}});
+  db.on("AS trace_bounds", summary_rows({"e2", "e4"}));
   const SearchOutcome out = search_with(db, service, true, 2);
   CHECK_EQ(out.search_path, std::string("trace_index_filtered"));
   CHECK_EQ(out.rank_by, std::string("newest_index_row"));
@@ -564,7 +564,7 @@ void test_a_filter_tests_the_traces_of_the_index_in_pages() {
   }
   CHECK_EQ(db.sqls[match_at], fill(golden::kBatchMatch, {{"OLDEST", "1789208771633818901"}, {"NEWEST", "1789210797855243093"}}));
   // The traces that match keep the rank of the index. The order of the answer does not change this rank.
-  CHECK_EQ(db.params.back()[0].second, std::string("['t2', 't4']"));
+  CHECK_EQ(db.params.back()[0].second, std::string("['e2', 'e4']"));
 }
 
 // The index of a busy window: every slice holds 20,000 traces, and none of them matches.
@@ -1048,7 +1048,8 @@ void test_the_deltas_compare_two_samples() {
   TestCaches cache;
   TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
-  db.on("count() OVER (PARTITION BY in_box)", {{"i1", "1", "40"}, {"i2", "1", "40"}, {"o1", "0", "400"}, {"o2", "0", "400"}});
+  // The row "b3'q" is data that is not a trace id: the samples keep it, and no statement binds it again.
+  db.on("count() OVER (PARTITION BY in_box)", {{"a1", "1", "40"}, {"a2", "1", "40"}, {"b1", "0", "400"}, {"b2", "0", "400"}, {"b3'q", "0", "400"}});
   db.on("ARRAY JOIN top AS tv",
         {{"span", "http.route", "2", "2", "2", "2", "/cart", "2", "0"}, {"span", "http.route", "2", "2", "2", "2", "/home", "0", "2"},
          {"column", "StatusCode", "1", "2", "2", "2", "Error", "2", "0"}});
@@ -1064,7 +1065,7 @@ void test_the_deltas_compare_two_samples() {
   const auto answer = service.deltas(context, trace_host(), request);
   CHECK(answer);
   CHECK_EQ(answer.value->samples.ids_in.size(), size_t(2));
-  CHECK_EQ(answer.value->samples.ids_out.size(), size_t(2));
+  CHECK_EQ(answer.value->samples.ids_out.size(), size_t(3));
   CHECK_EQ(answer.value->samples.total_out, uint64_t(400));
   CHECK_EQ(answer.value->ranking.ranked.size(), size_t(2));
   // Both keys explain all of the difference (a score of 102). The column of the table comes first.
@@ -1075,9 +1076,9 @@ void test_the_deltas_compare_two_samples() {
   const ChParams& sent = db.params.back();
   CHECK_EQ(sent.size(), size_t(2));
   CHECK_EQ(sent[0].first, std::string("ids_in"));
-  CHECK_EQ(sent[0].second, std::string("['i1', 'i2']"));
-  CHECK_EQ(sent[1].second, std::string("['i1', 'i2', 'o1', 'o2']"));
-  CHECK(db.sqls.back().find("'i1'") == std::string::npos);
+  CHECK_EQ(sent[0].second, std::string("['a1', 'a2']"));
+  CHECK_EQ(sent[1].second, std::string("['a1', 'a2', 'b1', 'b2']"));
+  CHECK(db.sqls.back().find("'a1'") == std::string::npos);
   // The JSON of the answer.
   rapidjson::Document doc;
   doc.Parse(deltas_json(*answer.value).c_str());
@@ -2624,10 +2625,10 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   FakeDb db;
   const auto errors = scope_of(kAStart, kAEnd, " AND StatusCode = 'Error'");
   const int64_t newest = kAEnd * kNsPerMs;
-  db.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, newest), 1);
-  db.on("AS batch_bounds", {{"h3"}, {"h7"}});
+  db.on("GROUP BY TraceId LIMIT 20001", hits_of("e", 20000, newest), 1);
+  db.on("AS batch_bounds", {{"e3"}, {"e7"}});
   // The span ranking of the completion: three older traces that match.
-  db.on("argMinIf(SpanName", summary_rows({"h3", "h7", "c1", "c2", "c3"}));
+  db.on("argMinIf(SpanName", summary_rows({"e3", "e7", "c1", "c2", "c3"}));
   db.on("NOT IN {excluded:Array(String)}", {{"c1", "1789208000000000000", "0"}, {"c2", "1789207900000000000", "0"}, {"c3", "1789207800000000000", "0"}});
   const SearchOutcome out = search_traces(db, errors, false, 5, SearchBudget{}, 50);
   CHECK_EQ(out.search_path, std::string("trace_index_then_spans"));
@@ -2651,12 +2652,12 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   CHECK(rank.find("LIMIT 3") != std::string::npos);
   CHECK_EQ(db.params[rank_at].size(), size_t(1));
   CHECK_EQ(db.params[rank_at][0].first, std::string("excluded"));
-  CHECK_EQ(db.params[rank_at][0].second, std::string("['h3', 'h7']"));
+  CHECK_EQ(db.params[rank_at][0].second, std::string("['e3', 'e7']"));
   // The summary is the one of the index. The traces are of two kinds, so the summary has the ids of both.
-  CHECK_EQ(db.params[summary_at][0].second, std::string("['h3', 'h7', 'c1', 'c2', 'c3']"));
+  CHECK_EQ(db.params[summary_at][0].second, std::string("['e3', 'e7', 'c1', 'c2', 'c3']"));
   // The code keeps nothing when no trace matches. The whole window is ranked by the spans, as before.
   FakeDb none;
-  none.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, newest), 1);
+  none.on("GROUP BY TraceId LIMIT 20001", hits_of("e", 20000, newest), 1);
   none.on("argMinIf(SpanName", summary_rows({"w1"}));
   none.on("ORDER BY min(Timestamp) DESC LIMIT 5", {{"w1", "1789210000000000000", "0"}});
   const SearchOutcome whole = search_traces(none, errors, false, 5, SearchBudget{}, 50);
@@ -2730,7 +2731,7 @@ void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
   const auto wide = scope_of(kCStart, kCEnd, kServiceFilter);
   RankBounds bounds;
   bounds.upper_ns = kCEnd * kNsPerMs - 3600LL * 1000 * kNsPerMs;
-  bounds.excluded = {"x1", "x2"};
+  bounds.excluded = {"d1", "d2"};
   db.on("ORDER BY min(Timestamp) DESC LIMIT 18", {{"a", "1789250000000000000", "0"}, {"b", "1789249000000000000", "0"}}, 1);
   db.on("SELECT DISTINCT toString(TraceId)", {{"b"}});
   db.on("ORDER BY min(Timestamp) DESC LIMIT 2", {{"a", "1789250000000000000", "0"}, {"d", "1789240000000000000", "0"}});
@@ -2755,6 +2756,27 @@ void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
   rank_traces_by_start(plain, scope_of(kAStart, kAEnd), false, 3);
   CHECK(plain.sqls[0].find("NOT IN {excluded") == std::string::npos && plain.sqls[0].find("Timestamp <= fromUnixTimestamp64Nano(") == std::string::npos);
   CHECK(plain.params[0].empty());
+}
+
+// An id that the search read from the data is bound again as an Array(String) parameter. clickhouse-cpp writes the quote mark and the backslash of
+// such a text in a form that the server reads another way, so one poisoned row failed the whole search. Only a hexadecimal id (the form of OpenTelemetry) is bound.
+void test_an_id_that_is_not_hexadecimal_is_never_bound_in_an_array() {
+  const std::string good = "3bf7651916cd43dd8448eb211c80319c";
+  const auto params = trace_ids_params({good, "v11'quote", "ab\\cd", "", "ABCDEF01", "zz", std::string(65, 'a')});
+  CHECK_EQ(params.size(), size_t(1));
+  CHECK_EQ(params[0].first, std::string("ids"));
+  CHECK_EQ(params[0].second, std::string("['" + good + "', 'ABCDEF01']"));
+  CHECK_EQ(trace_ids_params({}).front().second, std::string("[]"));
+  // The ids that the ranking excludes come from the data too.
+  FakeDb db;
+  db.on("ORDER BY min(Timestamp) DESC LIMIT 3", {});
+  RankBounds bounds;
+  bounds.upper_ns = kAEnd * kNsPerMs;
+  bounds.excluded = {"a1", "b'2", "c3"};
+  rank_traces_by_start(db, scope_of(kAStart, kAEnd), false, 3, bounds);
+  CHECK(!db.params.empty() && !db.params[0].empty());
+  CHECK_EQ(db.params[0][0].first, std::string("excluded"));
+  CHECK_EQ(db.params[0][0].second, std::string("['a1', 'c3']"));
 }
 
 }  // namespace
@@ -2838,6 +2860,7 @@ int main() {
   RUN(test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones);
   RUN(test_a_search_that_runs_out_of_time_answers_with_what_it_found);
   RUN(test_the_ranking_of_the_older_part_is_exact_for_a_wide_window);
+  RUN(test_an_id_that_is_not_hexadecimal_is_never_bound_in_an_array);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

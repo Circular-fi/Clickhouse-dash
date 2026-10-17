@@ -21,12 +21,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -832,6 +834,53 @@ void test_the_import_into_a_state() {
   CHECK(run("{}") == "accepted");
 }
 
+// An import does bounded work. Many queries with one name did cubic work under the lock of the library (each rename scanned every
+// query for each trial of a suffix). The work now grows with the size of the import.
+void test_an_import_of_queries_with_the_same_name_does_bounded_work() {
+  using namespace chdash::qlib;
+  int next = 0;
+  const NewId new_id = [&](char prefix, const chdash::QueryLibraryState&) { return std::string(1, prefix) + "_b" + std::to_string(++next); };
+  // Three names, 1000 queries each. The first query of a name keeps it. The others get " (2)" to " (1000)".
+  std::string text = "{\"queries\":[";
+  const char* const names[] = {"alpha", "beta", "gamma"};
+  for (int i = 0; i < 1000; ++i) {
+    for (const char* name : names) {
+      if (text.back() != '[') text += ",";
+      text += std::string("{\"name\":\"") + name + "\",\"sql\":\"SELECT " + std::to_string(i) + "\"}";
+    }
+  }
+  text += "]}";
+  const auto doc = parsed(text.c_str());
+  chdash::QueryLibraryState state;
+  const auto started = std::chrono::steady_clock::now();
+  const auto out = import_into(state, doc, "local", 100, new_id, 1);
+  const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+  CHECK(out.imported_queries == 3000 && out.skipped_queries == 0);
+  // The time of the cubic search was 2.7 s for one name of 1000 queries on a release build. A few seconds of margin hold on a sanitized build.
+  CHECK(elapsed_ms < 2000);
+  std::set<std::string> seen;
+  for (const auto& q : state.queries) seen.insert(q.name);
+  CHECK(seen.size() == 3000);
+  CHECK(seen.count("alpha") == 1 && seen.count("alpha (2)") == 1 && seen.count("alpha (1000)") == 1 && seen.count("gamma (1000)") == 1);
+  // An existing query takes the name too. The suffix is the first one that is free for the name that the item has.
+  auto library = small_state();
+  const auto more = parsed("{\"queries\":[{\"name\":\"Top\",\"sql\":\"SELECT 5\",\"folder_id\":\"f2\"},{\"name\":\"Top (2)\",\"sql\":\"SELECT 6\",\"folder_id\":\"f2\"},{\"name\":\"Top\",\"sql\":\"SELECT 7\",\"folder_id\":\"f2\"}]}");
+  import_into(library, more, "local", 100, new_id, 1);
+  std::set<std::string> names_in_f2;
+  for (const auto& q : library.queries) {
+    if (q.folder_id && *q.folder_id == "f2") names_in_f2.insert(q.name);
+  }
+  CHECK(names_in_f2.size() == 4);
+  CHECK(names_in_f2.count("Top") == 1 && names_in_f2.count("Top (2)") == 1 && names_in_f2.count("Top (2) (2)") == 1 && names_in_f2.count("Top (3)") == 1);
+  // The number of renames of one name is bounded: the 1001st query of a name is refused (413), and nothing is kept.
+  std::string many = "{\"queries\":[";
+  for (int i = 0; i < 1001; ++i) many += std::string(i ? "," : "") + "{\"name\":\"same\",\"sql\":\"SELECT " + std::to_string(i) + "\"}";
+  many += "]}";
+  const auto crowd = parsed(many.c_str());
+  chdash::QueryLibraryState empty;
+  CHECK(refused_with([&] { import_into(empty, crowd, "local", 100, new_id, 1); }).find("too_large/queries[1000].name") == 0);
+}
+
 } // namespace
 
 // The page of the tree has at most 100 items and as many levels as fit. A first level larger than a page comes in windows.
@@ -948,6 +997,7 @@ int main() {
   test_the_rules_of_the_tree();
   test_the_fields_of_a_request();
   test_the_import_into_a_state();
+  test_an_import_of_queries_with_the_same_name_does_bounded_work();
   test_the_page_of_the_tree();
   test_the_search_and_the_detail_of_a_query(make_temp_dir());
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;

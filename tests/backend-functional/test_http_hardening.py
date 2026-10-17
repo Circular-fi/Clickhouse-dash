@@ -9,6 +9,9 @@ import hashlib
 import json
 import os
 import re
+import socket
+import time
+import urllib.parse
 
 import pytest
 import requests
@@ -181,3 +184,38 @@ def test_a_versioned_asset_is_immutable_only_with_its_own_version():
     assert get(f"/static/icons.svg?v={hashlib.sha256(sprite).hexdigest()[:10]}").headers["Cache-Control"].endswith("immutable")
     # A shell is never immutable, whatever ?v= it is given.
     assert "immutable" not in get(f"/?v={version}").headers["Cache-Control"]
+
+
+def _talk(*chunks: bytes) -> tuple[bytes, bool]:
+    """Send each chunk on one connection as a write of its own, 0.2 s apart, then read until the server closes it or 2 s pass.
+
+    Returns the bytes and whether the server closed the connection. cpp-httplib reads the bytes that follow in the same segment
+    as part of the first request, so a desync primitive sends the bytes of the second request in a segment of their own."""
+    host = urllib.parse.urlparse(BASE_URL)
+    with socket.create_connection((host.hostname, host.port or 80), timeout=5) as connection:
+        connection.settimeout(2)
+        for chunk in chunks:
+            connection.sendall(chunk)
+            time.sleep(0.2)
+        data = b""
+        while True:
+            try:
+                received = connection.recv(65536)
+            except socket.timeout:
+                return data, False
+            if not received:
+                return data, True
+            data += received
+
+
+def test_a_connection_closes_after_a_request_that_cannot_be_parsed():
+    """cpp-httplib sent "Connection: close" with its 400 but kept the connection: the next bytes were read as a new request."""
+    good = b"GET /livez HTTP/1.1\r\nHost: chdash\r\n\r\n"
+    for name, bad in (("request line", b"NOT A REQUEST\r\n\r\n"), ("header line", b"GET /livez HTTP/1.1\r\nHost: a\r\nX-Long: " + b"a" * 9000 + b"\r\n\r\n")):
+        data, closed = _talk(bad, good)
+        assert data.count(b"HTTP/1.1 400") == 1, (name, data[:300])
+        assert data.count(b"HTTP/1.1 200") == 0, (name, data[:300])
+        assert closed, name
+    # Control: a good request keeps its connection (the second one is answered on it).
+    data, closed = _talk(good, b"GET /livez HTTP/1.1\r\nHost: chdash\r\nConnection: close\r\n\r\n")
+    assert data.count(b"HTTP/1.1 200") == 2 and closed

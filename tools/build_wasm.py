@@ -15,6 +15,8 @@ tests/harness/test_wasm_contract.py fails when a source changed without a rebuil
     python3 tools/build_wasm.py --check     # rebuild into a temporary directory and compare with the committed files
     python3 tools/build_wasm.py --docker --check
     python3 tools/build_wasm.py --verify    # only compare the lock with the committed files (no compiler)
+
+--check fails on any byte that differs from the rebuild. CHDASH_WASM_LENIENT=1 turns a difference of bytes into a warning (a local test only).
 """
 from __future__ import annotations
 
@@ -207,20 +209,25 @@ def main(argv: list[str]) -> int:
 
 def finish(options: argparse.Namespace, built: Path, lock: dict) -> int:
     if options.check:
-        problems = []
         old = json.loads(LOCK.read_text(encoding="utf-8")) if LOCK.exists() else {"kernels": {}}
-        # Another compiler release may write other bytes for the same sources: that is a warning (the committed files are
-        # what ships), unless CHDASH_WASM_STRICT is set. The same compiler must give the same bytes.
-        same_toolchain = old.get("toolchain") == lock["toolchain"] or os.environ.get("CHDASH_WASM_STRICT") == "1"
+        # A byte that differs from the rebuild fails the check. The lock is part of the change under test, so it never decides how strict the
+        # check is: a change cannot make its own check a warning by editing the toolchain text of the lock. The one way to a warning is the
+        # explicit choice of the caller, CHDASH_WASM_LENIENT=1, for a local test with another compiler release than the lock names.
+        lenient = os.environ.get("CHDASH_WASM_LENIENT") == "1"
+        differences = []
+        mismatches = []
         for name, entry in lock["kernels"].items():
             committed = OUT / (name + ".wasm")
             if not committed.exists() or committed.read_bytes() != (built / (name + ".wasm")).read_bytes():
-                problems.append(f"{name}.wasm: the rebuild differs from the committed file (toolchain {lock['toolchain']}, lock {old.get('toolchain')})")
+                differences.append(f"{name}.wasm: the rebuild differs from the committed file (toolchain {lock['toolchain']}, lock {old.get('toolchain')})")
             if old["kernels"].get(name, {}).get("source_sha256") != entry["source_sha256"]:
-                problems.append(f"{name}: the lock does not match the sources")
-        if problems and not same_toolchain:
-            print("build_wasm: WARNING, another toolchain than the lock; rebuild with tools/build_wasm.py --docker\n" + "\n".join(problems))
+                mismatches.append(f"{name}: the lock does not match the sources")
+        if differences and not mismatches and lenient:
+            print("build_wasm: WARNING, CHDASH_WASM_LENIENT=1: the rebuild differs from the committed files; this is never a release check\n" + "\n".join(differences))
             return 0
+        problems = differences + mismatches
+        if differences and old.get("toolchain") != lock["toolchain"]:
+            problems.append(f"build_wasm: the toolchain of the lock is {old.get('toolchain')!r}, the rebuild used {lock['toolchain']!r}: rebuild with tools/build_wasm.py --docker")
         print("\n".join(problems) if problems else f"build_wasm: the rebuild is byte-identical ({lock['toolchain']})")
         return 1 if problems else 0
     write_outputs(built, lock)

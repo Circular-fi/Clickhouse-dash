@@ -60,5 +60,14 @@ bool logical_scope_has_more(const ExplorerGraph& graph, const GraphScopeRequest&
 // The logical nodes that own a physical placement. A Buffer that routes to such a node is also included.
 std::unordered_set<std::string> logical_storage_available_ids(const ExplorerGraph& graph, const ExplorerGraphIndex* index = nullptr);
 
+// The access of humans (docs/access.md): a grant on some databases. The answer keeps only the databases that the subject may read.
+// A node of another database goes, with each edge that touches it. A node that names no database (a node of the cluster topology)
+// stays only while an edge links it to a node that stays.
+ExplorerGraph keep_graph_databases(const ExplorerGraph& scoped, const std::unordered_set<std::string>& readable);
+// The databases of the nodes of `graph`, once each, in the order of the nodes. A node that names no database gives none.
+std::vector<std::string> graph_databases(const ExplorerGraph& graph);
+// The storage map with only the databases that the subject may read. The totals of the answer come from the databases that stay.
+ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const std::unordered_set<std::string>& readable);
+
 }  // namespace explorer
 }  // namespace chdash

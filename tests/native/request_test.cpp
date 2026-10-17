@@ -13,6 +13,11 @@
 #include "request_context.hpp"
 #include "routed_server.hpp"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -290,6 +295,89 @@ void test_the_handler_sees_the_context_of_the_caller() {
   CHECK_EQ(comment, std::string("chdash-mcp key=k /api/ctx"));
 }
 
+// ---- a request that cannot be parsed ----
+
+// Sends each chunk to the loopback port as a write of its own, with a pause of 150 ms after it, then reads until the server closes the connection
+// or 1.5 s pass. The answer has the bytes read and says whether the server closed the connection.
+struct Talk {
+  std::string data;
+  bool closed = false;
+};
+
+Talk talk_to(int port, const std::vector<std::string>& chunks) {
+  Talk out;
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return out;
+  sockaddr_in address{};
+  address.sin_family = AF_INET;
+  address.sin_port = htons(static_cast<uint16_t>(port));
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    ::close(fd);
+    return out;
+  }
+  timeval timeout{};
+  timeout.tv_sec = 1;
+  timeout.tv_usec = 500000;
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  for (const std::string& bytes : chunks) {
+    size_t sent = 0;
+    while (sent < bytes.size()) {
+      const ssize_t n = ::send(fd, bytes.data() + sent, bytes.size() - sent, MSG_NOSIGNAL);
+      if (n <= 0) break;
+      sent += static_cast<size_t>(n);
+    }
+    std::this_thread::sleep_for(150ms);
+  }
+  char buffer[4096];
+  for (;;) {
+    const ssize_t n = ::recv(fd, buffer, sizeof(buffer), 0);
+    if (n > 0) {
+      out.data.append(buffer, static_cast<size_t>(n));
+      continue;
+    }
+    out.closed = n == 0;
+    break;
+  }
+  ::close(fd);
+  return out;
+}
+
+size_t count_of(const std::string& text, const std::string& part) {
+  size_t n = 0;
+  for (size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + part.size())) ++n;
+  return n;
+}
+
+// cpp-httplib answers 400 with "Connection: close" to a bad request line or to bad headers, but it kept the connection and parsed the next bytes
+// as a new request. The server closes the connection after any request that it cannot parse, so that a gateway that reuses the connection never
+// has bytes of one request read as another.
+void test_a_connection_closes_after_a_request_that_cannot_be_parsed() {
+  RoutedServer server;
+  server.Get("/x", [](const httplib::Request&, httplib::Response& res) { res.set_content("ok", "text/plain"); });
+  const int port = server.bind_to_any_port("127.0.0.1");
+  CHECK(port > 0);
+  std::thread serving([&] { server.listen_after_bind(); });
+  server.wait_until_ready();
+  const std::string good = "GET /x HTTP/1.1\r\nHost: a\r\n\r\n";
+  // A bad request line, then a good request on the same connection.
+  const Talk bad_line = talk_to(port, {"NOT A REQUEST\r\n\r\n", good});
+  CHECK_EQ(count_of(bad_line.data, "HTTP/1.1 400"), size_t(1));
+  CHECK_EQ(count_of(bad_line.data, "HTTP/1.1 200"), size_t(0));
+  CHECK(bad_line.closed);
+  // A header line that is too long, then a good request.
+  const Talk bad_header = talk_to(port, {"GET /x HTTP/1.1\r\nHost: a\r\nX-Long: " + std::string(9000, 'a') + "\r\n\r\n", good});
+  CHECK_EQ(count_of(bad_header.data, "HTTP/1.1 400"), size_t(1));
+  CHECK_EQ(count_of(bad_header.data, "HTTP/1.1 200"), size_t(0));
+  CHECK(bad_header.closed);
+  // Control: two good requests on one connection are both answered. The second one asks to close.
+  const Talk keep_alive = talk_to(port, {good, "GET /x HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n"});
+  CHECK_EQ(count_of(keep_alive.data, "HTTP/1.1 200"), size_t(2));
+  CHECK(keep_alive.closed);
+  server.stop();
+  serving.join();
+}
+
 } // namespace
 
 // ---- the jobs of Deep Analyze (src/deep_analysis_jobs.hpp) ----
@@ -455,6 +543,7 @@ int main() {
   test_the_context_does_not_cross_threads();
   test_a_route_runs_in_the_process();
   test_the_handler_sees_the_context_of_the_caller();
+  test_a_connection_closes_after_a_request_that_cannot_be_parsed();
   test_export_store_counts_the_bytes_of_the_entries_it_holds();
   test_deep_jobs_run_end_and_are_read_by_their_host();
   test_deep_jobs_cancel();

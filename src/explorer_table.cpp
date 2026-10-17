@@ -101,6 +101,7 @@ bool load_explorer_table_summary(
 
   std::string base_error;
   bool loaded = try_select(system, base_sql, consume_base, &base_error);
+  bool base_from_runner = false;
   if (!loaded || out.database.empty()) {
     out = ExplorerTableSummary{};
     std::string runner_error;
@@ -110,6 +111,22 @@ bool load_explorer_table_summary(
         *error = "Table summary metadata failed for " + database + "." + table +
             (runner_error.empty() ? std::string{} : ": " + runner_error);
       }
+      return false;
+    }
+    base_from_runner = true;
+  }
+
+  // ClickHouse masks the secrets of engine_full for each user. The system account can hold the privilege displaySecretsInShowAndSelect
+  // that the runner does not hold. So the text of the system account is never kept: take engine_full as the runner, the identity that
+  // bounds the caller. The system account gives the numbers and the structure only (docs/explorer.md).
+  if (!base_from_runner) {
+    out.engine_full.clear();
+    std::string engine_error;
+    if (!try_select(runner, table_engine_full_sql(database, table),
+          [&](const clickhouse::Block& block) {
+            if (block.GetRowCount()) out.engine_full = block_string_at(block, 0, 0);
+          }, &engine_error)) {
+      if (error) *error = "Table engine metadata failed for " + database + "." + table + ": " + engine_error;
       return false;
     }
   }

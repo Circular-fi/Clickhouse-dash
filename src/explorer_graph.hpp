@@ -13,7 +13,7 @@
 
 namespace chdash {
 
-// The side panel of a node or an edge explains a logical object. It uses the same authorized system.tables texts as the graph.
+// The side panel of a node or an edge explains a logical object. It uses the same authorized system.tables texts as the graph (read as the runner).
 // The graph payload never serializes these texts. GET /api/explorer/graph/definition serves them for each object.
 // A referenced object outside AllowedObjectSet keeps only a `*_visible = false` flag. It never keeps the name.
 struct ExplorerGraphDefinition {
@@ -108,12 +108,14 @@ struct ExplorerGraph {
   std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
-// `system_identity`: acl_identity_key of the system URI (DdlTextCache). The system account gives the graph inputs.
+// `runner_identity`: acl_identity_key of the runner URI (DdlTextCache). The system account gives the graph inputs (numbers and structure).
+// The runner gives the DDL texts, because ClickHouse masks their secrets for each user (the SELECT of a view, engine_full).
 // explorer_graph.cpp reads them. Then it builds the graph (explorer_graph_build.hpp).
 bool load_explorer_graph(
     ChExecutor& system,
+    ChExecutor& runner,
     ExplorerCaches& caches,
-    const std::string& system_identity,
+    const std::string& runner_identity,
     const AllowedObjectSet& allowed,
     const ExplorerCatalog& catalog,
     ExplorerGraph& out,

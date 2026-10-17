@@ -19,7 +19,9 @@ tests/config/privileges.hcl (users in tests/clickhouse-init/01-chdash-users.sql)
   badsystem   the system user does not exist;
   toolnone    the MCP user (mcp_uri) connects and reads nothing;
   toolmin     the MCP user reads chdash_ui only;
-  toolbad     the MCP user does not exist (no key can read this host).
+  toolbad     the MCP user does not exist (no key can read this host);
+  secretsrunner  the runner holds displaySecretsInShowAndSelect;
+  secretstool    the MCP user holds displaySecretsInShowAndSelect.
 
 A test marked xfail(strict) would be an inconsistency of the code that the matrix shows and that is not fixed:
 it says what the code should do. When it is fixed the test fails (XPASS): remove its mark. None is left.
@@ -129,8 +131,8 @@ def test_the_control_host_answers_every_route():
         assert response.status_code == 200, (name, response.status_code, response.text[:300])
     assert hosts()["ok"]["access"] == {
         "checked": True, "ok": True, "runner_user": "chdash_runner", "system_user": "chdash_system",
-        "runner_reads_nothing": False, "mcp_user": "chdash_mcp", "mcp_reads_nothing": False, "mcp_audited": True,
-        "mcp_connected": True, "mcp_error": "", "mcp_missing": [],
+        "runner_reads_nothing": False, "runner_shows_secrets": False, "mcp_user": "chdash_mcp", "mcp_reads_nothing": False,
+        "mcp_shows_secrets": False, "mcp_audited": True, "mcp_connected": True, "mcp_error": "", "mcp_missing": [],
         "runner_missing": [], "system_missing": [], "warnings": [],
     }
 
@@ -304,8 +306,9 @@ def test_a_tool_whose_grant_the_mcp_user_lacks_says_permission_denied_with_the_g
     # The Functions page of the Explorer: system.documentation, read by the MCP user.
     functions = tool("toolmin", "explorer_functions")
     assert functions["isError"] is True and functions["structuredContent"]["error"]["code"] == "permission_denied"
-    assert "system.documentation" in functions["structuredContent"]["error"]["message"]
-    assert "chdash_tool_min" in functions["structuredContent"]["error"]["message"]
+    # The message of the route names the grant; it is text of the route, so it is in error.untrusted.detail (contract 5.2).
+    assert "system.documentation" in functions["structuredContent"]["error"]["untrusted"]["detail"]
+    assert "chdash_tool_min" in functions["structuredContent"]["error"]["untrusted"]["detail"]
 
 
 def test_the_tools_of_traces_logs_and_metrics_read_with_the_system_user_as_the_pages_do():
@@ -583,3 +586,36 @@ def test_a_key_cannot_read_a_host_whose_mcp_user_cannot_connect():
     two = mcp("POST", "/api/mcp/keys", json={"name": "two", "hosts": ["ok", "toolmin"], "tools": [], "databases": ["*"]})
     assert two.status_code == 400 and two.json()["reason"] == "too_many", two.text
     assert mcp("GET", "/api/mcp/keys").json()["keys"] and all(len(k["hosts"]) <= 1 for k in mcp("GET", "/api/mcp/keys").json()["keys"])
+
+
+# ---- a runner or an MCP user that may display secrets -------------------------------------------------------------------------------------
+
+def _audited_host(name: str) -> dict:
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        host = hosts().get(name)
+        if host and host["access"]["checked"] and (name != "secretstool" or host["access"]["mcp_audited"]):
+            return host["access"]
+        time.sleep(0.5)
+    pytest.fail(f"the access audit did not run on {name} in 60 s")
+
+
+def test_the_audit_reports_a_runner_that_may_display_secrets():
+    """The Explorer shows the DDL texts as the runner. A runner that holds displaySecretsInShowAndSelect can show secrets that ClickHouse masks."""
+    access = _audited_host("secretsrunner")
+    assert access["runner_shows_secrets"] is True and access["mcp_shows_secrets"] is False
+    assert access["ok"] is False
+    assert any("displaySecretsInShowAndSelect" in w and "chdash_runner_secrets" in w and "format_display_secrets_in_show_and_select" in w
+               for w in access["warnings"]), access["warnings"]
+    control = _audited_host("runnermin")
+    assert control["runner_shows_secrets"] is False and control["mcp_shows_secrets"] is False
+    assert not any("displaySecretsInShowAndSelect" in w for w in control["warnings"])
+
+
+def test_the_audit_reports_an_mcp_user_that_may_display_secrets():
+    access = _audited_host("secretstool")
+    assert access["mcp_shows_secrets"] is True and access["runner_shows_secrets"] is False
+    assert any("displaySecretsInShowAndSelect" in w and "chdash_tool_secrets" in w and "MCP" in w for w in access["warnings"]), access["warnings"]
+    ok = hosts()["ok"]["access"]
+    assert ok["mcp_shows_secrets"] is False and ok["runner_shows_secrets"] is False
+

@@ -100,12 +100,10 @@ bool load_base_summaries(
   // The technical account is an enrichment source. It is not the ACL authority. A transient or native-protocol issue on its bulk system.tables
   // stream must not make every runner-readable object disappear. Retry the same backend-built metadata query through the runner, whose
   // AllowedObjectSet already defines the exact visibility boundary.
-  bool metadata_from_runner = false;
   if (!ok) {
     summaries.clear();
     by_key.clear();
     ddl_versions.clear();
-    metadata_from_runner = true;
     std::string runner_error;
     ok = try_select(runner, base_tables_ordered_sql(),
       [&](const clickhouse::Block& block) { consume_tables(block, true); }, &runner_error);
@@ -133,17 +131,15 @@ bool load_base_summaries(
   }
 
   // engine_full for every summary. This includes the entries that the runner filled above.
+  // ClickHouse masks the secrets of this text for each user. The system account can hold the privilege displaySecretsInShowAndSelect that the
+  // runner does not hold. So the texts are read as the runner, the identity that bounds the caller. The system account gives no text.
   try {
-    auto& ddl_client = metadata_from_runner ? runner : system;
-    auto texts = caches.ddl_texts.get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
-    if (!runner_ddl_versions.empty()) {
-      for (auto& [key, value] : caches.ddl_texts.get(runner, identities.runner, runner_ddl_versions)) {
-        texts[key] = std::move(value);
-      }
-    }
+    std::vector<DdlObjectVersion> versions = ddl_versions;
+    versions.insert(versions.end(), runner_ddl_versions.begin(), runner_ddl_versions.end());
+    const auto texts = caches.ddl_texts.get(runner, identities.runner, versions);
     for (auto& summary : summaries) {
       const auto it = texts.find(DdlTextCache::object_key(summary.database, summary.name));
-      if (it != texts.end()) summary.engine_full = it->second.engine_full;
+      summary.engine_full = it != texts.end() ? it->second.engine_full : std::string();
     }
   } catch (const std::exception& e) {
     if (error) *error = std::string("system.tables engine_full lookup failed: ") + e.what();

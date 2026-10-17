@@ -40,16 +40,11 @@ bool TableDetailReader::read_definition() {
         out_.create_table_query = block_string_at(block, 0, 0);
       }, load_error);
   };
-  bool table_loaded = load_ddl(system_, &section_error_);
+  // ClickHouse masks the secrets of create_table_query for each user. The system account can hold the privilege displaySecretsInShowAndSelect
+  // that the runner does not hold. So read the text as the runner, the identity that bounds the caller, after the ACL boundary accepted this object.
+  const bool table_loaded = load_ddl(runner_, &section_error_);
   if (!table_loaded || out_.create_table_query.empty()) {
-    // The metadata of each object can be read through runner_uri after the ACL boundary accepted this exact object. This also
-    // covers newly created tables that the technical metadata connection cannot see yet.
-    out_.create_table_query.clear();
-    std::string runner_error;
-    table_loaded = load_ddl(runner_, &runner_error);
-    if (!table_loaded || out_.create_table_query.empty()) {
-      return fail("DDL metadata query failed for " + database_ + "." + table_ + (runner_error.empty() ? std::string{} : ": " + runner_error));
-    }
+    return fail("DDL metadata query failed for " + database_ + "." + table_ + (section_error_.empty() ? std::string{} : ": " + section_error_));
   }
   out_.table_ttl = sql::table_ttl_clause(out_.create_table_query);
   if (summary_.engine == "Distributed") {

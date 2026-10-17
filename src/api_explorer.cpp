@@ -87,7 +87,15 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
   if (!open_explorer_route(cfg_, health_.get(), req, res, param_of(req, "host_id"), &route)) return;
   const auto answer = explorer_service_.storage(current_request_context(), *route.host, route.host_id, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
-  send_json(res, explorer::storage_json(route.host_id, *answer.value->value, answer.value->stale));
+  // The map holds every database. A grant on some databases keeps only those (docs/access.md): one batch asks each database.
+  const ExplorerStorageMap& map = *answer.value->value;
+  std::vector<std::string> databases;
+  databases.reserve(map.databases.size());
+  for (const auto& database : map.databases) databases.push_back(database.name);
+  if (const auto readable = access_readable_databases({"explorer.read"}, databases)) {
+    return send_json(res, explorer::storage_json(route.host_id, explorer::keep_storage_databases(map, *readable), answer.value->stale));
+  }
+  send_json(res, explorer::storage_json(route.host_id, map, answer.value->stale));
 }
 
 void Server::handle_explorer_table(const httplib::Request& req, httplib::Response& res) {
@@ -142,10 +150,23 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   ExplorerRoute route;
   if (!open_explorer_route(cfg_, health_.get(), req, res, param_of(req, "host_id"), &route)) return;
   const explorer::GraphScopeRequest scope = explorer::read_graph_scope(req);
+  // The focus names its own database: the subject must be able to read it (docs/access.md).
+  if (!scope.focus_database.empty()) {
+    const auto readable = access_readable_databases({"explorer.read"}, {scope.focus_database});
+    if (readable && readable->count(scope.focus_database) == 0) {
+      return access_forbidden(res, "explorer.read");
+    }
+  }
   const auto answer = explorer_service_.graph(current_request_context(), *route.host, route.host_id, scope, cfg_.explorer.lineage,
                                               cfg_.explorer.storage_topology, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
   const explorer::GraphScopeAnswer& graph = *answer.value;
+  // A lineage or a cluster topology crosses databases. A grant on some databases keeps only their nodes: one batch asks each
+  // database of the answer.
+  if (const auto readable = access_readable_databases({"explorer.read"}, explorer::graph_databases(graph.scoped))) {
+    return send_json(res, explorer::graph_json(route.host_id, *graph.graph, explorer::keep_graph_databases(graph.scoped, *readable), scope,
+                                               graph.scope_has_more, graph.storage_available, graph.stale, cfg_.explorer.live_refresh_ms));
+  }
   send_json(res, explorer::graph_json(route.host_id, *graph.graph, graph.scoped, scope, graph.scope_has_more, graph.storage_available, graph.stale,
                                       cfg_.explorer.live_refresh_ms));
 }

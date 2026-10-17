@@ -264,10 +264,14 @@ std::string tool_explain_query(Ctx& ctx, const rapidjson::Value& args) {
   w.Key("host"); put(w, ctx.host);
   w.Key("type"); put(w, type);
   if (res.columns.size() == 1) {
+    // ClickHouse writes the plan partly from the definitions of views and columns (third-party text): the lines are untrusted.
+    w.Key("untrusted");
+    w.StartObject();
     w.Key("lines");
     w.StartArray();
     for (const auto& row : res.rows) put(w, row.empty() ? std::string() : cell_text(row[0]));
     w.EndArray();
+    w.EndObject();
     w.Key("row_count"); w.Uint64(res.rows.size());
   } else {
     write_columns(w, res);

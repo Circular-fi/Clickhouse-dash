@@ -434,6 +434,41 @@ void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
   }
 }
 
+// A read-only subject of the access of humans sends a SETTINGS clause that readonly = 1 refuses, and that names a bound of ChDash.
+// The statement fails. The connection keeps its state: the next strict statement on it still has the bounds and the label, also
+// for another subject that leases the same connection from the pool.
+void test_a_refused_settings_clause_keeps_the_bounds(const std::string& uri) {
+  auto pool = std::make_shared<ClickHouseClientPool>(1);
+  ChQueryLimits strict;
+  strict.read_only_strict = true;
+  strict.log_comment = "chdash-run";
+  strict.max_rows_to_read = 1234;
+  strict.max_execution_time_s = 7;
+  ChQueryScope scope(std::move(strict));
+  {
+    auto client = lease(pool, uri);
+    CHECK(select_u64(*client, "SELECT toString(getSetting('max_rows_to_read'))") == 1234);
+    for (const char* sql : {"SELECT 1 SETTINGS max_rows_to_read = 99999999", "SELECT 1 SETTINGS log_comment = 'x'",
+                            "SELECT 1 SETTINGS max_execution_time = 0"}) {
+      int code = 0;
+      try {
+        ch_execute(*client, sql);
+      } catch (const clickhouse::ServerError& error) {
+        code = error.GetCode();
+      }
+      CHECK(code == 164);
+      CHECK(select_u64(*client, "SELECT toString(getSetting('max_rows_to_read'))") == 1234);
+      CHECK(select_u64(*client, "SELECT toString(toUInt64(getSetting('max_execution_time')))") == 7);
+      CHECK(select_text(*client, "SELECT toString(getSetting('log_comment'))") == "chdash-run");
+      CHECK(select_u64(*client, "SELECT toString(getSetting('readonly'))") == 1);
+    }
+  }
+  // The pool has one connection: the next lease gets the same one.
+  auto next = lease(pool, uri);
+  CHECK(select_u64(*next, "SELECT toString(getSetting('max_rows_to_read'))") == 1234);
+  CHECK(select_text(*next, "SELECT toString(getSetting('log_comment'))") == "chdash-run");
+}
+
 // The query_id of the scope reaches ClickHouse for each kind of statement. A SETTINGS clause does not change it.
 void test_the_query_id_of_the_scope_reaches_clickhouse(const std::string& uri) {
   auto pool = std::make_shared<ClickHouseClientPool>(4);
@@ -642,6 +677,7 @@ int main() {
       test_the_scope_observes_each_statement(uri);
       test_a_callback_that_stops_reading_keeps_the_connection(uri);
       test_the_scope_settings_reach_clickhouse(uri);
+      test_a_refused_settings_clause_keeps_the_bounds(uri);
       test_the_query_id_of_the_scope_reaches_clickhouse(uri);
       test_a_passed_deadline_or_a_cancel_stops_before_sending(uri);
       test_the_pool_bounds_its_leases(uri);

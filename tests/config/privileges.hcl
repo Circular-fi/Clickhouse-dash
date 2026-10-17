@@ -11,7 +11,9 @@
 #   badsystem  the system user does not exist (the host answers, its system reads cannot);
 #   toolnone   the MCP user (mcp_uri) connects and reads nothing;
 #   toolmin    the MCP user reads chdash_ui only;
-#   toolbad    the MCP user (mcp_uri) does not exist: no key can read this host.
+#   toolbad    the MCP user (mcp_uri) does not exist: no key can read this host;
+#   secretsrunner  the runner holds the privilege displaySecretsInShowAndSelect (the audit reports it);
+#   secretstool    the MCP user holds the privilege displaySecretsInShowAndSelect (the audit reports it).
 # MCP is on, with one key for each host that has an mcp_uri (a key reads one host): the access audit also reads the MCP user of these hosts.
 server {
   listen_host = "0.0.0.0"
@@ -153,6 +155,22 @@ clickhouse {
     system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
     mcp_uri    = "clickhouse://chdash_tool_min@clickhouse:9000"
     mcp_password_file = "/run/secrets/chdash-test/pw-chdash_tool_min"
+  }
+  host {
+    name       = "secretsrunner"
+    runner_uri = "clickhouse://chdash_runner_secrets@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner_secrets"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+  }
+  host {
+    name       = "secretstool"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_tool_secrets@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_tool_secrets"
   }
   host {
     name       = "toolbad"

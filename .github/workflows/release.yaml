@@ -2,7 +2,7 @@ name: Release
 
 # A release builds the tagged commit, checks and smoke-tests each binary, then publishes the archives
 # with SHA256SUMS and a signed build provenance attestation (gh attestation verify <archive> --repo
-# <owner>/<repo>). It runs no test suite (that took more than an hour): the full suite runs before the
+# <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yaml). It runs no test suite (that took more than an hour): the full suite runs before the
 # tag is made (tests/README.md) and on request (Actions > CI > Run workflow).
 #
 # Supply chain: every action is pinned by commit SHA (Dependabot updates the pins), no job restores a
@@ -95,9 +95,30 @@ jobs:
           echo "Resolved release tag: ${TAG}"
           echo "Resolved version: ${VERSION}"
 
+  # The archives embed the committed .wasm files byte for byte (src/CMakeLists.txt copies src/static). The attestation says that the release
+  # job built the archive. It does not say that a kernel is the build of its source. This job rebuilds the kernels from src/wasm with the pinned
+  # toolchain and fails on any byte that differs, so the release never embeds a kernel that no review linked to its source.
+  wasm-check:
+    name: Check the WebAssembly kernels
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - name: Rebuild the kernels and compare them with the committed files
+        run: |
+          python3 tools/build_wasm.py --verify
+          python3 tools/build_wasm.py --docker --check
+
   build:
     name: Build (${{ matrix.goos }} ${{ matrix.goarch }})
-    needs: prepare
+    needs: [prepare, wasm-check]
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}

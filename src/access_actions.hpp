@@ -34,7 +34,8 @@ enum class AccessRuleKind {
   Action,
   // A run of SQL: query.run.read or query.run.write. Without query.run.write, the statements run with readonly = 1.
   Run,
-  // An export: query.export. Without query.run.write, the statements run with readonly = 1.
+  // An export: query.export, and query.run.read or query.run.write (an export runs SQL). Without query.run.write, the
+  // statements run with readonly = 1.
   Export,
   // The route itself asks: the database is in the body (the data preview of the Explorer).
   Deferred,

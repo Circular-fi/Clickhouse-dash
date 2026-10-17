@@ -59,6 +59,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -431,12 +432,26 @@ private:
   // Return the decision of `action` on `database`. Return false after the function writes the 403.
   // Return true when no check applies, for example in the open mode or for a call of MCP.
   bool access_allows(httplib::Response& res, const char* action, const std::string& database);
+  // Return true when the subject of this request passes every question. Else write the 403 of the first refused action, and
+  // return false. Return true when no check applies.
+  bool access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions);
+  // Write the 403 of a refused action (docs/access.md, "Enforcement").
+  static void access_forbidden(httplib::Response& res, const std::string& action);
+  // The databases of `databases` that the subject of this request may read: one batch asks each action of `actions` on the
+  // service and on each database. A database passes when one action is true on it or on the service.
+  // Return nullopt when every database passes: no check applies, or an action is true on the service.
+  std::optional<std::unordered_set<std::string>> access_readable_databases(const std::vector<const char*>& actions,
+                                                                          const std::vector<std::string>& databases);
+  // An MCP key of the page in the authzen mode works only while the PDP gives its creator each action that its tools use
+  // (mcp_key_access_questions). Return the first action that the PDP refuses, "creator" for a key with no creator, or an empty
+  // string when the key may work. Return an empty string in the open mode and for a key of the configuration.
+  std::string mcp_key_refused_action(const McpKey& key, const std::string& request_id);
   // Return the decision of `action` on the service for the subject of this request.
   // The page uses it to show or hide a control. Return true when no check applies.
   bool access_permits(const char* action);
   // Return true when the statements of this request must run with readonly = 1.
   // This is the case when the subject has query.run.read and not query.run.write.
-  // It is also the case when the subject has query.export and not query.run.write.
+  // It is also the case for an export (query.export and query.run.read) without query.run.write.
   bool access_read_only() const;
   // Return the access part of /api/version, as a JSON object.
   // The object has the mode, the subject and the decisions for every action on the service.

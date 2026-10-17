@@ -71,16 +71,28 @@ inline std::string quote_qualified(std::string_view database, std::string_view t
   return quote_ident(database) + "." + quote_ident(table);
 }
 
-// ['a', 'b']: an Array(String) literal ([] when empty).
-// For a list that IN takes, use quote_list.
-// Use this text as an Array(String) query parameter only for values without a quote mark or a backslash (the hexadecimal trace ids).
-// ClickHouse reads the text of such a parameter with its own rules for these values, which differ from this quoting.
-// For other values, use SqlParams (sql_params.hpp).
-inline std::string quote_array(const std::vector<std::string>& values) {
+// ['a', 'b']: the text of an Array(String) query parameter of trace ids ([] when empty). Only a hexadecimal id (the form of OpenTelemetry) goes in.
+// clickhouse-cpp writes the quote mark and the backslash of a parameter in a form that the server reads another way, so no text with one of
+// them can be bound in this form. An id that the backend read from the data can hold such a byte: a value that is not a hexadecimal id is left out,
+// so that one row of the data can neither fail a request nor hide another trace.
+// For other values, use SqlParams (sql_params.hpp). For a list that IN takes, use quote_list.
+inline bool is_hex_trace_id(std::string_view value) {
+  if (value.empty() || value.size() > 64) return false;
+  for (const char c : value) {
+    const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    if (!hex) return false;
+  }
+  return true;
+}
+
+inline std::string hex_id_array(const std::vector<std::string>& values) {
   std::string out = "[";
-  for (size_t i = 0; i < values.size(); ++i) {
-    if (i) out += ", ";
-    out += quote_string(values[i]);
+  bool first = true;
+  for (const auto& value : values) {
+    if (!is_hex_trace_id(value)) continue;
+    if (!first) out += ", ";
+    first = false;
+    out += "'" + value + "'";
   }
   return out + "]";
 }

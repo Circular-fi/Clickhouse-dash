@@ -326,6 +326,10 @@ def test_a_run_needs_query_run_read_or_query_run_write():
     answer(deny=["query.run.read", "query.run.write"])
     response = call("POST", "/api/query/run", json={"host_id": "local", "sql": "SELECT 1"})
     assert response.status_code == 403 and response.json()["action"] == "query.run.read"
+    # An export runs SQL: query.export alone is not enough.
+    for path in ("/api/export/run", "/api/export/stream"):
+        response = call("POST", path, json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
+        assert response.status_code == 403 and response.json()["action"] == "query.run.read", (path, response.text)
     answer(deny=["query.export"])
     response = call("POST", "/api/export/run", json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
     assert response.status_code == 403 and response.json()["action"] == "query.export"
@@ -347,6 +351,87 @@ def test_explorer_read_on_one_database():
     assert preview.status_code != 403, preview.text
     resources = {(e["action"]["name"], e["resource"]["type"], e["resource"]["id"]) for r in received() for e in evaluations(r)}
     assert ("explorer.read", "database", "chdash_ui") in resources
+
+
+@needs_access
+def test_a_grant_on_one_database_keeps_only_that_database_in_each_answer():
+    # storage, graph and the names of the editor read every database: their answers keep only the databases that the PDP allows.
+    answer(default=False, allow=["explorer.read@database:chdash_ui", "query.run.read@database:chdash_ui"])
+    tok = token("tenant")
+    storage = call("GET", "/api/explorer/storage?host_id=local&database=chdash_ui", tok=tok)
+    assert storage.status_code == 200, storage.text
+    names = {d["name"] for d in storage.json()["databases"]}
+    assert names <= {"chdash_ui"} and "otel" not in storage.text, names
+    # A focus in another database is refused; the unfocused graph names no other database.
+    focused = call("GET", "/api/explorer/graph?host_id=local&database=chdash_ui&focus_database=otel&focus_table=otel_traces", tok=tok)
+    assert focused.status_code == 403 and focused.json()["action"] == "explorer.read", focused.text
+    graph = call("GET", "/api/explorer/graph?host_id=local&database=chdash_ui", tok=tok)
+    assert graph.status_code == 200, graph.text
+    assert {n.get("database", "") for n in graph.json()["nodes"]} <= {"chdash_ui", ""}, graph.text[:500]
+    meta = call("GET", "/api/meta?host_id=local&database=chdash_ui&types=databases,tables", tok=tok)
+    assert meta.status_code == 200, meta.text
+    body = meta.json()["data"]
+    assert {i["name"] for i in body["databases"]["items"]} == {"chdash_ui"}, body["databases"]
+    assert {i["database"] for i in body["tables"]["items"]} == {"chdash_ui"}, body["tables"]["items"][:5]
+    # The decisions came in one batch for each answer, with each database of the answer.
+    asked_databases = {e["resource"]["id"] for e in asked("explorer.read") if e["resource"]["type"] == "database"}
+    assert "chdash_ui" in asked_databases and len(asked_databases) > 1, asked_databases
+    # With the service, nothing is cut.
+    answer(default=True)
+    full = call("GET", "/api/explorer/storage?host_id=local", tok=tok)
+    assert full.status_code == 200 and len(full.json()["databases"]) > 1, full.text[:300]
+
+
+def make_mcp_key(tok: str, name: str, tools: list[str], databases: list[str]) -> requests.Response:
+    body = {"name": name, "hosts": ["local"], "tools": tools, "databases": databases}
+    return call("POST", "/api/mcp/keys", tok=tok, headers={"Sec-Fetch-Site": "same-origin"}, json=body)
+
+
+def mcp_call(secret: str, tool: str, arguments: dict | None = None) -> requests.Response:
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments or {}}}
+    return SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
+                        headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"})
+
+
+@needs_access
+def test_an_mcp_key_never_has_more_than_its_creator():
+    # mcp.keys.write alone does not give a key the read actions that the PDP refuses to its creator.
+    answer(default=False, allow=["mcp.keys.read", "mcp.keys.write"])
+    tok = token("integrator")
+    for tools, action in ((["system_overview"], "system.read"), (["query_library"], "library.read"),
+                          (["mcp_analysis_all_usage"], "mcp.usage.read"), (["traces_search"], "observability.read"),
+                          (["list_databases"], "explorer.read")):
+        refused = make_mcp_key(tok, f"refused-{uuid.uuid4().hex[:8]}", tools, ["*"])
+        assert refused.status_code == 403 and refused.json()["action"] == action, (tools, refused.text)
+    # With explorer.read on one database, a key on that database is made, and it names its creator.
+    answer(default=False, allow=["mcp.keys.read", "mcp.keys.write", "explorer.read@database:chdash_ui"])
+    assert make_mcp_key(tok, f"wide-{uuid.uuid4().hex[:8]}", ["list_databases"], ["*"]).status_code == 403
+    made = make_mcp_key(tok, f"bound-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases", "list_tables"], ["chdash_ui"])
+    assert made.status_code == 201, made.text
+    key, secret = made.json()["key"], made.json()["secret"]
+    try:
+        assert key["creator"] == "integrator" and key["source"] == "ui"
+        listed = call("GET", "/api/mcp/keys", tok=tok).json()["keys"]
+        assert [k["creator"] for k in listed if k["id"] == key["id"]] == ["integrator"]
+        time.sleep(CACHE_TTL + 0.2)  # the decisions of the creation are in the cache: let them expire
+        before = len(received())
+        working = mcp_call(secret, "list_databases")
+        assert working.status_code == 200 and "error" not in working.json(), working.text
+        assert working.json()["result"]["isError"] is False, working.text
+        # The use asks the PDP for the creator.
+        uses = [e for r in received()[before:] for e in evaluations(r)]
+        assert any(e["subject"]["id"] == "integrator" and e["action"]["name"] == "explorer.read"
+                   and e["resource"] == {"type": "database", "id": "chdash_ui"} for e in uses), uses
+        # The creator loses the grant: the key stops working, with the answer of a key that does not exist.
+        answer(default=False, allow=["mcp.keys.read", "mcp.keys.write"])
+        stopped = mcp_call(secret, "list_databases")
+        assert stopped.status_code == 401, stopped.text
+        assert mcp_call(secret, "list_hosts").status_code == 401
+        # The key of the configuration has no creator and keeps working.
+        assert mcp_call(MCP_TOKEN, "list_hosts").status_code == 200
+    finally:
+        answer(default=True)
+        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 @needs_access

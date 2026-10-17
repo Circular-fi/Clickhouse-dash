@@ -14,6 +14,7 @@
 #include "allowed_objects.hpp"
 #include "ddl_text_cache.hpp"
 #include "format_cache.hpp"
+#include "meta_cache_key.hpp"
 #include "ttl_cache.hpp"
 
 #include <atomic>
@@ -796,6 +797,22 @@ void ddl_text_cache_reads_names_in_batches_and_is_bounded() {
   CHECK(by_bytes.bytes() <= 64 * 1024 && by_bytes.size() < 100 && by_bytes.size() > 0);
 }
 
+// The caller names the database and the table of a column catalog. Two different names never share one entry of the cache.
+void meta_cache_key_separates_what_the_caller_names() {
+  const auto key = [](const char* database, const char* table) { return meta_catalog_cache_key("local", "runner", "columns", true, database, table); };
+  CHECK(key("a::b", "c") != key("a", "b::c"));
+  CHECK(key("a", "b") != key("ab", ""));
+  CHECK(key("a:", ":b") != key("a", "::b"));
+  CHECK(key("a", "b") == key("a", "b"));
+  CHECK(key("a", "b") != meta_catalog_cache_key("local", "runner", "columns", false, "a", "b"));
+  // The host, the credential scope and the type are part of the key.
+  CHECK(meta_catalog_cache_key("one", "runner", "columns", true, "a", "b") != meta_catalog_cache_key("two", "runner", "columns", true, "a", "b"));
+  CHECK(meta_catalog_cache_key("local", "runner", "columns", true, "a", "b") != meta_catalog_cache_key("local", "system", "columns", true, "a", "b"));
+  CHECK(meta_catalog_cache_key("local", "runner", "tables", false, "", "") != meta_catalog_cache_key("local", "runner", "databases", false, "", ""));
+  // A host name never joins with the next part of the key.
+  CHECK(meta_catalog_cache_key("a::runner", "x", "tables", false, "", "") != meta_catalog_cache_key("a", "runner::x", "tables", false, "", ""));
+}
+
 void format_cache_compares_the_text() {
   FormatCache cache(16, 1 << 20, ms(60000));
   cache.put("key", "SELECT 1", std::make_shared<const std::string>("SELECT 1\n"));
@@ -835,6 +852,7 @@ int main() {
   acl_view_asks_each_database_once();
   ddl_text_cache_never_shares_texts_between_identities();
   ddl_text_cache_reads_names_in_batches_and_is_bounded();
+  meta_cache_key_separates_what_the_caller_names();
   format_cache_compares_the_text();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

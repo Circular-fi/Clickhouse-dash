@@ -6,7 +6,8 @@
 //
 // Every imported folder and query belongs to the host of the request. The payload cannot change this host.
 // Folders are merged by name under the same parent. Queries are de-duplicated by name and SQL against the library of the host and within the payload.
-// A name clash that remains in the target folder gets a " (n)" suffix.
+// A name clash that remains in the target folder gets a " (n)" suffix. A name can be renamed at most 1000 times in one import: the next query of that name
+// is refused (413 too_large), and nothing is written. The work of an import grows with its size: it reads the state once, in an index.
 //
 // "copy": true makes a copy, not an import. The browser uses it to move a folder from its own storage into the server library.
 // Nothing is merged, skipped or renamed. A folder whose name its target parent already holds is a 400 duplicate.
@@ -36,7 +37,8 @@ struct ImportOutcome {
   bool changed() const { return imported_folders > 0 || imported_queries > 0; }
 };
 
-// A new id for a folder ('f') or a query ('q') that no item of the state has.
+// A candidate id for a folder ('f') or a query ('q'). The import checks it against an index of the ids of the state, and asks again when an item has it.
+// The function does not need to scan the state.
 using NewId = std::function<std::string(char prefix, const QueryLibraryState& state)>;
 
 // Throws a LibraryError (query_library_request.hpp) for a payload that is refused.

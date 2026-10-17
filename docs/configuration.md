@@ -133,6 +133,7 @@ Every statement that ChDash sends to ClickHouse has a label and bounds. The sett
 - A user with `readonly = 1` cannot change a setting. Its statements get no setting from ChDash, and only its profile bounds them.
 - A `SETTINGS` clause in the SQL has priority over the settings of ChDash. To enforce a bound on the users of the panel, put it in the settings profile of the runner, with a constraint.
 - If ClickHouse refuses a setting of ChDash (`READONLY` or a constraint of the profile), ChDash runs the statement again without its settings. On that connection, ChDash sends no settings again.
+- A statement of a read-only subject of the access of humans (`readonly = 1`, [access.md](access.md)) is not run again. It fails, and the connection keeps its state: its later statements still get all their settings. A `SETTINGS` clause of such a statement can thus never remove the bounds of the connection. If a constraint of the profile of the runner refuses a bound of ChDash, the statements of a read-only subject fail (fail closed): set the bound in the profile, or remove it from the configuration.
 
 | What | `log_comment` | Bounds |
 |---|---|---|
@@ -185,15 +186,60 @@ A host has two ClickHouse users. The health check proves one thing about them: t
 - **The system user** is checked for `SELECT` on the system tables that the Explorer and the System page read. These tables are `system.parts`, `system.disks`, `system.dictionaries`, `system.metrics`, `system.asynchronous_metrics`, `system.clusters` and `system.query_log`. It is also checked for the OpenTelemetry tables that are enabled for the host (the `observability` block, with the host override). ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns` (the rows are filtered by the grants), so the audit does not report them.
 - **The runner** is checked for `SELECT` on at least one table. This can be a database-wide grant or a table-level grant. It is also checked for `SELECT` on `system.functions`, `system.documentation` and `system.dictionaries` (the Functions page and `SHOW DICTIONARIES`).
 - **The MCP user** (`mcp_uri`, when `mcp.enabled`) is checked the same way: `SELECT` on at least one table, and on `system.documentation` (`explorer_functions`). Every tool of Traces, Logs and Metrics reads the OpenTelemetry tables with the system user. That user is checked for them as above, and for `system.data_skipping_indices` when Logs or Metrics are enabled. The findings are in `access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`, `mcp_audited`, `mcp_connected` and `mcp_error`. An MCP user that cannot connect refuses the keys that name the host. A missing grant removes some tools from the keys of the host. The MCP page shows these tools in grey (`docs/mcp.md`).
+- **The privilege `displaySecretsInShowAndSelect`.** The runner and the MCP user are checked for this privilege (`CHECK GRANT displaySecretsInShowAndSelect ON *.*`). A user that holds it is a finding. Refer to [Secrets in the DDL texts](#secrets-in-the-ddl-texts).
 - **A system user that cannot connect** is reported too, though the host stays healthy.
 
 The audit has its own thread and a budget of 60 seconds for each host. It never delays the health check of a host. A finding never stops the start. It appears in three places:
 
 1. The log, once when it appears and again when it changes: `{"event":"access.finding","host":"<name>","finding":"The system user <user> has no SELECT on ..."}` ([operations.md](operations.md#logs)). A host with no finding says nothing.
-2. `GET /api/hosts`, in the `access` object of each host: `ok`, `runner_user`, `system_user`, `runner_reads_nothing`, `runner_missing`, `system_missing` and `warnings` (one sentence each, with the `GRANT` to run). The `error` field of a host that is down says why (the last connection error).
+2. `GET /api/hosts`, in the `access` object of each host: `ok`, `runner_user`, `system_user`, `runner_reads_nothing`, `runner_shows_secrets`, `mcp_shows_secrets`, `runner_missing`, `system_missing` and `warnings` (one sentence each, with the `GRANT` to run). The `error` field of a host that is down says why (the last connection error).
 3. Every error answer that comes from a missing grant. The text of ClickHouse ("Not enough privileges") becomes `reason: "not_granted"` with `user`, `grant` and `hint` (`GRANT SELECT ON system.parts TO chdash_sysnone_user;`), whichever route answers.
 
 `tests/backend-functional/test_privileges.py` is the matrix of these setups. The setups are: a runner limited to two databases, a runner that reads nothing, a system user that reads nothing, and a user that does not exist. The tests that it marks `xfail` list what the code still does not do the same way everywhere.
+
+### Secrets in the DDL texts
+
+ClickHouse can mask the secrets in the DDL of an object. A secret is a key or a password of an `S3`, `MySQL`, `PostgreSQL` or `URL` engine or table function. The masked text has `'[HIDDEN]'` in place of each secret. Three columns of `system.tables` have such a text: `create_table_query`, `engine_full` and `as_select`.
+
+ChDash reads these three columns as the runner. The runner is the identity that bounds the caller. For the API tools of MCP, the runner is the MCP user. The system user never gives a DDL text. A caller of the Explorer or of an API tool gets the text that the runner sees, and no more.
+
+A user reads the clear text when three conditions hold together:
+
+| # | Condition | Default |
+| --- | --- | --- |
+| 1 | The server setting `display_secrets_in_show_and_select` is `true`. It is in the configuration file of the server. | `false` |
+| 2 | The setting `format_display_secrets_in_show_and_select` is `1` for the query. The profile of the user sets it, or the query sets it. | `0` |
+| 3 | The user holds the privilege `displaySecretsInShowAndSelect`. | not granted |
+
+The test of this rule ran on ClickHouse 26.7.5.10, the version of the test stack. The users had `SELECT` on the tables. The tables had a secret in an `S3` engine and in a view that calls `s3()`:
+
+| User | Server setting (1) | Format setting (2) | Privilege (3) | Text that the user reads |
+| --- | --- | --- | --- | --- |
+| plain | on | `0` | no | masked |
+| plain, query sets the format setting to `1` | on | `1` | no | masked |
+| privilege only | on | `0` | yes | masked |
+| privilege, profile sets the format setting to `1` | on | `1` | yes | clear |
+| privilege, `readonly = 2`, query sets the format setting to `1` | on | `1` | yes | clear |
+| privilege, profile with `format_display_secrets_in_show_and_select = 0 CONST` | on | locked at `0` | yes | masked. A query that sets `1` fails with `SETTING_CONSTRAINT_VIOLATION`. |
+| privilege, profile sets the format setting to `1` | off | `1` | yes | masked |
+
+`CHECK GRANT displaySecretsInShowAndSelect ON *.*` gives `1` to a user that holds the privilege. It also gives `1` to a user that has all the privileges. It gives `0` to any other user.
+
+A user with `readonly = 2` can change every setting except `readonly`. Its query can set the format setting. A profile with `readonly = 1` refuses every change of a setting.
+
+What to do:
+
+- Do not grant `displaySecretsInShowAndSelect` to the runner or to the MCP user.
+- If one of them must hold it, lock the format setting in its settings profile. A constraint that cannot change the value is `CONST`:
+
+  ```sql
+  CREATE SETTINGS PROFILE chdash_runner_profile SETTINGS format_display_secrets_in_show_and_select = 0 CONST TO chdash_runner;
+  ```
+
+  A `readonly` constraint on the setting has the same effect: `SETTINGS format_display_secrets_in_show_and_select = 0 READONLY`.
+- Leave the server setting `display_secrets_in_show_and_select` off when no user needs it.
+
+The access audit checks the privilege of the runner and of the MCP user every 10 minutes. It does not check the profile, so it reports each holder, also when a constraint locks the setting. A holder is a finding: the log line `access.finding`, `warnings` in `GET /api/hosts` and the fields `runner_shows_secrets` and `mcp_shows_secrets`. A finding never stops the start.
 
 ## Authorization model
 
@@ -205,7 +251,7 @@ ChDash has no login page and no user directory. The `access` block selects one o
 In the two models, the credentials of the configured host limit the access to ClickHouse:
 
 - `runner_uri` is the ClickHouse authorization boundary. It is the **only** connection on which the dashboard can run panel-supplied SQL.
-- `system_uri` is a technical connection of the backend. The backend uses it only for the metadata queries and log queries that it generates, and for cancellation. The cancel of a run, of an export and of a Deep Analyze job (and the stop of the server) send their `KILL QUERY` through it.
+- `system_uri` is a technical connection of the backend. The backend uses it only for the metadata queries and log queries that it generates, and for cancellation. It never reads a DDL text that ClickHouse masks by user. The cancel of a run, of an export and of a Deep Analyze job (and the stop of the server) send their `KILL QUERY` through it.
 
 Every caller who has an action on a given panel and host therefore has the same ClickHouse permissions. These are the permissions of its `runner_uri` (with `readonly = 1` without `query.run.write`). If you need different sets of data permissions, expose different deployments or hosts that use different runners.
 
@@ -372,7 +418,7 @@ The backend keeps what it reads from ClickHouse in bounded caches (`src/ttl_cach
 - Only `ACCESS_DENIED` (code 497) means "not readable". Another server error about one object leaves that object out. A connection error or a timeout is not an answer: the route answers 503, and the failure is not kept beyond 2 s. An ACL that cannot be read again is never sent from memory.
 - One discovery checks at most 4,000 objects in 20 s. To decide whether a database is readable, it probes at most 400 of its objects. Past a bound, the answer says `acl_truncated` (Explorer) or `truncated` (MCP), and the objects that were not checked are not shown.
 
-**The DDL texts.** The Explorer keeps the `engine_full` and `create_table_query` texts of the objects by identity. The identity is the SHA-256 of the URI of the connection, because ClickHouse masks the secrets of these texts by user. It reads at most 2,000 names in one query. The limits are 200,000 entries and 128 MiB.
+**The DDL texts.** The Explorer keeps the `engine_full`, `create_table_query` and `as_select` texts of the objects by identity. It reads them as the runner (as the MCP user for the API tools of MCP). The system user never gives one. The identity is the SHA-256 of the URI of the connection, because ClickHouse masks the secrets of these texts by user ([Secrets in the DDL texts](#secrets-in-the-ddl-texts)). It reads at most 2,000 names in one query. The limits are 200,000 entries and 128 MiB.
 
 **The format cache** (`format_cache { }`). The key has the host, the ClickHouse version of the host (its health check), the line width and the SHA-256 of the text. A hit also compares the text. Only the text that was formatted is a key. The formatter runs again on a text that is already formatted. A text that the formatter returned as written, with a warning, is not kept: the next request checks it again.
 

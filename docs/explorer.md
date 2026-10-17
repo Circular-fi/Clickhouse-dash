@@ -36,7 +36,7 @@ For each section, the `unavailable` object gives `reason: "not_granted"`, the `u
 
 A runner with `SHOW` and `SELECT` on a few databases is a normal setup. `SHOW DICTIONARIES` reads `system.dictionaries`. The runner cannot read that table (`ACCESS_DENIED`). The Explorer then lists only the dictionaries that `SHOW TABLES` returns. It does not fail. Any other error of the listing is still an error.
 
-The important rule is this: `system_uri` is for enrichment only. It never authorizes an object. It never runs SQL that a panel caller supplies. If different callers need different ClickHouse ACLs, use distinct deployments or hosts with different runners. Do this outside ChDash.
+The important rule is this: `system_uri` is for enrichment only. It never authorizes an object. It never runs SQL that a panel caller supplies. It never gives a DDL text: ClickHouse masks the secrets in `create_table_query`, `engine_full` and `as_select` for each user, so ChDash reads these three columns as the runner. The section "Secrets in the DDL texts" of `docs/configuration.md` gives the rules. If different callers need different ClickHouse ACLs, use distinct deployments or hosts with different runners. Do this outside ChDash.
 
 ## Shell and navigation
 

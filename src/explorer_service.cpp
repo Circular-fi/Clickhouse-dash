@@ -38,7 +38,14 @@ Result<Cached<ExplorerCatalog>> ExplorerService::catalog(const RequestContext&, 
   using Out = Result<Cached<ExplorerCatalog>>;
   std::string list_key = list_prefix(host_id);
   list_key.push_back('\0');
-  list_key += database_filter.empty() ? std::string("@databases") : database_filter;
+  // 'A' is the list of all the databases. 'D' and a name is one database. A name that the caller chooses cannot change the tag, so no name
+  // (for example "@databases") can reach the entry of the whole list, which needs a grant on the service.
+  if (database_filter.empty()) {
+    list_key.push_back('A');
+  } else {
+    list_key.push_back('D');
+    list_key += database_filter;
+  }
   const AclAccess access = access_of_(host);
   if (refresh) {
     // A global refresh reads the privileges of the runner again. It also reads the rich graph metadata again.
@@ -336,7 +343,7 @@ Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec
   const AclAccess access = access_of_(host);
   if (refresh) {
     acl_.invalidate(access);
-    // Sidebar entries are keyed "<scope>\0catalog-list\0<database|@databases>".
+    // Sidebar entries are keyed "<scope>\0catalog-list\0A" (all the databases) or "<scope>\0catalog-list\0D<database>".
     stores_.list.invalidate_prefix(list_prefix(host_id));
     stores_.functions.invalidate(functions_key(host_id));
   }
@@ -350,7 +357,7 @@ Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec
   }
 
   const std::string system_uri = system_uri_of(host);
-  const ExplorerIdentities identities{acl_identity_key(system_uri), access.key};
+  const ExplorerIdentities identities{access.key};
   // After their TTL, both cached answers are served at once while one refresh runs. The fetches own the data that they use.
   auto catalog_result = stores_.catalog.get_revalidating(
       catalog_key(host_id),
@@ -379,11 +386,17 @@ Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec
   const std::shared_ptr<const ExplorerCatalog> catalog = catalog_result.value;
   auto graph_result = stores_.graph.get_revalidating(
       graph_key(host_id),
-      [this, system_uri, allowed, catalog, identities](ExplorerGraph& value, std::string& code, std::string& message) {
+      [this, host_spec = host, system_uri, allowed, catalog, identities](ExplorerGraph& value, std::string& code, std::string& message) {
         std::string error;
         auto system = connect_(system_uri, &error);
         if (!system) { code = "system_context_unavailable"; message = error; return false; }
-        if (!load_explorer_graph(*system, caches_, identities.system, allowed->allowed, *catalog, value, &error)) {
+        auto runner = connect_(host_spec.runner_uri, &error);
+        if (!runner) {
+          code = "runner_unavailable";
+          message = reason_or(error, "Cannot connect to the runner context.");
+          return false;
+        }
+        if (!load_explorer_graph(*system, *runner, caches_, identities.runner, allowed->allowed, *catalog, value, &error)) {
           code = "explorer_graph_failed"; message = error; return false;
         }
         return true;

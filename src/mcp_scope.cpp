@@ -1,5 +1,6 @@
 #include "mcp_scope.hpp"
 
+#include "access_actions.hpp"
 #include "mcp_api_tools.hpp"
 
 #include <algorithm>
@@ -335,6 +336,69 @@ bool mcp_scope_tool_allowed(const std::vector<std::string>& tools, const std::ve
                             std::string_view tool) {
   const auto effective = mcp_effective_tools(tools, databases);
   return std::find(effective.begin(), effective.end(), tool) != effective.end();
+}
+
+const char* mcp_tool_access_action(const McpToolInfo& tool) {
+  if (tool.api) {
+    const AccessRule rule = access_rule(tool.api->method, tool.api->path);
+    switch (rule.kind) {
+      case AccessRuleKind::Action:
+      case AccessRuleKind::Deferred:
+        return rule.action;
+      case AccessRuleKind::Run:
+        return "query.run.read";
+      case AccessRuleKind::Export:
+        return "query.export";
+      case AccessRuleKind::Exempt:
+      case AccessRuleKind::Identity:
+        return nullptr;
+      case AccessRuleKind::Unknown:
+        return "unknown";
+    }
+    return "unknown";
+  }
+  const std::string_view name = tool.name;
+  const std::string_view group = tool.group;
+  if (name == "list_hosts" || name == "mcp_analysis_my_limits" || name == "mcp_analysis_my_usage") return nullptr;
+  if (name == "mcp_analysis_all_usage") return "mcp.usage.read";
+  if (group == "data") return "explorer.read";
+  if (group == "observability") return "observability.read";
+  if (group == "sql") return "query.run.read";
+  return "unknown";
+}
+
+std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
+                                                     const std::string& service_id) {
+  // The databases that the scope names. A wildcard in a database part names databases that nobody can list here: the service.
+  bool any_database = false;
+  std::vector<std::string> named;
+  for (const auto& entry : databases) {
+    const std::string database = entry.substr(0, entry.find('.'));
+    if (database.find('*') != std::string::npos) any_database = true;
+    else if (std::find(named.begin(), named.end(), database) == named.end()) named.push_back(database);
+  }
+  std::vector<AccessQuestion> out;
+  const auto add = [&](const char* action, const char* type, const std::string& id) {
+    const bool known = std::any_of(out.begin(), out.end(), [&](const AccessQuestion& q) {
+      return q.action == action && q.resource.type == type && q.resource.id == id;
+    });
+    if (!known) out.push_back(AccessQuestion{action, AccessResource{type, id}});
+  };
+  for (const auto& name : mcp_effective_tools(tools, databases)) {
+    const McpToolInfo* tool = mcp_find_tool(name);
+    if (!tool) continue;
+    const char* action = mcp_tool_access_action(*tool);
+    if (!action) continue;
+    // The tools that read only the tables of the scope: the data tools and the Explorer tools of a table or of the catalog.
+    const bool scoped = !tool->needs_all_data && std::string_view(action) == "explorer.read" &&
+                        (!tool->api || tool->api->scope != McpApiScope::Free);
+    if (!scoped || any_database) {
+      add(action, "service", service_id);
+      continue;
+    }
+    for (const auto& database : named) add(action, "database", database);
+  }
+  return out;
 }
 
 } // namespace chdash

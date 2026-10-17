@@ -951,7 +951,7 @@ void test_the_totals_of_the_databases() {
   CHECK(error.find("broken") != std::string::npos);
 }
 
-ExplorerIdentities identities() { return ExplorerIdentities{"system-key", "runner-key"}; }
+ExplorerIdentities identities() { return ExplorerIdentities{"runner-key"}; }
 
 void test_the_catalog_of_the_graph() {
   FakeDb system, runner;
@@ -959,8 +959,8 @@ void test_the_catalog_of_the_graph() {
                                          base_row("db", "dst", "MergeTree", "100", "800"), base_row("db", "mem", "Memory", "1", "4096"),
                                          base_row("db", "notes", "Log", "0", "300"), base_row("db", "dict", "Dictionary", "1", "50"),
                                          base_row("db", "repl", "ReplicatedMergeTree", "10", "100"), base_row("db", "hidden", "MergeTree", "1", "1")});
-  // The texts of the DDL come from their own statement (engine_full, the DDL and the SELECT).
-  system.on("toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}",
+  // The texts of the DDL come from their own statement (engine_full, the DDL and the SELECT). The runner reads them: ClickHouse masks their secrets for each user.
+  runner.on("toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}",
             {{"db", "buf", "Buffer(db, dst, 16, 10, 100, 10000, 1000000, 10000000, 100000000)", "", ""}});
   system.on("FROM system.dictionaries", {{"db", "dict", "7", "2048"}});
   system.on("SELECT toString(database), toString(`table`), toString(sum(rows))", {{"db", "events", "50", "5000", "2000", "4000", "6", "2", "default,cold", "2026-10-11 06:00:00", "123"},
@@ -1167,7 +1167,9 @@ void test_the_summary_of_a_table() {
   const auto summary_row = [](const std::string& engine, const std::string& full, const std::string& rows, const std::string& bytes) {
     return Row{"db", "t", engine, full, "ts", "ts", "toDate(ts)", "", "tiered", rows, bytes, "9000", "/var/lib/clickhouse/data/db/t/", "2026-10-11 01:02:03"};
   };
-  system.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1", {summary_row("MergeTree", "MergeTree ORDER BY ts", "1", "2")});
+  system.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1", {summary_row("MergeTree", "MergeTree ORDER BY ts /* the text of the system account */", "1", "2")});
+  // engine_full is the text of the runner: ClickHouse masks its secrets for each user.
+  runner.on("SELECT toString(engine_full) FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1", {{"MergeTree ORDER BY ts"}});
   system.on("secondary_indices_compressed_bytes)) FROM system.parts", {{"88"}});
   system.on("FROM system.parts WHERE active AND database = {p1:String} AND `table` = {p2:String}", {{"40", "4000", "1500", "3000", "5", "2", "default,cold", "2026-10-11 05:00:00"}});
   system.on("FROM system.projection_parts", {{"66"}});
@@ -1200,7 +1202,10 @@ void test_the_summary_of_a_table() {
   CHECK(out.replication.replicas[0].first == "r1" && out.replication.replicas[0].second);
   CHECK(out.replication.replicas[1].first == "r2" && !out.replication.replicas[1].second);
   CHECK_EQ(out.health, std::string("healthy"));   // 3 replicas of 3 are active, nothing is queued
-  CHECK(runner.sqls.empty());
+  // The runner is asked for engine_full alone. The text of the system account is never kept.
+  CHECK_EQ(out.engine_full, std::string("MergeTree ORDER BY ts"));
+  CHECK_EQ(runner.sqls.size(), size_t(1));
+  CHECK(runner.sqls[0].find("SELECT toString(engine_full) FROM system.tables") == 0);
   // The runner gives the same table when the system account has nothing. A table that nobody lists is not found.
   FakeDb empty, fallback;
   fallback.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1", {summary_row("Log", "Log", "0", "300")});
@@ -1223,12 +1228,15 @@ void test_the_summary_of_a_buffer_a_dictionary_and_a_log_table() {
   system.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1",
             {{"db", "t", "Buffer", "Buffer(currentDatabase(), dst, 16, 10, 100, 10000, 1000000, 10000000, 100000000)", "", "", "", "", "", "130", "100", "", "", "2026-10-11 00:00:00"}});
   system.on("SELECT toString(total_rows) FROM system.tables", {});
+  runner.on("SELECT toString(engine_full) FROM system.tables", {{"Buffer(currentDatabase(), dst, 16, 10, 100, 10000, 1000000, 10000000, 100000000)"}});
   runner.on("SELECT toString(total_rows) FROM system.tables", {{"100"}});
   CHECK(load_explorer_table_summary(system, runner, allowed, "db", "t", out, &error));
   CHECK(out.rows && *out.rows == 30);
   CHECK(out.resident_bytes && !out.logical_bytes);
-  CHECK_EQ(runner.params[0][0].second, std::string("db"));
-  CHECK_EQ(runner.params[0][1].second, std::string("dst"));
+  // The first statement of the runner reads engine_full. The second asks for the figure of the destination.
+  CHECK(runner.sqls.size() >= 2 && runner.sqls[1].find("SELECT toString(total_rows) FROM system.tables") == 0);
+  CHECK_EQ(runner.params[1][0].second, std::string("db"));
+  CHECK_EQ(runner.params[1][1].second, std::string("dst"));
   // A dictionary has the rows and the allocation of system.dictionaries.
   FakeDb dict, none;
   dict.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1", {{"db", "t", "Dictionary", "", "", "", "", "", "", "", "", "", "", "2026-10-11 00:00:00"}});
@@ -1246,7 +1254,7 @@ void test_the_card_of_a_table() {
   summary.engine_full = "MergeTree ORDER BY ts";
   summary.rows = 10;
   summary.logical_bytes = 1000;
-  system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (`ts` DateTime, `s` String) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 7 DAY DELETE"}});
+  runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (`ts` DateTime, `s` String) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 7 DAY DELETE"}});
   // name, type, default kind, default, codec, compressed, uncompressed, comment, partition key, sorting key, primary key, sampling key
   system.on("FROM system.columns WHERE", {{"ts", "DateTime", "", "", "CODEC(Delta, ZSTD)", "100", "400", "when", "1", "1", "1", "0"}, {"s", "String", "", "", "", "300", "900", "", "0", "0", "0", "0"},
                                            {"hidden", "String", "", "", "", "1", "1", "", "0", "0", "0", "0"}});
@@ -1330,7 +1338,7 @@ void test_a_neighbour_in_the_lineage_is_named_only_when_the_runner_reads_it() {
   // The runner reads `t` and `v` of db. `secret` is not in the list. So CHECK GRANT is never asked for it as readable.
   AclView view(acl, readable_access({{"db", {"t", "v"}}}));
   ExplorerTableSummary summary = table_summary("db", "t", "MergeTree");
-  system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (`ts` DateTime) ENGINE = MergeTree ORDER BY ts"}});
+  runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (`ts` DateTime) ENGINE = MergeTree ORDER BY ts"}});
   system.on("FROM system.columns WHERE", {{"ts", "DateTime", "", "", "", "1", "1", "", "0", "0", "0", "0"}});
   system.on("toString(tupleElement(dep, 1)), toString(tupleElement(dep, 2)) FROM (SELECT arrayJoin(arrayZip(dependencies_database", {{"db", "v"}, {"db", "row"}, {"secret", "x"}, {"db", "_row"}});
   system.on("has(dependencies_table", {{"db", "v"}});
@@ -1351,7 +1359,7 @@ void test_a_section_that_cannot_be_read_degrades_the_card_and_a_view_without_sch
   AclService acl(AclService::Options{});
   AclView view(acl, readable_access({{"db", {"v"}}}));
   ExplorerTableSummary summary = table_summary("db", "v", "View");
-  system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE VIEW db.v AS SELECT 1 AS a WHERE {x:UInt8} = 1"}});
+  runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE VIEW db.v AS SELECT 1 AS a WHERE {x:UInt8} = 1"}});
   // A parameterized view has no row in system.columns. DESCRIBE refuses it.
   system.fail_on("DESCRIBE TABLE", [] { throw server_error(36, "Query parameter x was not set"); });
   runner.fail_on("DESCRIBE TABLE", [] { throw server_error(36, "Query parameter x was not set"); });
@@ -1367,7 +1375,7 @@ void test_a_section_that_cannot_be_read_degrades_the_card_and_a_view_without_sch
   // A table (not a view) with no readable column is an error.
   FakeDb table_system, table_runner;
   ExplorerTableSummary plain = table_summary("db", "v", "MergeTree");
-  table_system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.v (a Int8) ENGINE = MergeTree ORDER BY a"}});
+  table_runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.v (a Int8) ENGINE = MergeTree ORDER BY a"}});
   CHECK(!load_explorer_table_detail(table_system, table_runner, view, allowed_of({{"db", "v"}}), "db", "v", plain, detail, &error));
   CHECK_EQ(error, std::string("Column metadata query returned no readable columns for db.v"));
   // The DDL that nobody can read is the error of the card.
@@ -1389,7 +1397,7 @@ void test_the_distributed_table_and_its_queue() {
   AclView view(acl, readable_access({{"db", {"d", "local"}}}));
   ExplorerTableSummary summary = table_summary("db", "d", "Distributed");
   summary.engine_full = "Distributed('c1', db, local, rand())";
-  system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.d (a Int8) ENGINE = Distributed('c1', db, local, rand())"}});
+  runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.d (a Int8) ENGINE = Distributed('c1', db, local, rand())"}});
   system.on("FROM system.columns WHERE", {{"a", "Int8", "", "", "", "", "", "", "0", "0", "0", "0"}});
   system.on("FROM system.distribution_queue", {{"/path/", "1", "2", "3", "4", "5", "6", "boom", "2026-10-11 00:00:00"}});
   system.on("FROM system.clusters WHERE cluster = {p1:String}", {{"c1", "1", "1", "h1", "10.0.0.1", "9000", "1", "0", "0", "0"}});
@@ -1521,14 +1529,15 @@ void test_the_preview_of_a_table() {
 }
 
 void test_the_graph_is_read_as_the_system_account_and_built() {
-  FakeDb system;
+  // The system account gives the structure and the numbers. The runner gives the DDL texts, which ClickHouse masks for each user.
+  FakeDb system, runner;
   system.on("FROM system.disks ORDER BY name", {{"host1", "default", "/var/lib/clickhouse/", "local", "10", "100"}});
   system.on("FROM system.storage_policies", {{"tiered", "hot", "1", "default", "JBOD", "0", "0.1"}});
   // database, name, engine, data paths, modification time, recently modified
   system.on("arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time), toString(toUInt8", {
       {"db", "src", "MergeTree", "", "2026-10-11 00:00:00", "0"}, {"db", "mv", "MaterializedView", "", "2026-10-11 00:00:00", "0"}, {"db", "dst", "MergeTree", "", "2026-10-11 00:00:00", "0"},
       {"db", "dist", "Distributed", "", "2026-10-11 00:00:00", "0"}, {"secret", "hidden", "MergeTree", "", "2026-10-11 00:00:00", "0"}});
-  system.on_fn("toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}", [](const std::string&) -> Rows {
+  runner.on_fn("toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}", [](const std::string&) -> Rows {
     return {{"db", "src", "MergeTree ORDER BY ts", "", ""}, {"db", "dst", "MergeTree ORDER BY ts", "", ""},
             {"db", "mv", "", "CREATE MATERIALIZED VIEW db.mv TO db.dst AS SELECT * FROM db.src", "SELECT * FROM db.src"},
             {"db", "dist", "Distributed(c1, db, dst, rand())", "", ""}};
@@ -1547,7 +1556,7 @@ void test_the_graph_is_read_as_the_system_account_and_built() {
   ExplorerCaches caches;
   ExplorerGraph graph;
   std::string error;
-  CHECK(load_explorer_graph(system, caches, "system-key", allowed, catalog, graph, &error));
+  CHECK(load_explorer_graph(system, runner, caches, "runner-key", allowed, catalog, graph, &error));
   CHECK_EQ(graph.metric_scope, std::string("local-replica"));
   CHECK((graph.unavailable_sections == std::vector<std::string>{"part_ingress"}));
   CHECK(graph.refreshable_views_available);
@@ -1562,9 +1571,11 @@ void test_the_graph_is_read_as_the_system_account_and_built() {
   CHECK_EQ(system.count("FROM system.storage_policies"), size_t(1));
   CHECK_EQ(system.count("FROM system.clusters"), size_t(1));
   // The DDL texts come from the cache of the server. The second graph asks nothing new for them.
-  const size_t ddl_reads = system.count("toString(create_table_query)");
-  CHECK(load_explorer_graph(system, caches, "system-key", allowed, catalog, graph, &error));
-  CHECK_EQ(system.count("toString(create_table_query)"), ddl_reads);
+  const size_t ddl_reads = runner.count("toString(create_table_query)");
+  CHECK(ddl_reads > 0);
+  CHECK_EQ(system.count("toString(create_table_query)"), size_t(0));
+  CHECK(load_explorer_graph(system, runner, caches, "runner-key", allowed, catalog, graph, &error));
+  CHECK_EQ(runner.count("toString(create_table_query)"), ddl_reads);
   // A system account that may not read system.disks degrades the graph. The answer names the grant.
   FakeDb limited;
   limited.fail_on("FROM system.disks ORDER BY name", denied("SELECT ON system.disks"));
@@ -1572,7 +1583,7 @@ void test_the_graph_is_read_as_the_system_account_and_built() {
   limited.on("FROM (SELECT toString(database) AS database", {});
   limited.on("view_refreshes", {{"0"}});
   ExplorerCatalog bare;
-  CHECK(load_explorer_graph(limited, caches, "other-key", allowed, bare, graph, &error));
+  CHECK(load_explorer_graph(limited, runner, caches, "other-key", allowed, bare, graph, &error));
   CHECK((graph.unavailable_sections == std::vector<std::string>{"disk"}));
   CHECK_EQ(graph.unavailable_issues[0].grant, std::string("SELECT ON system.disks"));
   CHECK(!graph.refreshable_views_available);
@@ -1580,7 +1591,7 @@ void test_the_graph_is_read_as_the_system_account_and_built() {
   FakeDb broken;
   broken.on("arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time), toString(toUInt8", {{"db", "src", "MergeTree", "", "2026-10-11 00:00:00", "0"}});
   broken.fail_on("FROM (SELECT toString(database) AS database", [] { throw server_error(60, "dependencies are gone"); });
-  CHECK(!load_explorer_graph(broken, caches, "third-key", allowed, bare, graph, &error));
+  CHECK(!load_explorer_graph(broken, runner, caches, "third-key", allowed, bare, graph, &error));
   CHECK(error.find("Graph dependency metadata query failed") == 0);
 }
 
@@ -2204,7 +2215,7 @@ void test_the_service_keeps_the_card_of_a_table() {
   ServiceRig rig;
   rig.system.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1",
                 {{"db", "t", "MergeTree", "MergeTree ORDER BY a", "a", "a", "", "", "", "1", "2", "3", "", "2026-10-11 00:00:00"}});
-  rig.system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (a Int8) ENGINE = MergeTree ORDER BY a"}});
+  rig.runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (a Int8) ENGINE = MergeTree ORDER BY a"}});
   rig.system.on("FROM system.columns WHERE", {{"a", "Int8", "", "", "", "1", "1", "", "1", "1", "1", "0"}});
   rig.runner.on("GROUP BY database ORDER BY database", {{"db", "2", "20", "200"}});
   RequestContext context;
@@ -2293,7 +2304,7 @@ void test_the_service_scopes_the_graph_and_answers_definitions() {
   rig.system.on("ORDER BY database, name", {base_row("db", "src", "MergeTree", "5", "500"), base_row("db", "mv", "MaterializedView", "", ""), base_row("db", "dst", "MergeTree", "1", "10")});
   rig.system.on("arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time), toString(toUInt8", {
       {"db", "src", "MergeTree", "", "2026-10-11 00:00:00", "0"}, {"db", "mv", "MaterializedView", "", "2026-10-11 00:00:00", "0"}, {"db", "dst", "MergeTree", "", "2026-10-11 00:00:00", "0"}});
-  rig.system.on_fn("toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}", [](const std::string&) -> Rows {
+  rig.runner.on_fn("toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}", [](const std::string&) -> Rows {
     return {{"db", "src", "MergeTree", "", ""}, {"db", "dst", "MergeTree", "", ""},
             {"db", "mv", "", "CREATE MATERIALIZED VIEW db.mv TO db.dst AS SELECT * FROM db.src", "SELECT * FROM db.src"}};
   });
@@ -2368,6 +2379,141 @@ void test_the_neighbours_of_a_view_are_read_by_the_one_lexer() {
   CHECK_EQ(target("CREATE MATERIALIZED VIEW v REFRESH EVERY 1 HOUR TO t AS SELECT 1"), std::string("db.t"));
 }
 
+
+// A grant on some databases (docs/access.md): the graph and the storage map keep only the databases that the subject may read.
+// A lineage that crosses into another database loses that part. A shard or a replica of a cluster stays while it links to a node
+// that stays.
+// The texts that ClickHouse masks for each user (create_table_query, engine_full, as_select) are the view of the runner, the identity that
+// bounds the caller. The system account may see more of them (the privilege displaySecretsInShowAndSelect), so it never reads them.
+void test_the_masked_ddl_texts_are_read_as_the_runner() {
+  const std::string secret = "TOPSECRET789";
+  const std::string masked = "[HIDDEN]";
+  RequestContext context;
+  {
+    // The card of a table: the DDL and engine_full.
+    ServiceRig rig;
+    rig.system.on("FROM system.tables WHERE database = {p1:String} AND name = {p2:String} LIMIT 1",
+                  {{"db", "t", "S3", "S3('http://h/b', 'KEY', '" + secret + "', 'CSV')", "", "", "", "", "", "1", "2", "3", "", "2026-10-11 00:00:00"}});
+    rig.system.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (a Int8) ENGINE = S3('http://h/b', 'KEY', '" + secret + "', 'CSV')"}});
+    rig.system.on("FROM system.columns WHERE", {{"a", "Int8", "", "", "", "1", "1", "", "1", "1", "1", "0"}});
+    rig.runner.on("SELECT toString(engine_full) FROM system.tables", {{"S3('http://h/b', 'KEY', '" + masked + "', 'CSV')"}});
+    rig.runner.on("toString(create_table_query) FROM system.tables WHERE", {{"CREATE TABLE db.t (a Int8) ENGINE = S3('http://h/b', 'KEY', '" + masked + "', 'CSV')"}});
+    const auto card = rig.service->table(context, explorer_host(), "local", "db", "t", false);
+    CHECK(card);
+    CHECK(card.value->value->create_table_query.find(masked) != std::string::npos);
+    CHECK(card.value->value->create_table_query.find(secret) == std::string::npos);
+    CHECK(card.value->value->summary.engine_full.find(masked) != std::string::npos);
+    CHECK(card.value->value->summary.engine_full.find(secret) == std::string::npos);
+    CHECK_EQ(rig.system.count("create_table_query"), size_t(0));
+  }
+  {
+    // The graph and the definition of a view.
+    ServiceRig rig;
+    rig.readable = {{"db", {"src", "mv", "dst"}}};
+    rig.system.on("ORDER BY database, name", {base_row("db", "src", "MergeTree", "5", "500"), base_row("db", "mv", "MaterializedView", "", ""), base_row("db", "dst", "MergeTree", "1", "10")});
+    rig.system.on("arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time), toString(toUInt8", {
+        {"db", "src", "MergeTree", "", "2026-10-11 00:00:00", "0"}, {"db", "mv", "MaterializedView", "", "2026-10-11 00:00:00", "0"}, {"db", "dst", "MergeTree", "", "2026-10-11 00:00:00", "0"}});
+    const auto texts = [](const std::string& word) {
+      return [word](const std::string&) -> Rows {
+        return {{"db", "src", "MergeTree", "", ""}, {"db", "dst", "MergeTree", "", ""},
+                {"db", "mv", "", "CREATE MATERIALIZED VIEW db.mv TO db.dst AS SELECT * FROM db.src WHERE k = '" + word + "'", "SELECT * FROM db.src WHERE k = '" + word + "'"}};
+      };
+    };
+    const std::string statement = "toString(engine_full), toString(create_table_query), toString(as_select) FROM system.tables WHERE database = {p1:String}";
+    rig.system.on_fn(statement, texts(secret));
+    rig.runner.on_fn(statement, texts(masked));
+    rig.system.on("FROM (SELECT toString(database) AS database", {{"db", "src", "db", "mv"}});
+    rig.system.on("view_refreshes", {{"0"}});
+    const auto definition = rig.service->definition(context, explorer_host(), "local", "db", "mv", false);
+    CHECK(definition);
+    CHECK_EQ(definition.value->definition->select_sql, std::string("SELECT * FROM db.src WHERE k = '[HIDDEN]'"));
+    CHECK_EQ(rig.system.count("toString(create_table_query)"), size_t(0));
+  }
+}
+
+// The key of the list of the catalog holds a database name that the caller chooses. The key of the whole catalog is never a name.
+void test_the_catalog_key_of_a_database_filter_never_aliases_the_whole_catalog() {
+  RequestContext context;
+  {
+    ServiceRig rig;
+    rig.runner.on("GROUP BY database ORDER BY database", {{"db", "2", "20", "200"}, {"other", "1", "1", "5"}});
+    const auto all = rig.service->catalog(context, explorer_host(), "local", "", false);
+    CHECK(all && all.value->value->databases.size() == 2);
+    // A database named "@databases" has no object that the runner reads. Its answer is empty. It is not the whole catalog.
+    const auto alias = rig.service->catalog(context, explorer_host(), "local", "@databases", false);
+    CHECK(alias);
+    CHECK(alias.value->value->databases.empty() && alias.value->value->tables.empty());
+  }
+  {
+    ServiceRig rig;
+    rig.runner.on("GROUP BY database ORDER BY database", {{"db", "2", "20", "200"}, {"other", "1", "1", "5"}});
+    const auto alias = rig.service->catalog(context, explorer_host(), "local", "@databases", false);
+    CHECK(alias && alias.value->value->databases.empty());
+    // The empty answer of the filter never answers the request of the whole catalog.
+    const auto all = rig.service->catalog(context, explorer_host(), "local", "", false);
+    CHECK(all && all.value->value->databases.size() == 2);
+  }
+}
+
+void test_a_grant_on_some_databases_cuts_the_graph_and_the_storage_map() {
+  const auto node = [](const std::string& id, const std::string& database, const std::string& layer = "logical") {
+    ExplorerGraphNode n;
+    n.id = id;
+    n.database = database;
+    n.layer = layer;
+    n.name = id;
+    return n;
+  };
+  const auto edge = [](const std::string& from, const std::string& to) {
+    ExplorerGraphEdge e;
+    e.id = from + "->" + to;
+    e.from = from;
+    e.to = to;
+    e.kind = "contains";
+    return e;
+  };
+  ExplorerGraph graph;
+  graph.nodes = {node("table:tenant_a.visible", "tenant_a"), node("table:tenant_z.hidden_ledger", "tenant_z"),
+                 node("table:tenant_z.ledger_mv", "tenant_z"), node("table:tenant_a.dist", "tenant_a"),
+                 node("physical:cluster:c:shard:1", "", "physical"), node("physical:cluster:c:shard:1:replica:1", "", "physical"),
+                 node("physical:cluster:d:shard:1", "", "physical")};
+  graph.edges = {edge("table:tenant_a.visible", "table:tenant_z.hidden_ledger"), edge("table:tenant_z.hidden_ledger", "table:tenant_z.ledger_mv"),
+                 edge("table:tenant_a.dist", "physical:cluster:c:shard:1"),
+                 edge("physical:cluster:c:shard:1", "physical:cluster:c:shard:1:replica:1"),
+                 edge("table:tenant_z.ledger_mv", "physical:cluster:d:shard:1")};
+  CHECK(graph_databases(graph) == (std::vector<std::string>{"tenant_a", "tenant_z"}));
+  const ExplorerGraph cut = keep_graph_databases(graph, {"tenant_a"});
+  std::vector<std::string> ids;
+  for (const auto& n : cut.nodes) ids.push_back(n.id);
+  CHECK(ids == (std::vector<std::string>{"table:tenant_a.visible", "table:tenant_a.dist", "physical:cluster:c:shard:1",
+                                       "physical:cluster:c:shard:1:replica:1"}));
+  CHECK_EQ(cut.edges.size(), size_t(2));
+  for (const auto& e : cut.edges) CHECK(e.from.find("tenant_z") == std::string::npos && e.to.find("tenant_z") == std::string::npos);
+  const std::string json = graph_json("local", graph, cut, GraphScopeRequest{}, false, {}, false, 0);
+  CHECK(json.find("tenant_z") == std::string::npos);
+  CHECK(json.find("hidden_ledger") == std::string::npos);
+  CHECK(keep_graph_databases(graph, {}).nodes.empty());
+
+  ExplorerStorageMap map;
+  map.table_limit_per_database = 5;
+  ExplorerStorageDatabase a;
+  a.name = "tenant_a";
+  a.bytes = 10;
+  a.rows = 1;
+  ExplorerStorageDatabase z;
+  z.name = "tenant_z";
+  z.bytes = 1577;
+  z.rows = 18;
+  map.databases = {a, z};
+  const ExplorerStorageMap kept = keep_storage_databases(map, {"tenant_a"});
+  CHECK_EQ(kept.databases.size(), size_t(1));
+  CHECK_EQ(kept.databases[0].name, std::string("tenant_a"));
+  CHECK_EQ(kept.table_limit_per_database, size_t(5));
+  const std::string storage = storage_json("local", kept, false);
+  CHECK(storage.find("tenant_z") == std::string::npos);
+  CHECK(storage.find("\"total_bytes\":10,") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -2423,6 +2569,9 @@ int main() {
   RUN(test_the_service_answers_storage_functions_and_preview);
   RUN(test_a_manual_refresh_of_the_catalog_reads_the_functions_again);
   RUN(test_the_service_scopes_the_graph_and_answers_definitions);
+  RUN(test_the_masked_ddl_texts_are_read_as_the_runner);
+  RUN(test_the_catalog_key_of_a_database_filter_never_aliases_the_whole_catalog);
+  RUN(test_a_grant_on_some_databases_cuts_the_graph_and_the_storage_map);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

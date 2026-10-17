@@ -127,7 +127,7 @@ export const key = (over) => {
   const made = {
     id: 'ui_0a1b2c3d4e5f', name: 'ci-bot', source: 'ui', secret_hint: 'a1b2c3d4',
     hosts: ['prod'], tools: ['list_databases', 'query_table'], databases: ['otel', 'analytics.events'],
-    max_rows: null, timeout_seconds: null, subject: null, expires_at: null, created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
+    max_rows: null, timeout_seconds: null, subject: null, creator: null, expires_at: null, created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
   };
   return { ...made, secret_mask: maskOf(made.secret_hint) };
 };

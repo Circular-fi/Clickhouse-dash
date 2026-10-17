@@ -58,7 +58,7 @@ def test_the_release_builds_the_tagged_commit_and_smoke_tests_every_binary_befor
     # No test job: the suite takes more than an hour on a runner, and runs before the tag is made (and on request, ci.yml).
     assert "\n  tests:\n" not in RELEASE and "uses: ./.github/workflows/ci.yml" not in RELEASE
     build = RELEASE.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
-    assert "needs: prepare" in build and "ref: ${{ needs.prepare.outputs.sha }}" in build
+    assert re.search(r"needs: \[?prepare\b", build) and "ref: ${{ needs.prepare.outputs.sha }}" in build
     smoke = RELEASE.index("- name: Smoke test the binary")
     assert RELEASE.index("- name: Verify and strip the Linux binary") < smoke < RELEASE.index("- name: Upload release asset")
     assert "if:" not in RELEASE[smoke:RELEASE.index("run:", smoke)]  # the macOS binaries too
@@ -123,3 +123,16 @@ def test_dependabot_covers_actions_images_python_and_npm():
     config = read(".github/dependabot.yml")
     for ecosystem in ("github-actions", "docker", "pip", "npm"):
         assert f"package-ecosystem: {ecosystem}" in config, ecosystem
+
+
+def test_the_documented_attestation_check_names_the_release_workflow():
+    # Why: with --repo alone, an attestation of any workflow of the repository passes. Only the release workflow is the reviewed producer of an archive.
+    security = read("SECURITY.md")
+    commands = re.findall(r"^gh attestation verify .*$", security, flags=re.MULTILINE)
+    assert commands, "SECURITY.md has no attestation command"
+    for command in commands:
+        assert "--repo Circular-fi/Clickhouse-dash" in command
+        assert "--signer-workflow Circular-fi/Clickhouse-dash/.github/workflows/release.yaml" in command
+    # The comment of the release workflow gives the same command.
+    header = RELEASE.split("\non:\n", 1)[0]
+    assert "--signer-workflow" in header

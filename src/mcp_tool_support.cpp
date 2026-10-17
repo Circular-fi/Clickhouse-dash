@@ -9,7 +9,17 @@
 namespace chdash {
 namespace mcp_tools {
 
-void fail(const std::string& code, const std::string& message) { throw ToolFailure{code, message}; }
+void fail(const std::string& code, const std::string& message) { throw ToolFailure{code, message, {}}; }
+
+void fail_untrusted(const std::string& code, const std::string& message, std::string detail) {
+  if (detail.size() > 1500) {
+    // Cut at the start of a UTF-8 character.
+    size_t cut = 1500;
+    while (cut > 0 && (static_cast<unsigned char>(detail[cut]) & 0xC0) == 0x80) --cut;
+    detail.resize(cut);
+  }
+  throw ToolFailure{code, message, std::move(detail)};
+}
 
 // ---- arguments ----------------------------------------------------------------------------
 
@@ -110,9 +120,8 @@ McpDbResult run(Ctx& ctx, const std::string& sql, const McpDbLimits& limits) {
   try {
     return ctx.db.run(ctx.host, sql, limits);
   } catch (const McpDbError& error) {
-    std::string message = error.what();
-    if (message.size() > 1500) message.resize(1500);
-    fail(error.code(), message);
+    // The text of ClickHouse can quote the data of a table: it goes to untrusted.detail, never to the message.
+    fail_untrusted(error.code(), mcp_error_message(error.code()), error.what());
   }
 }
 

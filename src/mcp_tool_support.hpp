@@ -29,9 +29,13 @@ using Writer = rapidjson::Writer<rapidjson::StringBuffer>;
 struct ToolFailure {
   std::string code;
   std::string message;
+  // Text that ChDash did not write (an error of ClickHouse or of a route). The error result holds it as untrusted.detail.
+  std::string detail;
 };
 
 [[noreturn]] void fail(const std::string& code, const std::string& message);
+// A failure whose cause is text that ChDash did not write. `message` is text of ChDash. `detail` is cut to 1500 bytes.
+[[noreturn]] void fail_untrusted(const std::string& code, const std::string& message, std::string detail);
 
 inline void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 inline std::string finish(rapidjson::StringBuffer& sb) { return std::string(sb.GetString(), sb.GetSize()); }

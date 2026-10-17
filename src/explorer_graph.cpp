@@ -22,8 +22,9 @@ using namespace explorer;
 
 bool load_explorer_graph(
     ChExecutor& system,
+    ChExecutor& runner,
     ExplorerCaches& caches,
-    const std::string& system_identity,
+    const std::string& runner_identity,
     const AllowedObjectSet& allowed,
     const ExplorerCatalog& catalog,
     ExplorerGraph& out,
@@ -88,7 +89,7 @@ bool load_explorer_graph(
   }
 
   std::string last_error;
-  // Identity and version columns only. The formatted DDL texts come from DdlTextCache. The cache re-reads them only for objects whose
+  // Identity and version columns only (as the system account). The formatted DDL texts come from DdlTextCache, as the runner. The cache re-reads them only for objects whose
   // metadata_modification_time changed since the previous graph build.
   std::vector<DdlObjectVersion> versions;
   const bool tables_loaded = try_select(system, graph_tables_sql(),
@@ -107,7 +108,8 @@ bool load_explorer_graph(
       }, &last_error);
   if (tables_loaded) {
     try {
-      const auto texts = caches.ddl_texts.get(system, system_identity, versions);
+      // ClickHouse masks the secrets of the DDL texts for each user. The texts are the view of the runner, never the view of the system account.
+      const auto texts = caches.ddl_texts.get(runner, runner_identity, versions);
       for (auto& item : inputs.tables) {
         const auto it = texts.find(DdlTextCache::object_key(item.database, item.name));
         if (it == texts.end()) continue;

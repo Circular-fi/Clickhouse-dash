@@ -282,7 +282,7 @@ std::vector<DeltaKey> read_delta_keys(ChExecutor& db, const TraceScope& scope, c
   const std::string sql = deltas_attribute_sql(scope, windows, columns.span(), columns.resource(), samples.ids_in.size(), samples.ids_out.size());
   std::map<std::pair<std::string, std::string>, size_t> index;
   // The ids go as parameters. Two lists of up to 2,500 ids, passed as text, exceed max_query_size.
-  const ChParams id_params = {{"ids_in", sql::quote_array(samples.ids_in)}, {"all_ids", sql::quote_array(all_ids)}};
+  const ChParams id_params = {{"ids_in", sql::hex_id_array(samples.ids_in)}, {"all_ids", sql::hex_id_array(all_ids)}};
   db.select(sql, id_params, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       auto key = std::make_pair(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));

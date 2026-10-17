@@ -147,18 +147,24 @@ def ok_tool(base: str, key: str, name: str, arguments=None) -> dict:
 
 
 def fail_tool(base: str, key: str, name: str, arguments=None, code: str | None = None) -> dict:
-    """A tool error (contract 6.1): {"error": {"code", "message", "retryable"}}. The function gives {"error": code, "message", "retryable"},
-    so that a test reads the code and the message directly."""
+    """A tool error (contract 6.1): {"error": {"code", "message", "retryable"}}. The text of ClickHouse or of a route is in
+    error.untrusted.detail, and then data_notice comes first (contract 5.2). The function gives {"error": code, "message",
+    "retryable", "detail"}, so that a test reads them directly."""
     result = call_tool(base, key, name, arguments)
     assert result["isError"] is True, result
     payload = result["structuredContent"]
     assert json.loads(result["content"][0]["text"]) == payload
+    if "untrusted" in payload.get("error", {}):
+        assert list(payload) == ["data_notice", "error"] and payload["data_notice"] == DATA_NOTICE, payload
+        assert set(payload["error"]["untrusted"]) == {"detail"}, payload
+        payload = {"error": payload["error"]}
     assert set(payload) == {"error"} and set(payload["error"]) >= {"code", "message", "retryable"}, payload
     assert isinstance(payload["error"]["retryable"], bool)
     assert payload["error"]["retryable"] is (payload["error"]["code"] in ("timeout", "unavailable", "api_unavailable")), payload
     if code:
         assert payload["error"]["code"] == code, payload
-    return {"error": payload["error"]["code"], "message": payload["error"]["message"], "retryable": payload["error"]["retryable"]}
+    return {"error": payload["error"]["code"], "message": payload["error"]["message"], "retryable": payload["error"]["retryable"],
+            "detail": payload["error"].get("untrusted", {}).get("detail", "")}
 
 
 def refused_tool(base: str, key: str, name: str, arguments=None) -> dict:
@@ -1341,7 +1347,8 @@ def test_timeout_and_read_limit():
     started = time.time()
     payload = fail_tool(MCP_URL, LIMITED, "run_query", {"host": "local", "sql": "SELECT sleep(3)"}, "timeout")  # the key allows 1 s
     assert time.time() - started < 4.5
-    assert "DB::Exception" in payload["message"]
+    # The text of ClickHouse is in error.untrusted.detail, never in the message.
+    assert "DB::Exception" in payload["detail"] and "DB::Exception" not in payload["message"]
     # Under the global timeout of 5 s the same statement works.
     assert ok_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": "SELECT sleep(1)"})["row_count"] == 1
     # max_rows_to_read = 5,000,000.
@@ -1356,10 +1363,11 @@ def test_explain_query():
     for kind in ("plan", "pipeline", "ast", "syntax", "estimate"):
         result = ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT id FROM chdash_ui.weather_observations WHERE id < 5", "type": kind})
         assert result["type"] == kind
-        assert result.get("lines") or result.get("untrusted", {}).get("rows"), kind
+        # The lines of a plan hold texts of view and column definitions: they are in untrusted, with data_notice (contract 5.2).
+        assert "lines" not in result and (result.get("untrusted", {}).get("lines") or result.get("untrusted", {}).get("rows")), kind
     plan = ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT 1"})
-    assert plan["type"] == "plan" and any("ReadFromSystemOne" in line for line in plan["lines"])
-    assert ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT id FROM chdash_ui.weather_observations", "indexes": True})["lines"]
+    assert plan["type"] == "plan" and any("ReadFromSystemOne" in line for line in plan["untrusted"]["lines"])
+    assert ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT id FROM chdash_ui.weather_observations", "indexes": True})["untrusted"]["lines"]
     fail_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "INSERT INTO chdash_ui.memory_weather VALUES (1)"}, "statement_not_allowed")
     fail_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "EXPLAIN SELECT 1"}, "statement_not_allowed")
     fail_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT 1; SELECT 2"}, "multiple_statements")
@@ -1451,7 +1459,7 @@ def test_log_comment_names_the_agent():
 
 
 KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_mask", "hosts", "tools", "databases", "max_rows",
-              "timeout_seconds", "subject", "expires_at", "created_at", "last_used_at"}
+              "timeout_seconds", "subject", "creator", "expires_at", "created_at", "last_used_at"}
 
 
 @needs_mcp
@@ -3264,7 +3272,9 @@ def test_a_tool_that_the_mcp_user_cannot_run_says_which_grant_it_lacks():
         result = call_tool(MCP_URL, secret, "system_queries", {"host": "local"})
         if result["isError"]:
             payload = result["structuredContent"]
-            assert payload["error"] == "permission_denied" and "GRANT SELECT ON" in payload["message"] and "chdash_mcp" in payload["message"], payload
+            error = payload["error"]
+            assert error["code"] == "permission_denied" and "GRANT SELECT ON" in error["untrusted"]["detail"], payload
+            assert "chdash_mcp" in error["untrusted"]["detail"], payload
         else:
             # The Queries panel reports the table that it cannot read inside the answer (not_granted), not as an error.
             assert "not_granted" in json.dumps(result["structuredContent"]) or result["structuredContent"]

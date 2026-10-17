@@ -3,6 +3,8 @@
 // What an MCP key may reach: hosts, tools and data (docs/mcp.md, "Key model").
 // Everything here is pure: no I/O, no ClickHouse, no global state.
 
+#include "access_pdp.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -146,5 +148,22 @@ std::vector<std::string> mcp_effective_tools(const std::vector<std::string>& too
 // The key is entitled to the tool through its list and its data scope. This is true whether or not the configuration offers the tool now (mcp_tool_available).
 bool mcp_scope_tool_allowed(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
                             std::string_view tool);
+
+// ---- the access of humans --------------------------------------------------
+
+// The action of the access of humans (docs/access.md) that the tool uses, or null when it uses none.
+// An API tool has the action of its route (access_rule). A route of a run gives query.run.read.
+// The tools of the data use explorer.read, the tools of Observability observability.read, the SQL tools query.run.read and
+// mcp_analysis_all_usage mcp.usage.read. list_hosts and the analysis of the key itself use none.
+// A route that the table of the rules does not know gives "unknown": the PDP refuses it (fail closed).
+const char* mcp_tool_access_action(const McpToolInfo& tool);
+
+// The questions that the creator of a key must pass for that key (docs/mcp.md, "Keys and the access of humans"). Each tool of the
+// key (mcp_effective_tools, with all the tools that the key is entitled to) gives its action once.
+// An action that can also take a database (explorer.read for the tools that read only the tables of the scope) is asked on each
+// database that the scope names. It is asked on the service when an entry has a wildcard in its database part.
+// Every other action is asked on the service `service_id`. The questions have no duplicates.
+std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
+                                                     const std::string& service_id);
 
 } // namespace chdash

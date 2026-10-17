@@ -105,6 +105,31 @@ std::string join(const std::vector<std::string>& items) {
   return out;
 }
 
+// The keywords that can follow a column, an alias or a table named settings. After the clause keyword SETTINGS, a setting name
+// comes. A setting name that is also one of these keywords stays refused when `=` or `,` follows it (settings_clause_at).
+bool follows_an_expression(const std::string& upper_word) {
+  static const std::unordered_set<std::string> words = {
+      "FROM", "WHERE", "PREWHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT", "FORMAT",
+      "AS", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "PASTE", "ANY", "ALL", "ASOF", "SEMI", "ANTI", "ARRAY", "GLOBAL",
+      "ON", "USING", "AND", "OR", "NOT", "IS", "IN", "LIKE", "ILIKE", "BETWEEN", "ASC", "DESC", "NULLS", "COLLATE", "WINDOW",
+      "QUALIFY", "SAMPLE", "FINAL", "BY", "WITH", "THEN", "ELSE", "END", "WHEN", "OVER", "FILTER", "INTO"};
+  return words.count(upper_word) != 0;
+}
+
+// True when the word SETTINGS at `i` starts a SETTINGS clause. Every form of the clause counts: `name = value`, a name with no
+// value (a Bool setting, for example `SETTINGS log_queries, max_execution_time = 0`), and a list of them.
+// A column, an alias or a table named settings is no clause: `system.settings`, `Settings['x']`, `AS settings,`,
+// `SELECT Settings FROM t`, `settings = 1`.
+bool settings_clause_at(const std::vector<Token>& tokens, size_t i, size_t count) {
+  if (i + 1 >= count) return false;
+  const Token& name = tokens[i + 1];
+  if (name.kind != Tok::Word && name.kind != Tok::Quoted) return false;
+  if (i + 2 < count && tokens[i + 2].kind == Tok::Punct && (tokens[i + 2].text == "=" || tokens[i + 2].text == ",")) return true;
+  if (i > 0 && tokens[i - 1].kind == Tok::Punct && tokens[i - 1].text == ".") return false;  // db.settings alias
+  if (name.kind == Tok::Quoted) return true;
+  return !follows_an_expression(upper(name.text));
+}
+
 McpSqlScan scan_fail(const char* error, std::string message) {
   McpSqlScan scan;
   scan.error = error;
@@ -152,11 +177,10 @@ McpSqlScan mcp_scan_single_statement(std::string_view sql, const std::vector<std
     if (word == "INTO" && i + 1 < count && tokens[i + 1].kind == Tok::Word && upper(tokens[i + 1].text) == "OUTFILE") {
       return scan_fail("clause_not_allowed", "INTO OUTFILE is not allowed");
     }
-    // A `SETTINGS name = value` clause would change the limits that ChDash sends.
+    // A SETTINGS clause would change the limits that ChDash sends, in each of its forms.
     // A profile at readonly = 2 lets a statement change them, and the clause wins. So the limits of the key apply.
     // A column, an alias or a table named settings is no clause.
-    if (word == "SETTINGS" && i + 2 < count && (tokens[i + 1].kind == Tok::Word || tokens[i + 1].kind == Tok::Quoted) &&
-        tokens[i + 2].kind == Tok::Punct && tokens[i + 2].text == "=") {
+    if (word == "SETTINGS" && settings_clause_at(tokens, i, count)) {
       return scan_fail("clause_not_allowed", "SETTINGS is not allowed: the limits of the key apply");
     }
     if (i + 1 < count && tokens[i + 1].kind == Tok::Punct && tokens[i + 1].text == "(" && denied_function(word)) {

@@ -65,6 +65,7 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.Key("runner_user"); write_json_text(w, h.access.runner_user);
     w.Key("system_user"); write_json_text(w, h.access.system_user);
     w.Key("runner_reads_nothing"); w.Bool(h.access.runner_reads_nothing);
+    w.Key("runner_shows_secrets"); w.Bool(h.access.runner_shows_secrets);
     const auto write_list = [&](const char* key, const std::vector<std::string>& items) {
       w.Key(key);
       w.StartArray();
@@ -73,6 +74,7 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     };
     w.Key("mcp_user"); write_json_text(w, h.access.mcp_user);
     w.Key("mcp_reads_nothing"); w.Bool(h.access.mcp_reads_nothing);
+    w.Key("mcp_shows_secrets"); w.Bool(h.access.mcp_shows_secrets);
     w.Key("mcp_audited"); w.Bool(h.access.mcp_audited);
     w.Key("mcp_connected"); w.Bool(h.access.mcp_connected);
     w.Key("mcp_error"); write_json_text(w, h.access.mcp_error);

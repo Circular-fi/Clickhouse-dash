@@ -176,6 +176,10 @@ A page shell has a policy of its own. ChDash adds the hash (`'sha256-…'`) of e
 
 The value `'wasm-unsafe-eval'` does not let `eval` run. `'unsafe-inline'` in `style-src` is necessary, because the pages set style attributes. A reverse proxy must not replace these headers. It can add headers. For example, it can add `Strict-Transport-Security` when it terminates TLS.
 
+### A request that cannot be parsed
+
+ChDash answers 400 to a request line or to headers that it cannot parse. The 400 has `Connection: close`, and ChDash closes the connection after it. The bytes that follow on this connection are never read as another request. cpp-httplib 0.54.1 keeps the connection after such a 400, so `RoutedServer` (`src/routed_server.hpp`) repeats the loop of the library with this one change. Its `static_assert` on the version of the library makes a review of that code necessary at each update of the library.
+
 ### The guard of the writes
 
 A page of another site must not use the browser of a user to change anything or to run SQL. This applies also when the browser has an identity token of the access gateway ([access.md](access.md)). For this reason, every `POST`, `PUT`, `PATCH` and `DELETE` request passes one guard before ChDash reads the body. These requests include a run, a cancel, a format, an analysis, an export, the table preview, the query library and the MCP keys.

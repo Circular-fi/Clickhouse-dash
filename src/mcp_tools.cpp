@@ -58,7 +58,7 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
     else return mcp_tool_error("unknown_tool", "unknown tool " + tool);
     outcome.json = std::move(json);
   } catch (const ToolFailure& failure) {
-    outcome = mcp_tool_error(failure.code, failure.message);
+    outcome = mcp_tool_error(failure.code, failure.message, failure.detail);
   }
   outcome.host = ctx.host;
   outcome.rows = ctx.rows_out;

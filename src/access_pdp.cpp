@@ -149,6 +149,22 @@ std::string PdpClient::cache_key(const std::string& subject, const AccessQuestio
   return key;
 }
 
+size_t PdpClient::cache_entry_bytes(const std::string& key) {
+  // The fixed part is an estimate of the node of the map, the pair of the value and the heap block of the key.
+  constexpr size_t kEntryOverhead = 96;
+  return key.size() + kEntryOverhead;
+}
+
+size_t PdpClient::cached_entries() {
+  std::lock_guard<std::mutex> lock(mu_);
+  return cache_.size();
+}
+
+size_t PdpClient::cached_bytes() {
+  std::lock_guard<std::mutex> lock(mu_);
+  return cache_used_bytes_;
+}
+
 std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const std::vector<AccessQuestion>& questions,
                                               const PdpCallContext& context) {
   std::vector<AccessDecision> out(questions.size());
@@ -207,12 +223,31 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
       for (size_t k = 0; k < ask.size(); ++k) {
         out[ask[k]] = AccessDecision{decisions[k], "pdp"};
         if (options_.cache_ttl.count() <= 0) continue;
-        if (cache_.size() >= options_.cache_entries) {
-          const auto at = std::chrono::steady_clock::now();
-          for (auto it = cache_.begin(); it != cache_.end();) it = it->second.second <= at ? cache_.erase(it) : std::next(it);
-          if (cache_.size() >= options_.cache_entries) cache_.clear();
+        std::string key = cache_key(subject, questions[ask[k]]);
+        const size_t entry_bytes = cache_entry_bytes(key);
+        // An entry that is larger than the whole budget is not kept.
+        if (entry_bytes > options_.cache_bytes) continue;
+        if (const auto known = cache_.find(key); known != cache_.end()) {
+          known->second = {decisions[k], expires};
+          continue;
         }
-        cache_[cache_key(subject, questions[ask[k]])] = {decisions[k], expires};
+        if (cache_.size() >= options_.cache_entries || cache_used_bytes_ + entry_bytes > options_.cache_bytes) {
+          const auto at = std::chrono::steady_clock::now();
+          for (auto it = cache_.begin(); it != cache_.end();) {
+            if (it->second.second <= at) {
+              cache_used_bytes_ -= cache_entry_bytes(it->first);
+              it = cache_.erase(it);
+            } else {
+              ++it;
+            }
+          }
+          if (cache_.size() >= options_.cache_entries || cache_used_bytes_ + entry_bytes > options_.cache_bytes) {
+            cache_.clear();
+            cache_used_bytes_ = 0;
+          }
+        }
+        cache_used_bytes_ += entry_bytes;
+        cache_.emplace(std::move(key), std::make_pair(decisions[k], expires));
       }
     } else {
       // Fail closed: every question of the call is false, and nothing is kept.

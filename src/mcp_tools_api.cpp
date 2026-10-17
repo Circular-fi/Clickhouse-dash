@@ -205,6 +205,8 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
       code = "permission_denied";
       if (!hint.empty()) message += " Give it to the MCP user: " + hint;
     }
+    // The message of a route can quote ClickHouse, and so the data of a table: it goes to untrusted.detail.
+    const bool from_route = !message.empty();
     // A route is not there (the router's own JSON 404, or none). The part of ChDash is off in its configuration.
     if (response.status == 404 && (code.empty() || (code == "not_found" && message == "Not Found"))) {
       fail("not_enabled", std::string("this part of ChDash is not enabled in its configuration (") + api.name + ")");
@@ -216,9 +218,13 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
                                             : "the table " + named.database + "." + named.table + " does not exist or is not visible");
     }
     if (code.empty()) code = "api_error";
-    if (message.empty()) message = "the API answered " + std::to_string(response.status);
-    if (message.size() > 1500) message.resize(1500);
-    fail(code, message);
+    if (code.size() > 64) code.resize(64);
+    const std::string summary = not_granted ? std::string("the ClickHouse user of MCP lacks a grant for this tool; the statement that gives it is in "
+                                                          "error.untrusted.detail")
+                                            : "the API answered " + std::to_string(response.status) +
+                                                  (from_route ? std::string("; its message is in error.untrusted.detail") : std::string());
+    if (!from_route) fail(code, summary);
+    fail_untrusted(code, summary, message);
   }
   if (json && doc.IsObject() && api.scope == McpApiScope::Catalog) {
     cut_catalog(ctx.key, &doc);
