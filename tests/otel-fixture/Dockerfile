@@ -1,4 +1,4 @@
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 
 WORKDIR /fixture
 COPY examples/generate_otel_traces.py /fixture/generate_otel_traces.py
