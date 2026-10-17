@@ -127,12 +127,38 @@ def test_dependabot_covers_actions_images_python_and_npm():
 
 def test_the_documented_attestation_check_names_the_release_workflow():
     # Why: with --repo alone, an attestation of any workflow of the repository passes. Only the release workflow is the reviewed producer of an archive.
+    # Without --source-ref, an archive that the release workflow built from any branch passes; without --deny-self-hosted-runners, one built on a
+    # runner outside GitHub passes.
     security = read("SECURITY.md")
     commands = re.findall(r"^gh attestation verify .*$", security, flags=re.MULTILINE)
     assert commands, "SECURITY.md has no attestation command"
+    refs = []
     for command in commands:
         assert "--repo Circular-fi/Clickhouse-dash" in command
         assert "--signer-workflow Circular-fi/Clickhouse-dash/.github/workflows/release.yaml" in command
+        assert "--deny-self-hosted-runners" in command, command
+        ref = re.search(r"--source-ref (\S+)", command)
+        assert ref, command
+        refs.append(ref.group(1))
+    # A tag push gives the tag as the source ref; a manual run (workflow_dispatch) gives the ref of its branch.
+    assert "refs/tags/v<version>" in refs
+    assert any(ref.startswith("refs/heads/") for ref in refs), "SECURITY.md has no command for a manual release"
+    assert "workflow_dispatch:" in RELEASE
     # The comment of the release workflow gives the same command.
     header = RELEASE.split("\non:\n", 1)[0]
-    assert "--signer-workflow" in header
+    for option in ("--signer-workflow", "--source-ref", "--deny-self-hosted-runners"):
+        assert option in header, option
+
+
+def test_every_release_job_runs_on_a_runner_that_github_hosts():
+    # Why: the documented check refuses an attestation from a self-hosted runner (--deny-self-hosted-runners); a release job on such a runner
+    # would publish archives that the check refuses.
+    hosted = re.compile(r"(ubuntu|macos|windows)-[\w.-]+")
+    labels = re.findall(r"^\s*runs-on:\s*(.+?)\s*$", RELEASE, flags=re.MULTILINE)
+    labels += re.findall(r"^\s*- runner:\s*(\S+)", RELEASE, flags=re.MULTILINE)
+    assert labels
+    for label in labels:
+        # The build matrix names its runners in its "- runner:" lines, which are in the list too.
+        if label == "${{ matrix.runner }}":
+            continue
+        assert hosted.fullmatch(label), label

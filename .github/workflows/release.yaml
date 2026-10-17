@@ -2,7 +2,8 @@ name: Release
 
 # A release builds the tagged commit, checks and smoke-tests each binary, then publishes the archives
 # with SHA256SUMS and a signed build provenance attestation (gh attestation verify <archive> --repo
-# <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yaml). It runs no test suite (that took more than an hour): the full suite runs before the
+# <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yaml --source-ref refs/tags/<tag>
+# --deny-self-hosted-runners; a manual run gives the ref of its branch, SECURITY.md). It runs no test suite (that took more than an hour): the full suite runs before the
 # tag is made (tests/README.md) and on request (Actions > CI > Run workflow).
 #
 # Supply chain: every action is pinned by commit SHA (Dependabot updates the pins), no job restores a

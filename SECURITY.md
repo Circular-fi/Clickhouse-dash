@@ -55,10 +55,22 @@ Each release has the archives, a `SHA256SUMS` file and a build provenance attest
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-gh attestation verify chdash_<version>_linux_amd64.tar.gz --repo Circular-fi/Clickhouse-dash --signer-workflow Circular-fi/Clickhouse-dash/.github/workflows/release.yaml
+gh attestation verify chdash_<version>_linux_amd64.tar.gz --repo Circular-fi/Clickhouse-dash --signer-workflow Circular-fi/Clickhouse-dash/.github/workflows/release.yaml --source-ref refs/tags/v<version> --deny-self-hosted-runners
 ```
 
-The option `--signer-workflow` is required. With `--repo` alone, the command also accepts an attestation that another workflow of the repository signed. Only the release workflow builds the archives.
+Each option of the command is necessary:
+
+- `--signer-workflow`: With `--repo` alone, the command also accepts an attestation that another workflow of the repository signed. Only the release workflow builds the archives.
+- `--source-ref`: The command accepts only an attestation of a run that started from the tag of this version. Without it, the command also accepts an archive that the release workflow built from a branch.
+- `--deny-self-hosted-runners`: The command accepts only an attestation from a runner that GitHub hosts. The release workflow uses only runners that GitHub hosts.
+
+**Manual releases.** A maintainer can start the release workflow by hand (Actions > Release > Run workflow). Then the attestation gives the branch of the run as the source ref, not the tag. The page of the workflow run shows this branch. For such a release, give the branch to `--source-ref`:
+
+```bash
+gh attestation verify chdash_<version>_linux_amd64.tar.gz --repo Circular-fi/Clickhouse-dash --signer-workflow Circular-fi/Clickhouse-dash/.github/workflows/release.yaml --source-ref refs/heads/main --deny-self-hosted-runners
+```
+
+The attestation of a manual release also gives the commit of the run. If the tag existed before the run, this commit can be different from the commit of the tag. In this case, the workflow builds the commit of the tag. To compare the two commits, read the log of the job "Resolve release tag".
 
 A release starts only after the tests pass on the commit that it builds. The section "Validate release builds" in `CONTRIBUTING.md` describes the release chain.
 
