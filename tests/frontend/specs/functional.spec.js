@@ -2466,7 +2466,9 @@ for (const path of ['/query', '/explorer/catalog', '/observability/traces', '/ob
 }
 
 test('traces: time range, status and result pickers have their final style at first paint', async ({ page }) => {
-  const scripts = await holdRequests(page, '**/static/*.js');
+  // The shell asks for each script with its content hash (/static/app_x.js?v=<hash>): a glob that ends with
+  // ".js" holds none of them, and the scripts then race the first snapshot.
+  const scripts = await holdRequests(page, (url) => /\/static\/[^/]+\.js$/.test(url.pathname));
   const api = await holdRequests(page, '**/api/**');
   try {
     const pickers = ['tracesRangeUnit', 'tracesStatus', 'tracesService', 'tracesOperation', 'tracesLimit', 'tracesSort'];
@@ -2492,6 +2494,8 @@ test('traces: time range, status and result pickers have their final style at fi
 
     await page.goto('/observability/traces', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style(\.[a-z]+)*\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
+    // The hold took the scripts of the page: without them, the first snapshot is not the first paint.
+    await expect.poll(() => scripts.count()).toBeGreaterThan(0);
     // No application script has run yet. This is the page as first painted.
     expect(await page.evaluate(() => Boolean(window.ChDash && window.ChDash.traces))).toBe(false);
     const firstPaint = await snapshot(pickers);
