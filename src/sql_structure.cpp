@@ -132,6 +132,119 @@ bool from_of_a_function(const View& v, size_t k) {
   return false;
 }
 
+// One table after FROM, JOIN or a comma of FROM. `first` is the index of its first name; `second` is the index of the table name of
+// `db.table` (qualified). `cte` is true for a reference to a CTE of the statement.
+struct RelationAt {
+  size_t first = 0;
+  bool qualified = false;
+  size_t second = 0;
+  bool cte = false;
+};
+
+// The tables that a SELECT reads, with their tokens. Refer to relation_sources.
+std::vector<RelationAt> relations_of(const View& v) {
+  // The names of the CTEs, for example `WITH a AS (...), b AS (...)`. A reference to a CTE is not a table.
+  std::set<std::string> ctes;
+  for (size_t k = 1; k + 2 < v.size(); ++k) {
+    if (!v.is_name(k) || !v.is_word(k + 1, "AS") || !v.is_punct(k + 2, '(')) continue;
+    if (v.is_word(k - 1, "WITH") || v.is_punct(k - 1, ',')) ctes.insert(name_of(v, k));
+  }
+  std::vector<RelationAt> result;
+  const auto relation_at = [&](size_t& k) -> bool {
+    // k is the first token of the name. Move k past the name and its alias when the name is a table.
+    if (!v.is_name(k)) return false;
+    RelationAt relation;
+    relation.first = k;
+    size_t next = k + 1;
+    if (v.is_punct(next, '.') && v.is_name(next + 1)) {
+      relation.qualified = true;
+      relation.second = next + 1;
+      next += 2;
+    }
+    if (v.is_punct(next, '(')) return false;  // a table function: numbers(10), remote(...)
+    k = next;
+    relation.cte = !relation.qualified && ctes.count(name_of(v, relation.first)) != 0;
+    result.push_back(relation);
+    return true;
+  };
+  for (size_t k = 0; k < v.size(); ++k) {
+    const bool from = v.is_word(k, "FROM");
+    const bool join = v.is_word(k, "JOIN");
+    if (!from && !join) continue;
+    if (join && k > 0 && v.is_word(k - 1, "ARRAY")) continue;  // ARRAY JOIN joins an array of the row
+    if (from && from_of_a_function(v, k)) continue;
+    size_t at = k + 1;
+    if (!relation_at(at)) continue;
+    // FROM a, b: these are the tables of a comma join. Skip the alias and FINAL of each table.
+    while (from) {
+      if (v.is_word(at, "AS") && v.is_name(at + 1)) at += 2;
+      else if (v.is_name(at) && v.at(at).kind == TokenKind::Word && !clause_word(v.text_of(at))) at += 1;
+      if (v.is_word(at, "FINAL")) at += 1;
+      if (!v.is_punct(at, ',') || v.depth[at] != v.depth[k]) break;
+      ++at;
+      if (!relation_at(at)) break;
+    }
+  }
+  return result;
+}
+
+// The value of a closed text or quoted name, without its marks. A doubled mark and an escaped byte are one byte.
+std::string unquoted(const View& v, size_t k) {
+  const Token& t = v.at(k);
+  if (t.kind != TokenKind::QuotedIdent && t.kind != TokenKind::String) return std::string(t.text(v.text));
+  const char quote = v.text[t.begin];
+  std::string out;
+  for (size_t i = t.begin + 1; i + 1 < t.end;) {
+    if (v.text[i] == quote && v.text[i + 1] == quote) {
+      out.push_back(quote);
+      i += 2;
+    } else if (v.text[i] == '\\' && i + 2 < t.end) {
+      out.push_back(v.text[i + 1]);
+      i += 2;
+    } else {
+      out.push_back(v.text[i++]);
+    }
+  }
+  return out;
+}
+
+bool is_text(const View& v, size_t k) { return k < v.size() && v.at(k).kind == TokenKind::String && v.at(k).closed; }
+
+// How a function or an engine names a database in its arguments.
+struct DatabaseArguments {
+  const char* name;      // compared without case
+  int database;          // the index of the database argument
+  int table;             // the index of the table argument, or -1
+  bool dotted_text;      // a text 'db.name' in the database argument names the database and the object; a bare name does not
+  size_t min_args;       // with fewer arguments, the function names no database (merge('^t') reads the current database)
+};
+
+const DatabaseArguments* database_arguments(std::string_view word) {
+  static const DatabaseArguments kFunctions[] = {
+      {"Distributed", 1, 2, false, 3}, {"Buffer", 0, 1, false, 2},  {"Merge", 0, -1, false, 2},
+      {"Dictionary", 0, -1, true, 1},  {"remote", 1, 2, false, 2},  {"remoteSecure", 1, 2, false, 2},
+      {"cluster", 1, 2, false, 2},     {"clusterAllReplicas", 1, 2, false, 2},
+  };
+  const auto same = [&](const char* name) {
+    if (word.size() != std::char_traits<char>::length(name)) return false;
+    for (size_t i = 0; i < word.size(); ++i) {
+      if (std::tolower(static_cast<unsigned char>(word[i])) != std::tolower(static_cast<unsigned char>(name[i]))) return false;
+    }
+    return true;
+  };
+  for (const auto& function : kFunctions) {
+    if (same(function.name)) return &function;
+  }
+  // The functions that read a dictionary or a Join table by its name: the first argument is 'db.name'.
+  static const DatabaseArguments kDictionaryFunction{"dictGet", 0, -1, true, 1};
+  std::string lower(word);
+  for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (lower.rfind("dictget", 0) == 0 || lower == "dicthas" || lower == "dictisin" || lower == "joinget" || lower == "joingetornull") {
+    return &kDictionaryFunction;
+  }
+  return nullptr;
+}
+
 } // namespace
 
 std::optional<size_t> find_keyword(std::string_view text, std::string_view keyword, size_t start) {
@@ -296,53 +409,160 @@ std::vector<std::string> engine_arguments(std::string_view engine_full, std::str
 
 std::vector<QualifiedName> relation_sources(std::string_view select_sql, const std::string& default_database) {
   const View v(select_sql);
-  // The names of the CTEs, for example `WITH a AS (...), b AS (...)`. A reference to a CTE is not a table.
-  std::set<std::string> ctes;
-  for (size_t k = 1; k + 2 < v.size(); ++k) {
-    if (!v.is_name(k) || !v.is_word(k + 1, "AS") || !v.is_punct(k + 2, '(')) continue;
-    if (v.is_word(k - 1, "WITH") || v.is_punct(k - 1, ',')) ctes.insert(name_of(v, k));
-  }
   std::vector<QualifiedName> result;
   std::set<std::pair<std::string, std::string>> seen;
-  const auto relation_at = [&](size_t& k) -> bool {
-    // k is the first token of the name. Move k past the name and its alias when the name is a table.
-    if (!v.is_name(k)) return false;
-    QualifiedName name;
-    std::string first = name_of(v, k);
-    size_t next = k + 1;
-    bool qualified = false;
-    if (v.is_punct(next, '.') && v.is_name(next + 1)) {
-      name = {first, name_of(v, next + 1)};
-      next += 2;
-      qualified = true;
-    } else {
-      name = {default_database, first};
-    }
-    if (v.is_punct(next, '(')) return false;  // a table function: numbers(10), remote(...)
-    k = next;
-    if (!qualified && ctes.count(name.table)) return true;
+  for (const RelationAt& relation : relations_of(v)) {
+    if (relation.cte) continue;
+    QualifiedName name = relation.qualified ? QualifiedName{name_of(v, relation.first), name_of(v, relation.second)}
+                                            : QualifiedName{default_database, name_of(v, relation.first)};
     if (seen.insert({name.database, name.table}).second) result.push_back(std::move(name));
-    return true;
-  };
-  for (size_t k = 0; k < v.size(); ++k) {
-    const bool from = v.is_word(k, "FROM");
-    const bool join = v.is_word(k, "JOIN");
-    if (!from && !join) continue;
-    if (join && k > 0 && v.is_word(k - 1, "ARRAY")) continue;  // ARRAY JOIN joins an array of the row
-    if (from && from_of_a_function(v, k)) continue;
-    size_t at = k + 1;
-    if (!relation_at(at)) continue;
-    // FROM a, b: these are the tables of a comma join. Skip the alias and FINAL of each table.
-    while (from) {
-      if (v.is_word(at, "AS") && v.is_name(at + 1)) at += 2;
-      else if (v.is_name(at) && v.at(at).kind == TokenKind::Word && !clause_word(v.text_of(at))) at += 1;
-      if (v.is_word(at, "FINAL")) at += 1;
-      if (!v.is_punct(at, ',') || v.depth[at] != v.depth[k]) break;
-      ++at;
-      if (!relation_at(at)) break;
-    }
   }
   return result;
+}
+
+std::vector<DatabaseReference> database_references(std::string_view text) {
+  const View v(text);
+  std::vector<DatabaseReference> refs;
+  const auto add_qualified = [&](size_t database, size_t object) {
+    DatabaseReference ref;
+    ref.database = name_of(v, database);
+    ref.begin = v.at(database).begin;
+    ref.end = v.at(database).end;
+    ref.object_begin = v.at(object).begin;
+    ref.object_end = v.at(object).end;
+    if (!ref.database.empty()) refs.push_back(std::move(ref));
+  };
+  // `db.table` at k: true when k starts a qualified name of two parts. In an argument, a bracket after it makes a function call. After
+  // TO and AS, a bracket after it is the list of the columns: `TO db.t (x Int8)`.
+  const auto qualified_at = [&](size_t k, bool columns_may_follow = false) {
+    return v.is_name(k) && v.is_punct(k + 1, '.') && v.is_name(k + 2) && !v.is_punct(k + 3, '.') &&
+           (columns_may_follow || !v.is_punct(k + 3, '('));
+  };
+
+  for (const RelationAt& relation : relations_of(v)) {
+    if (relation.qualified) add_qualified(relation.first, relation.second);
+  }
+  for (size_t k = 0; k + 1 < v.size(); ++k) {
+    // x IN db.t, the TO of a materialized view and CREATE TABLE t AS db.t.
+    const bool in = v.is_word(k, "IN");
+    const bool top = v.depth[k] == 0 && (v.is_word(k, "TO") || v.is_word(k, "AS"));
+    if ((in || top) && qualified_at(k + 1, top)) add_qualified(k + 1, k + 3);
+  }
+
+  for (size_t k = 0; k + 1 < v.size(); ++k) {
+    if (v.at(k).kind != TokenKind::Word || !v.is_punct(k + 1, '(')) continue;
+    if (k > 0 && v.is_punct(k - 1, '.')) continue;  // a name of a column or a table, not a function
+    // Only these functions are read, so a long text with many calls is not read again for each call.
+    const bool source = v.is_word(k, "CLICKHOUSE");
+    const DatabaseArguments* spec = source ? nullptr : database_arguments(v.text_of(k));
+    if (!source && !spec) continue;
+    // The arguments at the depth of the bracket: the significant tokens of each one.
+    const int inside = v.depth[k + 1] + 1;
+    std::vector<std::pair<size_t, size_t>> args;  // [first, last) of each argument
+    size_t first = k + 2;
+    size_t close = k + 2;
+    for (; close < v.size(); ++close) {
+      if (v.depth[close] == inside - 1 && v.is_punct(close, ')')) break;
+      if (v.depth[close] == inside && v.is_punct(close, ',')) {
+        args.emplace_back(first, close);
+        first = close + 1;
+      }
+    }
+    if (close >= v.size()) continue;  // the bracket is not closed
+    if (first < close) args.emplace_back(first, close);
+
+    // DB 'x' and TABLE 'y' in SOURCE(CLICKHOUSE(...)) of a dictionary.
+    if (source) {
+      DatabaseReference ref;
+      for (size_t i = k + 2; i + 1 < close; ++i) {
+        if (v.depth[i] != inside || !(is_text(v, i + 1) || v.is_name(i + 1))) continue;
+        if (v.is_word(i, "DB")) {
+          ref.database = unquoted(v, i + 1);
+          ref.begin = v.at(i + 1).begin;
+          ref.end = v.at(i + 1).end;
+        } else if (v.is_word(i, "TABLE")) {
+          ref.object_begin = v.at(i + 1).begin;
+          ref.object_end = v.at(i + 1).end;
+        }
+      }
+      if (!ref.database.empty()) refs.push_back(std::move(ref));
+      continue;
+    }
+
+    if (args.size() < spec->min_args || static_cast<size_t>(spec->database) >= args.size()) continue;
+    const auto [a, b] = args[static_cast<size_t>(spec->database)];
+    if (b - a == 3 && qualified_at(a)) {
+      add_qualified(a, a + 2);
+      continue;
+    }
+    if (b - a != 1 || !(is_text(v, a) || v.is_name(a))) continue;
+    // Dictionary(d) and dictGet(d, ...) name an object of the current database.
+    if (spec->dotted_text && !is_text(v, a)) continue;
+    DatabaseReference ref;
+    ref.database = unquoted(v, a);
+    ref.begin = v.at(a).begin;
+    ref.end = v.at(a).end;
+    if (spec->dotted_text) {
+      // 'db.name': the database is the part before the first dot. A text without a dot names an object of the current database.
+      const size_t dot = ref.database.find('.');
+      if (dot == std::string::npos) continue;
+      ref.database.resize(dot);
+    } else if (spec->table >= 0 && static_cast<size_t>(spec->table) < args.size()) {
+      const auto [ta, tb] = args[static_cast<size_t>(spec->table)];
+      if (tb - ta == 1 && (is_text(v, ta) || v.is_name(ta))) {
+        ref.object_begin = v.at(ta).begin;
+        ref.object_end = v.at(ta).end;
+      }
+    }
+    if (!ref.database.empty()) refs.push_back(std::move(ref));
+  }
+
+  std::sort(refs.begin(), refs.end(), [](const DatabaseReference& x, const DatabaseReference& y) { return x.begin < y.begin; });
+  refs.erase(std::unique(refs.begin(), refs.end(), [](const DatabaseReference& x, const DatabaseReference& y) { return x.begin == y.begin; }),
+             refs.end());
+  return refs;
+}
+
+std::vector<std::string> referenced_databases(std::string_view text) {
+  std::vector<std::string> out;
+  std::set<std::string> seen;
+  for (auto& ref : database_references(text)) {
+    if (seen.insert(ref.database).second) out.push_back(std::move(ref.database));
+  }
+  return out;
+}
+
+std::string mask_databases(std::string_view text, const std::vector<std::string>& hidden) {
+  if (hidden.empty() || text.empty()) return std::string(text);
+  const std::set<std::string> masked(hidden.begin(), hidden.end());
+  std::vector<std::pair<size_t, size_t>> spans;
+  for (const auto& ref : database_references(text)) {
+    if (masked.count(ref.database) == 0) continue;
+    spans.emplace_back(ref.begin, ref.end);
+    if (ref.object_end > ref.object_begin) spans.emplace_back(ref.object_begin, ref.object_end);
+  }
+  // Every other `db.name` of a hidden database: an expression such as db.table.column.
+  const View v(text);
+  for (size_t k = 0; k + 2 < v.size(); ++k) {
+    if (!v.is_name(k) || !v.is_punct(k + 1, '.') || !v.is_name(k + 2)) continue;
+    if (k > 0 && v.is_punct(k - 1, '.')) continue;
+    if (masked.count(name_of(v, k)) == 0) continue;
+    spans.emplace_back(v.at(k).begin, v.at(k).end);
+    spans.emplace_back(v.at(k + 2).begin, v.at(k + 2).end);
+  }
+  if (spans.empty()) return std::string(text);
+  std::sort(spans.begin(), spans.end());
+  std::string out;
+  out.reserve(text.size());
+  size_t at = 0;
+  for (const auto& [begin, end] : spans) {
+    if (begin < at) continue;  // the same span twice
+    out.append(text.substr(at, begin - at));
+    out.append(text[begin] == '\'' ? "'[HIDDEN]'" : "`[HIDDEN]`");
+    at = end;
+  }
+  out.append(text.substr(at));
+  return out;
 }
 
 std::optional<QualifiedName> materialized_view_target(std::string_view create_sql, const std::string& default_database) {

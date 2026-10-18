@@ -109,12 +109,14 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   if (!open_explorer_route(cfg_, health_.get(), req, res, host_id, &route)) return;
   const auto answer = explorer_service_.table(current_request_context(), *route.host, route.host_id, database, table, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
-  // The related objects and the target of a Distributed table can be in other databases. A grant on some databases keeps only those
-  // (docs/access.md): one batch asks each database of the card.
+  // The related objects, the target of a Distributed table, the DDL text and engine_full can name other databases. A grant on some
+  // databases keeps only those and masks the names of the others (docs/access.md): one batch asks each database of the card.
   const ExplorerTableDetail& detail = *answer.value->value;
-  if (const auto readable = access_readable_databases({"explorer.read"}, explorer::table_detail_databases(detail))) {
-    return send_json(res, explorer::table_json(route.host_id, explorer::keep_table_detail_databases(detail, *readable), answer.value->stale,
-                                               explorer::kTableDetailCacheTtlMs));
+  if (cfg_.access.enforced()) {
+    if (const auto readable = access_readable_databases({"explorer.read"}, explorer::table_detail_databases(detail))) {
+      return send_json(res, explorer::table_json(route.host_id, explorer::keep_table_detail_databases(detail, *readable), answer.value->stale,
+                                                 explorer::kTableDetailCacheTtlMs));
+    }
   }
   send_json(res, explorer::table_json(route.host_id, detail, answer.value->stale, explorer::kTableDetailCacheTtlMs));
 }
@@ -188,12 +190,17 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   if (!open_explorer_route(cfg_, health_.get(), req, res, param_of(req, "host_id"), &route)) return;
   const auto answer = explorer_service_.definition(current_request_context(), *route.host, route.host_id, database, table, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
-  // The target (MV TO, Buffer, Distributed) can be in another database. Without a grant on it, the target is not visible (docs/access.md).
+  // The target (MV TO, Buffer, Distributed) and the SELECT can name another database. Without a grant on it, the target is not visible
+  // and the SELECT masks its name (docs/access.md).
   const ExplorerGraphDefinition& definition = *answer.value->definition;
-  if (!definition.target_database.empty()) {
-    if (const auto readable = access_readable_databases({"explorer.read"}, {definition.target_database})) {
-      return send_json(res, explorer::definition_json(route.host_id, *answer.value->node, explorer::keep_definition_databases(definition, *readable),
-                                                      answer.value->stale));
+  if (cfg_.access.enforced()) {
+    const std::vector<std::string> named = explorer::definition_databases(definition);
+    if (!named.empty()) {
+      if (const auto readable = access_readable_databases({"explorer.read"}, named)) {
+        return send_json(res, explorer::definition_json(route.host_id, *answer.value->node,
+                                                        explorer::keep_definition_databases(definition, *readable, answer.value->node->database),
+                                                        answer.value->stale));
+      }
     }
   }
   send_json(res, explorer::definition_json(route.host_id, *answer.value->node, definition, answer.value->stale));

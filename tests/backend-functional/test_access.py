@@ -408,6 +408,16 @@ def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
         assert detail["distributed"]["cluster"] == "chdash_cluster", detail.get("distributed")
         assert detail["distributed"]["database"] == "" and detail["distributed"]["table"] == "", detail["distributed"]
         assert all(d["database"] != "chdash_ui" for d in detail["dependencies"]), detail["dependencies"]
+        # The DDL text and engine_full mask the target database and its table (user decision 2026-10-18).
+        assert "chdash_ui" not in detail["ddl"] and "weather_observations" not in detail["ddl"], detail["ddl"]
+        assert "[HIDDEN]" in detail["ddl"] and "chdash_cluster" in detail["ddl"], detail["ddl"]
+        assert "chdash_ui" not in detail["summary"]["engine_full"] and "[HIDDEN]" in detail["summary"]["engine_full"], detail["summary"]
+        assert "chdash_ui" not in card.text and "weather_observations" not in card.text
+        # The catalog of the database gives no engine_full and no DDL: it names no other database.
+        catalog = call("GET", "/api/explorer/catalog?host_id=local&database=chdash_access_cross&refresh=1", tok=tok)
+        assert catalog.status_code == 200, catalog.text[:300]
+        listed = [t for t in catalog.json()["tables"] if t["name"] == "to_ui"]
+        assert listed and "chdash_ui" not in json.dumps(listed), listed
         definition = call("GET", "/api/explorer/graph/definition?host_id=local&database=chdash_access_cross&table=to_ui&refresh=1", tok=tok)
         assert definition.status_code == 200, definition.text[:300]
         assert definition.json()["target_visible"] is False and definition.json()["target"] is None, definition.text[:300]
@@ -417,6 +427,8 @@ def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
         answer(default=False, allow=["explorer.read@database:chdash_access_cross", "explorer.read@database:chdash_ui"])
         card = call("GET", "/api/explorer/table?host_id=local&database=chdash_access_cross&table=to_ui", tok=tok).json()
         assert card["distributed"]["database"] == "chdash_ui" and card["distributed"]["table"] == "weather_observations", card["distributed"]
+        assert "chdash_ui" in card["ddl"] and "[HIDDEN]" not in card["ddl"], card["ddl"]
+        assert "chdash_ui" in card["summary"]["engine_full"], card["summary"]
         definition = call("GET", "/api/explorer/graph/definition?host_id=local&database=chdash_access_cross&table=to_ui", tok=tok).json()
         assert definition["target"] == {"database": "chdash_ui", "table": "weather_observations"}, definition
     finally:

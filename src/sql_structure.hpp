@@ -73,6 +73,36 @@ std::vector<QualifiedName> relation_sources(std::string_view select_sql, const s
 // A `WITH FILL ... TO n` is not a TO target either.
 std::optional<QualifiedName> materialized_view_target(std::string_view create_sql, const std::string& default_database);
 
+// A place in a statement that names a database. The place can also name an object (a table or a dictionary) of that database.
+// The positions are byte offsets in the text. Each span covers whole tokens, the quote marks included.
+struct DatabaseReference {
+  std::string database;  // the decoded name
+  size_t begin = 0;      // the span of the database name
+  size_t end = 0;
+  size_t object_begin = 0;  // the span of the object; empty (object_begin == object_end) when the place names no object
+  size_t object_end = 0;
+};
+
+// The function gives the places of `text` that name a database, in the order of the text:
+//   - `db.table` after FROM, JOIN (not ARRAY JOIN), a comma of FROM, IN, the TO of a materialized view and the AS of CREATE TABLE;
+//   - the database argument (and the table argument) of the engines Distributed, Buffer, Merge and Dictionary, and of the table
+//     functions remote, remoteSecure, cluster, clusterAllReplicas, merge and dictionary. The name of the function is not case
+//     sensitive. The argument is a name, a text or `db.table`. For Dictionary and dictionary, a text 'db.name' names the database;
+//   - the first argument of dictGet*, dictHas, dictIsIn, joinGet and joinGetOrNull, as 'db.name' or `db.name`;
+//   - DB and TABLE in the SOURCE(CLICKHOUSE(...)) of a dictionary.
+// A name without a database (`table`) is not a place: it is in the database of the statement. The function does not read a SQL
+// text inside a text, for example the QUERY of a dictionary source.
+std::vector<DatabaseReference> database_references(std::string_view text);
+
+// The databases that database_references finds, once each, in the order of the text.
+std::vector<std::string> referenced_databases(std::string_view text);
+
+// The function gives `text` with the databases of `hidden` masked. Each place of database_references whose database is in
+// `hidden` shows [HIDDEN] in place of its database and its object. A name becomes `[HIDDEN]`, a text becomes '[HIDDEN]'. Every
+// other `db.name` whose `db` is in `hidden` is masked too, for example `db.table.column` in an expression.
+// The text does not change when `hidden` is empty.
+std::string mask_databases(std::string_view text, const std::vector<std::string>& hidden);
+
 // The function gives the TTL clause of a CREATE TABLE.
 // The clause is the text between the TTL that follows ENGINE and the next SETTINGS or COMMENT.
 // A TTL of a column stands inside the brackets. The function does not read it.

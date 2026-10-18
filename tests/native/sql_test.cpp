@@ -376,6 +376,60 @@ std::string names(const std::vector<sql::QualifiedName>& list) {
   return out;
 }
 
+// The places of a statement that name another database, and their masks (user decision 2026-10-18, docs/access.md).
+void test_database_references() {
+  const auto dbs = [](std::string_view text) { return sql::referenced_databases(text); };
+  using V = std::vector<std::string>;
+  // The engines.
+  CHECK_EQ(dbs("Distributed(chdash_cluster, chdash_ui, weather_observations)"), V{"chdash_ui"});
+  CHECK_EQ(dbs("Distributed('c', 'tenant_z', 'ledger', rand())"), V{"tenant_z"});
+  CHECK_EQ(dbs("Distributed('c', currentDatabase(), 'ledger')"), V{});
+  CHECK_EQ(dbs("Buffer(`tenant z`, ledger, 16, 10, 100, 10000, 1000000, 10000000, 100000000)"), V{"tenant z"});
+  CHECK_EQ(dbs("Merge('tenant_z', '^ledger')"), V{"tenant_z"});
+  CHECK_EQ(dbs("Merge(REGEXP('^tenant'), '^ledger')"), V{});
+  CHECK_EQ(dbs("Dictionary(tenant_z.rates)"), V{"tenant_z"});
+  CHECK_EQ(dbs("Dictionary('tenant_z.rates')"), V{"tenant_z"});
+  CHECK_EQ(dbs("Dictionary(rates)"), V{});
+  CHECK_EQ(dbs("MergeTree ORDER BY id TTL ts + INTERVAL 1 DAY TO VOLUME 'cold'"), V{});
+  // A materialized view, a view, a CREATE TABLE AS and the table functions.
+  CHECK_EQ(dbs("CREATE MATERIALIZED VIEW a.mv TO tenant_z.dst (`x` Int8) AS SELECT x FROM a.src JOIN tenant_y.dim AS d ON 1"),
+           (V{"tenant_z", "a", "tenant_y"}));
+  CHECK_EQ(dbs("CREATE TABLE a.copy AS tenant_z.orig ENGINE = MergeTree ORDER BY x"), V{"tenant_z"});
+  CHECK_EQ(dbs("SELECT * FROM remote('h:9000', tenant_z, ledger) WHERE k IN tenant_y.keys"), (V{"tenant_z", "tenant_y"}));
+  CHECK_EQ(dbs("SELECT * FROM cluster('c', tenant_z.ledger)"), V{"tenant_z"});
+  CHECK_EQ(dbs("SELECT * FROM merge('^ledger')"), V{});
+  // A column of a table alias is not a database: t.x and s.k.
+  CHECK_EQ(dbs("SELECT t.x, s.k FROM tenant_z.ledger AS t JOIN own AS s ON t.k = s.k"), V{"tenant_z"});
+  // The dictionaries and the Join tables of an expression, and the source of a dictionary.
+  CHECK_EQ(dbs("CREATE TABLE a.t (`k` UInt64, `r` Float64 DEFAULT dictGetFloat64('tenant_z.rates', 'r', k)) ENGINE = Log"), V{"tenant_z"});
+  CHECK_EQ(dbs("SELECT joinGet(tenant_y.j, 'v', 1), dictHas('local_dict', 1)"), V{"tenant_y"});
+  CHECK_EQ(dbs("CREATE DICTIONARY a.d (`k` UInt64) PRIMARY KEY k SOURCE(CLICKHOUSE(USER 'u' DB 'tenant_z' TABLE 'rates')) LAYOUT(FLAT()) LIFETIME(0)"),
+           V{"tenant_z"});
+  // Not a place: a text, a comment, a name without a database.
+  CHECK_EQ(dbs("SELECT 'FROM tenant_z.t' /* FROM tenant_y.t */ FROM t"), V{});
+
+  // The masks: the database and its object, with the quote marks of their kind. The other databases do not change.
+  const V hidden{"tenant_z"};
+  CHECK_EQ(sql::mask_databases("Distributed(chdash_cluster, tenant_z, ledger, rand())", hidden),
+           std::string("Distributed(chdash_cluster, `[HIDDEN]`, `[HIDDEN]`, rand())"));
+  CHECK_EQ(sql::mask_databases("Distributed('c', 'tenant_z', 'ledger')", hidden), std::string("Distributed('c', '[HIDDEN]', '[HIDDEN]')"));
+  CHECK_EQ(sql::mask_databases("Dictionary('tenant_z.rates')", hidden), std::string("Dictionary('[HIDDEN]')"));
+  CHECK_EQ(sql::mask_databases("Merge('tenant_z', '^ledger')", hidden), std::string("Merge('[HIDDEN]', '^ledger')"));
+  CHECK_EQ(sql::mask_databases("CREATE MATERIALIZED VIEW a.mv TO `tenant_z`.dst AS SELECT tenant_z.dst.x FROM a.src", hidden),
+           std::string("CREATE MATERIALIZED VIEW a.mv TO `[HIDDEN]`.`[HIDDEN]` AS SELECT `[HIDDEN]`.`[HIDDEN]`.x FROM a.src"));
+  CHECK_EQ(sql::mask_databases("CREATE DICTIONARY a.d (k UInt64) PRIMARY KEY k SOURCE(CLICKHOUSE(DB 'tenant_z' TABLE 'rates'))", hidden),
+           std::string("CREATE DICTIONARY a.d (k UInt64) PRIMARY KEY k SOURCE(CLICKHOUSE(DB '[HIDDEN]' TABLE '[HIDDEN]'))"));
+  CHECK_EQ(sql::mask_databases("SELECT dictGet('tenant_z.rates', 'r', k) FROM a.t", hidden),
+           std::string("SELECT dictGet('[HIDDEN]', 'r', k) FROM a.t"));
+  // A text and a comment that hold the name stay: they name no database for ClickHouse.
+  CHECK_EQ(sql::mask_databases("SELECT 'tenant_z' /* tenant_z.t */ FROM a.t", hidden), std::string("SELECT 'tenant_z' /* tenant_z.t */ FROM a.t"));
+  CHECK_EQ(sql::mask_databases("Distributed(c, tenant_z, ledger)", V{}), std::string("Distributed(c, tenant_z, ledger)"));
+  CHECK_EQ(sql::mask_databases("Distributed(c, tenant_y, ledger)", hidden), std::string("Distributed(c, tenant_y, ledger)"));
+  // A text that does not close and a bracket that does not close give no place and no crash.
+  CHECK_EQ(dbs("Distributed(c, 'tenant_z"), V{});
+  CHECK_EQ(dbs("Distributed(c, tenant_z, t"), V{});
+}
+
 void test_structure() {
   CHECK_EQ(sql::engine_arguments("Buffer('db', 'tbl', 16, 10, 100)", "Buffer"),
            (std::vector<std::string>{"db", "tbl", "16", "10", "100"}));
@@ -425,6 +479,8 @@ void test_structure() {
   CHECK_EQ(sql::clause_arguments("x LIFETIME(MIN 0   MAX 300) y", "LIFETIME").value_or("-"), std::string("MIN 0 MAX 300"));
   CHECK(!sql::clause_arguments("x LIFETIME(MIN 0", "LIFETIME"));
   CHECK(!sql::clause_arguments("x (LIFETIME(1))", "LIFETIME"));
+
+  test_database_references();
 
   size_t pos = 0;
   const auto name = sql::parse_qualified_name(" `a``b` . c$d rest", pos, "d");

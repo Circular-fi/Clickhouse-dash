@@ -68,15 +68,20 @@ ExplorerGraph keep_graph_databases(const ExplorerGraph& scoped, const std::unord
 std::vector<std::string> graph_databases(const ExplorerGraph& graph);
 // The storage map with only the databases that the subject may read. The totals of the answer come from the databases that stay.
 ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const std::unordered_set<std::string>& readable);
-// The databases that the card of a table names besides its own: the related objects (dependencies) and the target of a Distributed
-// table. Once each, in that order.
+// The databases that the card of a table names: the related objects (dependencies), the target of a Distributed table, and the
+// databases that its DDL text and its engine_full name (sql::referenced_databases). Once each, in that order.
 std::vector<std::string> table_detail_databases(const ExplorerTableDetail& detail);
-// The card of a table with only the databases that the subject may read. A related object of another database goes. The target of a
-// Distributed table in another database loses its database and its table; the cluster stays.
+// The card of a table with only the databases that the subject may read. The database of the table is always readable. A related
+// object of another database goes. The target of a Distributed table in another database loses its database and its table; the
+// cluster stays. The DDL text, engine_full, the TTL and the expressions of the columns show [HIDDEN] in place of the names of
+// such a database and of its objects (sql::mask_databases).
 ExplorerTableDetail keep_table_detail_databases(const ExplorerTableDetail& detail, const std::unordered_set<std::string>& readable);
-// The definition of a graph object. A target (MV TO, Buffer, Distributed) in a database that the subject may not read becomes a target
-// that is not visible: no database and no table.
-ExplorerGraphDefinition keep_definition_databases(const ExplorerGraphDefinition& definition, const std::unordered_set<std::string>& readable);
+// The databases that the definition of a graph object names: its target and the databases of its SELECT.
+std::vector<std::string> definition_databases(const ExplorerGraphDefinition& definition);
+// The definition of a graph object of `database`. A target (MV TO, Buffer, Distributed) in a database that the subject may not read
+// becomes a target that is not visible: no database and no table. Its SELECT shows [HIDDEN] in place of such a database.
+ExplorerGraphDefinition keep_definition_databases(const ExplorerGraphDefinition& definition, const std::unordered_set<std::string>& readable,
+                                                  const std::string& database);
 
 }  // namespace explorer
 }  // namespace chdash

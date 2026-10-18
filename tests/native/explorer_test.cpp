@@ -2532,7 +2532,16 @@ void test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition() {
   other.table = "ledger_mv";
   other.relation = "downstream";
   detail.dependencies = {own, other};
-  CHECK(table_detail_databases(detail) == (std::vector<std::string>{"tenant_a", "tenant_z"}));
+  // The DDL text and engine_full name the target database too (user decision 2026-10-18): they mask it.
+  detail.summary.engine_full = "Distributed(c, tenant_z, hidden_ledger, rand())";
+  detail.create_table_query =
+      "CREATE TABLE tenant_a.dist (`k` UInt64, `r` Float64 DEFAULT dictGet('tenant_y.rates', 'r', k)) "
+      "ENGINE = Distributed(c, tenant_z, hidden_ledger, rand())";
+  ExplorerColumnInfo column;
+  column.name = "r";
+  column.default_expression = "dictGet('tenant_y.rates', 'r', k)";
+  detail.columns = {column};
+  CHECK(table_detail_databases(detail) == (std::vector<std::string>{"tenant_a", "tenant_z", "tenant_y"}));
 
   const ExplorerTableDetail cut = keep_table_detail_databases(detail, {"tenant_a"});
   CHECK_EQ(cut.dependencies.size(), size_t(1));
@@ -2543,10 +2552,21 @@ void test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition() {
   CHECK(json.find("tenant_z") == std::string::npos);
   CHECK(json.find("hidden_ledger") == std::string::npos);
   CHECK(json.find("ledger_mv") == std::string::npos);
+  CHECK(json.find("tenant_y") == std::string::npos);
+  CHECK_EQ(cut.summary.engine_full, std::string("Distributed(c, `[HIDDEN]`, `[HIDDEN]`, rand())"));
+  CHECK(cut.create_table_query.find("ENGINE = Distributed(c, `[HIDDEN]`, `[HIDDEN]`, rand())") != std::string::npos);
+  CHECK(cut.create_table_query.find("CREATE TABLE tenant_a.dist") == 0);
+  CHECK_EQ(cut.columns[0].default_expression, std::string("dictGet('[HIDDEN]', 'r', k)"));
+  // The database of the table is readable without a decision: a card with no grant on another database keeps its own names.
+  const ExplorerTableDetail own_only = keep_table_detail_databases(detail, {});
+  CHECK(own_only.create_table_query.find("CREATE TABLE tenant_a.dist") == 0);
+  CHECK_EQ(own_only.dependencies.size(), size_t(1));
   // A grant on both databases keeps the card as it is.
-  const ExplorerTableDetail whole = keep_table_detail_databases(detail, {"tenant_a", "tenant_z"});
+  const ExplorerTableDetail whole = keep_table_detail_databases(detail, {"tenant_a", "tenant_z", "tenant_y"});
   CHECK_EQ(whole.dependencies.size(), size_t(2));
   CHECK_EQ(whole.distributed_table, std::string("hidden_ledger"));
+  CHECK_EQ(whole.create_table_query, detail.create_table_query);
+  CHECK_EQ(whole.summary.engine_full, detail.summary.engine_full);
 
   ExplorerGraphNode node;
   node.id = "table:tenant_a.dist";
@@ -2558,15 +2578,19 @@ void test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition() {
   definition.target_table = "hidden_ledger";
   definition.target_visible = true;
   definition.distributed_cluster = "c";
-  const ExplorerGraphDefinition hidden = keep_definition_databases(definition, {"tenant_a"});
+  definition.select_sql = "SELECT k FROM tenant_a.src JOIN tenant_z.dim AS d ON d.k = src.k";
+  CHECK(definition_databases(definition) == (std::vector<std::string>{"tenant_z", "tenant_a"}));
+  const ExplorerGraphDefinition hidden = keep_definition_databases(definition, {"tenant_a"}, "tenant_a");
   CHECK(!hidden.target_visible && hidden.target_database.empty() && hidden.target_table.empty());
   CHECK_EQ(hidden.distributed_cluster, std::string("c"));
   const std::string text = definition_json("local", node, hidden, false);
   CHECK(text.find("tenant_z") == std::string::npos);
   CHECK(text.find("hidden_ledger") == std::string::npos);
   CHECK(text.find("\"target\":null") != std::string::npos);
-  const ExplorerGraphDefinition kept = keep_definition_databases(definition, {"tenant_z"});
+  CHECK_EQ(hidden.select_sql, std::string("SELECT k FROM tenant_a.src JOIN `[HIDDEN]`.`[HIDDEN]` AS d ON d.k = src.k"));
+  const ExplorerGraphDefinition kept = keep_definition_databases(definition, {"tenant_z"}, "tenant_a");
   CHECK(kept.target_visible && kept.target_table == "hidden_ledger");
+  CHECK_EQ(kept.select_sql, definition.select_sql);
 }
 
 }  // namespace

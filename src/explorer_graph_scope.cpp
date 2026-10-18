@@ -1,6 +1,7 @@
 #include "explorer_graph_scope.hpp"
 
 #include "api_params.hpp"
+#include "sql_structure.hpp"
 
 #include <algorithm>
 #include <deque>
@@ -83,37 +84,78 @@ ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const s
   return out;
 }
 
+namespace {
+
+// The databases of `named` that the subject may not read. `own` (the database of the object) is always readable.
+std::vector<std::string> hidden_databases(const std::vector<std::string>& named, const std::unordered_set<std::string>& readable,
+                                          const std::string& own) {
+  std::vector<std::string> out;
+  for (const auto& database : named) {
+    if (database != own && readable.count(database) == 0) out.push_back(database);
+  }
+  return out;
+}
+
+void add_once(std::vector<std::string>& out, std::unordered_set<std::string>& seen, const std::string& database) {
+  if (!database.empty() && seen.insert(database).second) out.push_back(database);
+}
+
+}  // namespace
+
 std::vector<std::string> table_detail_databases(const ExplorerTableDetail& detail) {
   std::vector<std::string> out;
   std::unordered_set<std::string> seen;
-  const auto add = [&](const std::string& database) {
-    if (!database.empty() && seen.insert(database).second) out.push_back(database);
-  };
-  for (const auto& dependency : detail.dependencies) add(dependency.database);
-  add(detail.distributed_database);
+  for (const auto& dependency : detail.dependencies) add_once(out, seen, dependency.database);
+  add_once(out, seen, detail.distributed_database);
+  // The DDL text holds the expressions of the columns and the TTL too.
+  for (const auto& database : sql::referenced_databases(detail.create_table_query)) add_once(out, seen, database);
+  for (const auto& database : sql::referenced_databases(detail.summary.engine_full)) add_once(out, seen, database);
   return out;
 }
 
 ExplorerTableDetail keep_table_detail_databases(const ExplorerTableDetail& detail, const std::unordered_set<std::string>& readable) {
   ExplorerTableDetail out = detail;
+  const std::string& own = detail.summary.database;
   out.dependencies.clear();
   for (const auto& dependency : detail.dependencies) {
-    if (dependency.database.empty() || readable.count(dependency.database) != 0) out.dependencies.push_back(dependency);
+    if (dependency.database.empty() || dependency.database == own || readable.count(dependency.database) != 0) {
+      out.dependencies.push_back(dependency);
+    }
   }
-  if (!out.distributed_database.empty() && readable.count(out.distributed_database) == 0) {
+  if (!out.distributed_database.empty() && out.distributed_database != own && readable.count(out.distributed_database) == 0) {
     out.distributed_database.clear();
     out.distributed_table.clear();
+  }
+  const std::vector<std::string> hidden = hidden_databases(table_detail_databases(detail), readable, own);
+  if (hidden.empty()) return out;
+  out.create_table_query = sql::mask_databases(detail.create_table_query, hidden);
+  out.summary.engine_full = sql::mask_databases(detail.summary.engine_full, hidden);
+  out.table_ttl = sql::mask_databases(detail.table_ttl, hidden);
+  for (auto& column : out.columns) {
+    column.default_expression = sql::mask_databases(column.default_expression, hidden);
+    column.ttl_expression = sql::mask_databases(column.ttl_expression, hidden);
   }
   return out;
 }
 
-ExplorerGraphDefinition keep_definition_databases(const ExplorerGraphDefinition& definition, const std::unordered_set<std::string>& readable) {
+std::vector<std::string> definition_databases(const ExplorerGraphDefinition& definition) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  add_once(out, seen, definition.target_database);
+  for (const auto& database : sql::referenced_databases(definition.select_sql)) add_once(out, seen, database);
+  return out;
+}
+
+ExplorerGraphDefinition keep_definition_databases(const ExplorerGraphDefinition& definition, const std::unordered_set<std::string>& readable,
+                                                  const std::string& database) {
   ExplorerGraphDefinition out = definition;
-  if (!out.target_database.empty() && readable.count(out.target_database) == 0) {
+  if (!out.target_database.empty() && out.target_database != database && readable.count(out.target_database) == 0) {
     out.target_visible = false;
     out.target_database.clear();
     out.target_table.clear();
   }
+  const std::vector<std::string> hidden = hidden_databases(sql::referenced_databases(definition.select_sql), readable, database);
+  if (!hidden.empty()) out.select_sql = sql::mask_databases(definition.select_sql, hidden);
   return out;
 }
 
