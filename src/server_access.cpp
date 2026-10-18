@@ -116,6 +116,21 @@ void Server::init_access() {
   };
   pdp_ = std::make_unique<PdpClient>(std::move(options), make_http_pdp_transport(endpoint.host, endpoint.port, endpoint.base_path),
                                      std::move(on_call));
+  // The MCP keys of the page never have more than their creator (docs/mcp.md, "Keys and the access of humans"). The state of a key is
+  // kept for pdp.cache_ttl, as the answers of the PDP are.
+  if (mcp_keys_) {
+    mcp_creator_ = std::make_unique<McpCreatorAccess>(
+        settings.audience, std::chrono::milliseconds(settings.pdp_cache_ttl_ms),
+        [this](const std::string& subject, const std::vector<AccessQuestion>& questions) {
+          PdpCallContext context;
+          context.request_id = current_request_context().request_id;
+          return pdp_->decide(subject, questions, context);
+        },
+        [] {
+          return static_cast<int64_t>(
+              std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+        });
+  }
 }
 
 std::vector<AccessDecision> Server::access_decide(const std::vector<AccessQuestion>& questions) {
@@ -261,20 +276,6 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
     }
   }
   return out;
-}
-
-std::string Server::mcp_key_refused_action(const McpKey& key, const std::string& request_id) {
-  if (!cfg_.access.enforced() || key.source != "ui") return {};
-  if (key.creator.empty() || !pdp_) return "creator";
-  const auto questions = mcp_key_access_questions(key.tools, key.databases, cfg_.access.audience);
-  if (questions.empty()) return {};
-  PdpCallContext context;
-  context.request_id = request_id;
-  const auto decisions = pdp_->decide(key.creator, questions, context);
-  for (size_t i = 0; i < questions.size(); ++i) {
-    if (!decisions[i].allowed) return questions[i].action;
-  }
-  return {};
 }
 
 bool Server::access_permits(const char* action) {

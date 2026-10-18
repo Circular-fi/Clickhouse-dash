@@ -367,36 +367,59 @@ const char* mcp_tool_access_action(const McpToolInfo& tool) {
   return "unknown";
 }
 
-std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
-                                                     const std::string& service_id) {
-  // The databases that the scope names. A wildcard in a database part names databases that nobody can list here: the service.
-  bool any_database = false;
+namespace {
+
+// The databases that a scope names, and whether an entry has a wildcard in its database part. A wildcard names databases that
+// nobody can list here: the questions then go to the service.
+struct ScopeDatabases {
+  bool any = false;
   std::vector<std::string> named;
+};
+
+ScopeDatabases scope_databases(const std::vector<std::string>& databases) {
+  ScopeDatabases out;
   for (const auto& entry : databases) {
     const std::string database = entry.substr(0, entry.find('.'));
-    if (database.find('*') != std::string::npos) any_database = true;
-    else if (std::find(named.begin(), named.end(), database) == named.end()) named.push_back(database);
+    if (database.find('*') != std::string::npos) out.any = true;
+    else if (std::find(out.named.begin(), out.named.end(), database) == out.named.end()) out.named.push_back(database);
   }
-  std::vector<AccessQuestion> out;
-  const auto add = [&](const char* action, const char* type, const std::string& id) {
-    const bool known = std::any_of(out.begin(), out.end(), [&](const AccessQuestion& q) {
+  return out;
+}
+
+void add_tool_questions(const McpToolInfo& tool, const ScopeDatabases& scope, const std::string& service_id, std::vector<AccessQuestion>* out) {
+  const char* action = mcp_tool_access_action(tool);
+  if (!action) return;
+  const auto add = [&](const char* type, const std::string& id) {
+    const bool known = std::any_of(out->begin(), out->end(), [&](const AccessQuestion& q) {
       return q.action == action && q.resource.type == type && q.resource.id == id;
     });
-    if (!known) out.push_back(AccessQuestion{action, AccessResource{type, id}});
+    if (!known) out->push_back(AccessQuestion{action, AccessResource{type, id}});
   };
+  // The tools that read only the tables of the scope: the data tools and the Explorer tools of a table or of the catalog.
+  const bool scoped = !tool.needs_all_data && std::string_view(action) == "explorer.read" &&
+                      (!tool.api || tool.api->scope != McpApiScope::Free);
+  if (!scoped || scope.any) {
+    add("service", service_id);
+    return;
+  }
+  for (const auto& database : scope.named) add("database", database);
+}
+
+} // namespace
+
+std::vector<AccessQuestion> mcp_tool_access_questions(const McpToolInfo& tool, const std::vector<std::string>& databases,
+                                                      const std::string& service_id) {
+  std::vector<AccessQuestion> out;
+  add_tool_questions(tool, scope_databases(databases), service_id, &out);
+  return out;
+}
+
+std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
+                                                     const std::string& service_id) {
+  const ScopeDatabases scope = scope_databases(databases);
+  std::vector<AccessQuestion> out;
   for (const auto& name : mcp_effective_tools(tools, databases)) {
-    const McpToolInfo* tool = mcp_find_tool(name);
-    if (!tool) continue;
-    const char* action = mcp_tool_access_action(*tool);
-    if (!action) continue;
-    // The tools that read only the tables of the scope: the data tools and the Explorer tools of a table or of the catalog.
-    const bool scoped = !tool->needs_all_data && std::string_view(action) == "explorer.read" &&
-                        (!tool->api || tool->api->scope != McpApiScope::Free);
-    if (!scoped || any_database) {
-      add(action, "service", service_id);
-      continue;
-    }
-    for (const auto& database : named) add(action, "database", database);
+    if (const McpToolInfo* tool = mcp_find_tool(name)) add_tool_questions(*tool, scope, service_id, &out);
   }
   return out;
 }

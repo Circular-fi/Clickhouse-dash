@@ -39,6 +39,7 @@ AccessRule mcp_rule(std::string_view method, std::string_view path) {
     }
     if (!one_segment(rest.substr(0, slash))) return rule(AccessRuleKind::Unknown);
     const std::string_view tail = rest.substr(slash);
+    if (tail == "/adopt") return method == "POST" ? rule(AccessRuleKind::Action, "mcp.keys.write") : rule(AccessRuleKind::Unknown);
     if (tail == "/access") return rule(AccessRuleKind::Action, "mcp.keys.read");
     if (tail == "/usage" || tail == "/cost") return rule(AccessRuleKind::Action, "mcp.usage.read");
   }
@@ -59,7 +60,7 @@ const std::vector<AccessAction>& access_actions() {
       {"system.kill_query", false, "Stop the queries of other users. ChDash has no such control yet: the action is reserved."},
       {"observability.read", false, "Open the Traces, Logs and Metrics pages."},
       {"mcp.keys.read", false, "See the MCP keys and what each key can read."},
-      {"mcp.keys.write", false, "Make and delete MCP keys."},
+      {"mcp.keys.write", false, "Make, delete and adopt MCP keys."},
       {"mcp.usage.read", false, "See the usage and the cost of the MCP keys."},
   };
   return actions;

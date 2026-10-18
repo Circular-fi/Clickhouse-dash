@@ -109,6 +109,19 @@ public:
     (void)info;
     return call_tool(key, tool, arguments, now);
   }
+// The access of humans can take tools from a key of the page (docs/mcp.md, "Keys and the access of humans").
+// tools/list shows only the tools of `tools` that this function keeps. By default, it keeps all of them.
+  virtual std::vector<std::string> permitted_tools(const McpKey& key, std::vector<std::string> tools) {
+    (void)key;
+    return tools;
+  }
+// tools/call calls a tool that the key holds only when this function gives true. Otherwise the call gets the answer for a tool
+// that does not exist (-32602), as tools/list does not show it. By default, every tool is permitted.
+  virtual bool tool_permitted(const McpKey& key, const McpToolInfo& tool) {
+    (void)key;
+    (void)tool;
+    return true;
+  }
 };
 
 struct McpRpcResult {

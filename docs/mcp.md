@@ -364,9 +364,31 @@ In the `authzen` mode ([access.md](access.md)), a key of the page never has more
 - `explorer.read` of a tool that reads only the tables of the scope is asked for each database of `databases`. When a database part has a wildcard (`*`, `app_*`), ChDash asks for the service. ChDash asks every other action for the service.
 - When a key is made, ChDash asks the PDP for the person, in one batch, for each action of the tools of the key (with `*`, every tool that `*` gives). A `false` decision gives `403` with that action, and no key is made.
 - The key keeps its creator: the member `creator` of the key file and of the key list (the `sub` of the identity token). The value is `null` for a key of the configuration and for a key made in the `open` mode.
-- On each request of the key, ChDash asks the PDP again for the creator, with the same questions. The cache of the decisions applies (`pdp.cache_ttl`). When the PDP refuses one action, or does not answer, the key stops: the request gets the `401` of a key that does not exist (contract 3.3). The log has the line `mcp.key_refused` with the key, the creator and the action. When the PDP gives the actions again, the key works again.
-- In the `authzen` mode, a key of the page with no creator (a key of an older ChDash, or of the `open` mode) gets the same `401`, with the action `creator` in the log. Make such a key again.
+- On each request of the key, ChDash finds the state of the key: one batch to the PDP for the creator, with all the questions of the key. ChDash keeps this state for `pdp.cache_ttl`, so it sends at most one such batch for each key and each period. It never keeps a state that has a failure of the PDP.
+- `tools/list` shows only the tools whose actions the creator holds in this state. The tools that use no action stay.
+- `tools/call` asks the PDP for the actions of the called tool only, not for all the actions of the key. The cache of the decisions applies. When the PDP refuses an action of the tool, or does not answer, the call gets the answer of a tool that does not exist (`-32602`, contract 3.6). The log has the line `mcp.tool_refused` with the key, the creator, the tool and the action. The other tools of the key continue to work.
 - A key of the configuration is not checked: the operator writes it in the configuration.
+
+### Orphan keys and their adoption
+
+A key of the page is an orphan in the `authzen` mode in two cases:
+
+- `no_creator`: the key has no creator. This is a key of an older ChDash, or a key made in the `open` mode.
+- `creator_gone`: the PDP refuses to the creator every action of the key, in an answer without a failure. ChDash has no list of persons, so the PDP is the source: for ChDash, the creator does not exist any more. A key whose tools use no action is never `creator_gone`.
+
+An orphan key is refused:
+
+- Each request of the key gets the `401` of a key that does not exist (contract 3.3). The log has the line `mcp.key_refused` with the key, the creator (`-` when there is none) and the reason (`no_creator` or `creator_gone`).
+- `GET /api/mcp/keys` gives the reason in the member `orphan` of the key. The MCP page shows the warning "Refused" on the key, and the action Adopt.
+- A failure of the PDP does not make a key an orphan. During the failure, each tool that uses an action is refused (fail closed), and nobody can adopt the key.
+
+To adopt a key, a person uses Adopt on the page, or `POST /api/mcp/keys/<id>/adopt`:
+
+- The person needs `mcp.keys.write` and each action that the tools of the key use, with the rules above. ChDash asks the PDP for all of them in one batch. A `false` decision gives `403` with that action, and the key does not change. Thus a key never has more than its new creator.
+- Only an orphan key can be adopted. For a key whose creator holds an action of the key, the answer is `409` `not_adoptable`. When the PDP does not answer, the answer is `503` `pdp_unavailable`.
+- The person becomes the creator. The key file keeps the new creator. The secret does not change: the clients that hold the token get access again, with the permissions of the new creator.
+- When two persons adopt one key at the same time, the second gets `409` `creator_changed`.
+- The log has the line `mcp.key_adopted` with the key, the former creator, the new creator and the reason.
 
 ### Modes and sources
 
@@ -1192,6 +1214,7 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 | `GET /api/mcp/keys/<id>/cost?window=24h` | What the statements of a key cost ClickHouse in a window. The default window is `24h`. The other windows are `1h`, `6h` and `7d`. The figures are read from `system.query_log` of the host of the key (refer to [The ClickHouse cost of a key](#the-clickhouse-cost-of-a-key)). The answer has this form: `{"id", "host", "window", "from", "to", "max_lookback_hours", "clamped", "read_at", "status": "ok" \| "unavailable", "reason", "error", "statement", "suggested_window", "totals": {"statements", "failed", "canceled", "read_rows", "read_bytes", "result_rows", "result_bytes", "duration_ms", "cpu_ms", "memory_peak_bytes"}, "identities": [{"user", "role", "statements", "failed", "canceled", "read_rows", "read_bytes", "duration_ms", "cpu_ms", "memory_peak_bytes"}], "tools": [{"tool", ...the same figures}], "tables": [{"name", "statements"}], "tables_truncated", "rows_truncated"}`. The figures are JSON numbers. `status` is `unavailable` when the read fails. The `reason` is one of these: `not_granted` (with the `statement` that gives the grant to the runner), `disabled` (no `query_log`), `window_too_large` (with the `suggested_window`), `readonly_account`, `runner_unavailable`, `no_host` (the host of a deleted key is gone) or `failed`. The figures are then 0. A deleted key answers while its usage is kept. The route gives 400 `validation` (field `window`) for another window. An unknown key gives 404 `not_found`. When `system.top_queries` is disabled, the route gives 404 `not_enabled`. This is a read of the page only. |
 | `POST /api/mcp/keys` | Makes a key. The answer is 201: `{"key": {...}, "secret": "mcp_..."}`. The `secret` value is the token of the key. This is the only answer that carries the token. The body has `name`, `hosts`, `tools`, `databases` and the optional `max_rows` and `timeout_seconds`. A member that is not one of these gives 400 `validation` with `reason` `unknown_field` (for example `expires_at`). In the `authzen` mode, the person must have each action that the tools of the key use, else the answer is 403 with that action (refer to [Keys and the access of humans](#keys-and-the-access-of-humans)). |
 | `DELETE /api/mcp/keys/<id>` | Answer: `{"ok": true, "id": "<id>"}`. |
+| `POST /api/mcp/keys/<id>/adopt` | The person becomes the creator of an orphan key. The body is `{}`. The answer is 200: `{"key": {...}}`, without the secret. Refer to [Orphan keys and their adoption](#orphan-keys-and-their-adoption). |
 
 A key in the answers:
 
@@ -1209,7 +1232,7 @@ For a key of an older version, it is 8 characters, because its token is a UUID. 
 
 For a key of an older version, it shows the shape of a UUID, or only bullets when the hint is empty. It says nothing but the shape of the token. `subject` and `expires_at` are the subject and the expiry of a key of the configuration (`mcp_key`).
 
-They are `null` for a key without them. `creator` is the subject that made a key of the page in the `authzen` mode. It is `null` for a key of the configuration and for a key of the `open` mode.
+They are `null` for a key without them. `creator` is the subject that made a key of the page in the `authzen` mode. It is `null` for a key of the configuration and for a key of the `open` mode. `orphan` is `no_creator` or `creator_gone` for a key of the page that is refused until a person adopts it. It is `null` for every other key, and always `null` in the `open` mode.
 
 The write routes pass the guard of every write of ChDash ([operations.md](operations.md#the-guard-of-the-writes)). The guard runs before the routing:
 

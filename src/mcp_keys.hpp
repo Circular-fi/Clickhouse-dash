@@ -151,7 +151,9 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, Mcp
 using McpJsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
 // The Key object of the API contract (docs/mcp.md).
-void mcp_write_key(McpJsonWriter& writer, const McpKey& key, std::optional<int64_t> last_used);
+// `orphan` is the state of a key of the page in the authzen mode that a person can adopt ("no_creator" or "creator_gone",
+// mcp_creator_access.hpp), or null.
+void mcp_write_key(McpJsonWriter& writer, const McpKey& key, std::optional<int64_t> last_used, const char* orphan = nullptr);
 
 // ---- the UI key file ----------------------------------------------------
 
@@ -220,6 +222,10 @@ public:
   // `creator` is the subject of the access of humans that makes the key (empty in the open mode).
   Result create(const McpKeyInput& input, int64_t now, const std::string& creator = std::string());
   Result remove(const std::string& id);
+  // A person adopts a key of the page: `creator` becomes its creator, and the secret does not change (docs/mcp.md, "Adoption of a
+  // key"). The change happens only while the creator of the key is still `expected` (an empty text for a key with no creator), so
+  // two persons cannot adopt one key at the same time: the second gets 409 `creator_changed`.
+  Result adopt(const std::string& id, const std::string& expected, const std::string& creator, int64_t now);
 
   // The comparison of the hash of `token` with every key takes constant time.
   // A key whose expiry is at or before `now` (Unix seconds) is Expired.

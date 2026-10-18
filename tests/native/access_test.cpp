@@ -343,6 +343,7 @@ void test_route_rules() {
       {"GET", "/api/mcp/usage", "mcp.usage.read"}, {"GET", "/api/mcp/usage/overview", "mcp.usage.read"},
       {"GET", "/api/mcp/keys/k1/usage", "mcp.usage.read"}, {"GET", "/api/mcp/keys/k1/cost", "mcp.usage.read"},
       {"GET", "/api/mcp/keys/k1", "unknown"}, {"GET", "/api/mcp/keys/k1/other", "unknown"}, {"GET", "/api/mcp/other", "unknown"},
+      {"POST", "/api/mcp/keys/k1/adopt", "mcp.keys.write"}, {"GET", "/api/mcp/keys/k1/adopt", "unknown"},
       {"GET", "/api/system/overview", "system.read"}, {"GET", "/api/system/queries/123", "system.read"}, {"GET", "/api/explorer/ops/activity", "system.read"},
       {"GET", "/api/explorer/catalog", "explorer.read@database"}, {"GET", "/api/explorer/table", "explorer.read@database"},
       {"GET", "/api/explorer/graph/definition", "explorer.read@database"}, {"GET", "/api/explorer/storage", "explorer.read@database"},

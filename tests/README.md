@@ -402,7 +402,7 @@ The test also checks the cache of the decisions and `readonly = 1` for a run wit
 | Variable | Instance |
 | --- | --- |
 | `ACCESS_BASE_URL` | `config/access.authzen.hcl` (compose service `chdash_access`): `access.mode = "authzen"`, a cache of 1 s, MCP with a static key, and the OTLP export to its own receiver |
-| `ACCESS_PDP_URL` | the fake PDP (compose service `access_pdp`, `otel-fixture/fake_pdp.py`): it keeps each request that it receives (`GET /control/received`) and answers what a test asks (`POST /control/answer`) |
+| `ACCESS_PDP_URL` | the fake PDP (compose service `access_pdp`, `otel-fixture/fake_pdp.py`): it keeps each request that it receives (`GET /control/received`) and answers what a test asks (`POST /control/answer`: a default, actions to deny or allow, and `deny_subjects`, the subjects that it does not know) |
 | `ACCESS_OTLP_URL` | the fake OTLP receiver of that instance (compose service `access_otlp_receiver`) |
 | `ACCESS_LOGS_CMD` | optional: a command that prints the log of `chdash_access`, for the decision records (U10) |
 

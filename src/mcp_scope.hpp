@@ -165,5 +165,9 @@ const char* mcp_tool_access_action(const McpToolInfo& tool);
 // Every other action is asked on the service `service_id`. The questions have no duplicates.
 std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
                                                      const std::string& service_id);
+// The questions of one tool, with the same rules: the questions that the creator of a key must pass to call this tool.
+// The list is empty for a tool that uses no action.
+std::vector<AccessQuestion> mcp_tool_access_questions(const McpToolInfo& tool, const std::vector<std::string>& databases,
+                                                      const std::string& service_id);
 
 } // namespace chdash

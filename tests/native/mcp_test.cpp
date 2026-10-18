@@ -17,6 +17,7 @@
 #include "http_guard.hpp"
 #include "log.hpp"
 #include "mcp_api_tools.hpp"
+#include "mcp_creator_access.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_keys.hpp"
@@ -778,6 +779,44 @@ void test_key_creator(const std::string& dir) {
     refused = contains(error.what(), "creator");
   }
   CHECK(refused);
+}
+
+// A key without a creator, or whose creator the PDP does not know any more, can be adopted (user decision 2026-10-18): the person
+// becomes the creator, and the secret does not change. Two persons cannot adopt one key at the same time.
+void test_key_adoption(const std::string& dir) {
+  const std::string file = dir + "/adopt-keys.json";
+  McpKeyStore store(store_options(file));
+  auto orphan = store.create(input_of(R"({"name":"orphan-key","hosts":["prod"],"tools":["list_databases"],"databases":["otel"]})"), 1'800'000'000);
+  CHECK_EQ(orphan.status, 201);
+  const std::string id = orphan.key->id;
+  // The creator that the caller saw is not the creator now: refused.
+  CHECK_EQ(store.adopt(id, "somebody", "adopter", 1'800'000'100).status, 409);
+  CHECK_EQ(store.adopt(id, "somebody", "adopter", 1'800'000'100).error, std::string("creator_changed"));
+  CHECK_EQ(store.adopt("ui_000000000000", "", "adopter", 1'800'000'100).status, 404);
+  CHECK_EQ(store.adopt(id, "", "", 1'800'000'100).status, 400);
+  CHECK_EQ(store.adopt(id, "", std::string("bad\x01name"), 1'800'000'100).status, 400);
+  const auto adopted = store.adopt(id, "", "adopter", 1'800'000'100);
+  CHECK_EQ(adopted.status, 200);
+  CHECK_EQ(adopted.key->creator, std::string("adopter"));
+  CHECK(adopted.secret.empty());  // the secret is never given again
+  // The same secret works, and the file keeps the new creator after a restart.
+  CHECK_EQ(store.authenticate(orphan.secret, 0).key.creator, std::string("adopter"));
+  CHECK(contains(read_file(file), "\"creator\":\"adopter\""));
+  McpKeyStore again(store_options(file));
+  CHECK_EQ(again.authenticate(orphan.secret, 0).key.creator, std::string("adopter"));
+  // A second adoption with the old view is refused.
+  CHECK_EQ(again.adopt(id, "", "other", 1'800'000'200).error, std::string("creator_changed"));
+  // A key of the configuration has no creator to change.
+  CHECK_EQ(again.adopt(again.list().front().id, "", "adopter", 1'800'000'200).error, std::string("config_key"));
+  // The key list says which key is an orphan.
+  rapidjson::StringBuffer sb;
+  McpJsonWriter w(sb);
+  mcp_write_key(w, again.list().back(), std::nullopt, "creator_gone");
+  CHECK_EQ(std::string(parse(sb.GetString())["orphan"].GetString()), std::string("creator_gone"));
+  rapidjson::StringBuffer sb2;
+  McpJsonWriter w2(sb2);
+  mcp_write_key(w2, again.list().back(), std::nullopt);
+  CHECK(parse(sb2.GetString())["orphan"].IsNull());
 }
 
 void test_store_startup_errors(const std::string& dir) {
@@ -5397,6 +5436,147 @@ std::string modern_rpc(const std::string& method, const std::string& params_with
   return rpc(method, params);
 }
 
+// The state of a key of the page in the authzen mode (mcp_creator_access.hpp, user decision 2026-10-18).
+void test_creator_access() {
+  struct FakePdp {
+    std::set<std::string> allowed;  // "subject|action@type:id"
+    bool fails = false;
+    int batches = 0;
+    std::vector<std::vector<std::string>> asked;
+  };
+  FakePdp pdp;
+  int64_t clock = 1000;
+  McpCreatorAccess gate("db", std::chrono::milliseconds(30000),
+                        [&](const std::string& subject, const std::vector<AccessQuestion>& questions) {
+                          pdp.batches += 1;
+                          std::vector<std::string> names;
+                          std::vector<AccessDecision> out;
+                          for (const auto& q : questions) {
+                            const std::string text = q.action + "@" + q.resource.type + ":" + q.resource.id;
+                            names.push_back(text);
+                            AccessDecision d;
+                            d.source = pdp.fails ? "error" : "pdp";
+                            d.allowed = !pdp.fails && pdp.allowed.count(subject + "|" + text) != 0;
+                            out.push_back(d);
+                          }
+                          pdp.asked.push_back(names);
+                          return out;
+                        },
+                        [&] { return clock; });
+  McpKey key = a_key({"list_databases", "system_overview", "run_query", "list_hosts"}, {"*"});
+  key.source = "ui";
+
+  // No creator: an orphan, and the PDP is not asked.
+  CHECK(gate.state(key).status == McpCreatorStatus::NoCreator);
+  CHECK(mcp_creator_orphan(McpCreatorStatus::NoCreator));
+  CHECK_EQ(pdp.batches, 0);
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("list_databases")), std::string("creator"));
+
+  // A creator who holds explorer.read only: the key keeps the tools of that action and the tools that use no action.
+  key.creator = "alice";
+  pdp.allowed = {"alice|explorer.read@service:db"};
+  McpCreatorState state = gate.state(key);
+  CHECK(state.status == McpCreatorStatus::Active);
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "list_databases") != state.tools.end());
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "list_hosts") != state.tools.end());
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "system_overview") == state.tools.end());
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "run_query") == state.tools.end());
+  CHECK_EQ(pdp.batches, 1);
+  // One batch with every action of the key.
+  CHECK_EQ(pdp.asked.back().size(), size_t(3));
+  // The state is kept for the period: no new batch.
+  gate.state(key);
+  gate.state(key);
+  CHECK_EQ(pdp.batches, 1);
+  CHECK_EQ(gate.kept(), size_t(1));
+  // tools/call asks for the called tool only.
+  CHECK(gate.tool_refused_action(key, *mcp_find_tool("list_databases")).empty());
+  CHECK(pdp.asked.back() == (std::vector<std::string>{"explorer.read@service:db"}));
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("system_overview")), std::string("system.read"));
+  CHECK(pdp.asked.back() == (std::vector<std::string>{"system.read@service:db"}));
+  // A tool that uses no action asks nothing.
+  const int before = pdp.batches;
+  CHECK(gate.tool_refused_action(key, *mcp_find_tool("list_hosts")).empty());
+  CHECK_EQ(pdp.batches, before);
+
+  // After the period, the state is asked again: the creator lost every action of the key, the PDP does not know this person.
+  pdp.allowed.clear();
+  clock += 30001;
+  state = gate.state(key);
+  CHECK(state.status == McpCreatorStatus::CreatorGone);
+  CHECK(mcp_creator_orphan(state.status));
+  CHECK(state.tools.empty());
+  CHECK_EQ(std::string(mcp_creator_status_name(state.status)), std::string("creator_gone"));
+
+  // A failure of the PDP proves nothing: the state is Unknown, no tool passes, and nothing is kept.
+  gate.forget(key.id);
+  CHECK_EQ(gate.kept(), size_t(0));
+  pdp.fails = true;
+  state = gate.state(key);
+  CHECK(state.status == McpCreatorStatus::Unknown);
+  CHECK(!mcp_creator_orphan(state.status));
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "list_databases") == state.tools.end());
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "list_hosts") != state.tools.end());
+  CHECK_EQ(gate.kept(), size_t(0));
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("list_databases")), std::string("explorer.read"));
+  pdp.fails = false;
+
+  // An adoption changes the creator: the state of the old creator never applies to the adopter.
+  pdp.allowed = {"bob|explorer.read@service:db", "bob|system.read@service:db", "bob|query.run.read@service:db"};
+  gate.state(key);  // alice: gone, kept
+  key.creator = "bob";
+  state = gate.state(key);
+  CHECK(state.status == McpCreatorStatus::Active);
+  CHECK(std::find(state.tools.begin(), state.tools.end(), "run_query") != state.tools.end());
+
+  // A key whose tools use no action is never an orphan by its creator.
+  McpKey hosts_only = a_key({"list_hosts"}, {});
+  hosts_only.id = "k2";
+  hosts_only.source = "ui";
+  hosts_only.creator = "carol";
+  CHECK(gate.state(hosts_only).status == McpCreatorStatus::Active);
+
+  // The questions of one tool follow the rules of the key: explorer.read of a scoped tool is asked for each database.
+  const auto questions = mcp_tool_access_questions(*mcp_find_tool("query_table"), {"otel", "chdash_ui.x"}, "db");
+  CHECK_EQ(questions.size(), size_t(2));
+  CHECK(mcp_tool_access_questions(*mcp_find_tool("list_hosts"), {"*"}, "db").empty());
+}
+
+// The access of humans can take tools from a key (McpToolBackend::permitted_tools and tool_permitted): tools/list does not show them,
+// and tools/call gets the answer for a tool that does not exist (-32602). The tool never runs.
+void test_protocol_permitted_tools() {
+  struct Narrowed : FakeBackend {
+    std::vector<std::string> asked;
+    std::vector<std::string> permitted_tools(const McpKey&, std::vector<std::string> tools) override {
+      tools.erase(std::remove(tools.begin(), tools.end(), "system_overview"), tools.end());
+      return tools;
+    }
+    bool tool_permitted(const McpKey&, const McpToolInfo& tool) override {
+      asked.push_back(tool.name);
+      return std::string(tool.name) != "system_overview";
+    }
+  };
+  Narrowed backend;
+  McpServerInfo info;
+  const McpKey key = a_key({"list_hosts", "system_overview"}, {"*"});
+  const int64_t now = 1'800'000'000;
+  const auto list = parse(mcp_handle_message(rpc("tools/list"), key, backend, info, now).body);
+  std::vector<std::string> names;
+  for (const auto& tool : list["result"]["tools"].GetArray()) names.emplace_back(tool["name"].GetString());
+  CHECK(std::find(names.begin(), names.end(), "list_hosts") != names.end());
+  CHECK(std::find(names.begin(), names.end(), "system_overview") == names.end());
+  const auto refused = mcp_handle_message(rpc("tools/call", R"({"name":"system_overview","arguments":{}})"), key, backend, info, now);
+  const auto doc = parse(refused.body);
+  CHECK_EQ(doc["error"]["code"].GetInt(), kRpcInvalidParams);
+  CHECK(contains(doc["error"]["message"].GetString(), "Unknown tool"));
+  CHECK(std::find(backend.calls.begin(), backend.calls.end(), "system_overview") == backend.calls.end());
+  // Only the called tool is asked.
+  CHECK(backend.asked == (std::vector<std::string>{"system_overview"}));
+  const auto ok = parse(mcp_handle_message(rpc("tools/call", R"({"name":"list_hosts","arguments":{}})"), key, backend, info, now).body);
+  CHECK(ok.HasMember("result"));
+  CHECK(backend.asked == (std::vector<std::string>{"system_overview", "list_hosts"}));
+}
+
 void test_protocol_modern() {
   FakeBackend backend;
   McpServerInfo info;
@@ -8158,7 +8338,9 @@ int main() {
     const std::string d = make_temp_dir();
     test_store(d);
     test_key_creator(d);
+    test_key_adoption(d);
   }
+  test_creator_access();
   test_store_startup_errors(make_temp_dir());
   test_usage(make_temp_dir());
   test_usage_cells(make_temp_dir());
@@ -8178,6 +8360,7 @@ int main() {
   test_sql_quoting_and_types();
   test_sql_builder();
   test_protocol();
+  test_protocol_permitted_tools();
   test_protocol_modern();
   test_trace_and_untrusted();
   test_analysis_protocol();

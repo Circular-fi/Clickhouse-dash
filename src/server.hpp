@@ -27,6 +27,7 @@
 #include "jwt.hpp"
 #include "metrics.hpp"
 #include "mcp_cost.hpp"
+#include "mcp_creator_access.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
 #include "mcp_usage.hpp"
@@ -366,6 +367,8 @@ enum class McpApiRoute {
   KeysList,
   KeyCreate,
   KeyDelete,
+  // A person adopts a key of the page that has no creator, or whose creator the PDP does not know any more.
+  KeyAdopt,
   KeyAccess,
   // The number of databases and tables that each key reaches. The page shows them in a table.
   AccessSummary,
@@ -442,10 +445,6 @@ private:
   // Return nullopt when every database passes: no check applies, or an action is true on the service.
   std::optional<std::unordered_set<std::string>> access_readable_databases(const std::vector<const char*>& actions,
                                                                           const std::vector<std::string>& databases);
-  // An MCP key of the page in the authzen mode works only while the PDP gives its creator each action that its tools use
-  // (mcp_key_access_questions). Return the first action that the PDP refuses, "creator" for a key with no creator, or an empty
-  // string when the key may work. Return an empty string in the open mode and for a key of the configuration.
-  std::string mcp_key_refused_action(const McpKey& key, const std::string& request_id);
   // Return the decision of `action` on the service for the subject of this request.
   // The page uses it to show or hide a control. Return true when no check applies.
   bool access_permits(const char* action);
@@ -736,6 +735,8 @@ private:
   // The access of humans (docs/access.md). These pointers are null in the open mode.
   std::unique_ptr<IdentityVerifier> identity_;
   std::unique_ptr<PdpClient> pdp_;
+  // The access of humans for the MCP keys of the page (mcp_creator_access.hpp). Set in the authzen mode when MCP is on.
+  std::unique_ptr<McpCreatorAccess> mcp_creator_;
   // The OTLP export of the spans and of the call log of MCP. The pointer is null when telemetry.enabled is false.
   // A request only puts its items in the queue of the exporter.
   // The destructor sends the items that wait, within the time of the stop.

@@ -104,7 +104,7 @@ if (CHDASH_BUILD_CODEC_TESTS)
 endif()
 
 # The tools of MCP: the dispatch, what the tools share, and the tools by family.
-set(CHDASH_MCP_TOOL_SOURCES mcp_untrusted.cpp mcp_trace.cpp mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
+set(CHDASH_MCP_TOOL_SOURCES mcp_creator_access.cpp mcp_untrusted.cpp mcp_trace.cpp mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
 
 # The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
 set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_read.cpp query_library_request.cpp query_library_rules.cpp)

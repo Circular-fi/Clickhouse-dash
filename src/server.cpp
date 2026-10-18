@@ -639,6 +639,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/mcp/keys", mcp_api(McpApiRoute::KeysList));
     http_.Post("/api/mcp/keys", mcp_api(McpApiRoute::KeyCreate));
     http_.Delete(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyDelete));
+    http_.Post(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/adopt)", mcp_api(McpApiRoute::KeyAdopt));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/access)", mcp_api(McpApiRoute::KeyAccess));
     http_.Get("/api/mcp/access", mcp_api(McpApiRoute::AccessSummary));
     http_.Get("/api/mcp/usage", mcp_api(McpApiRoute::Usage));

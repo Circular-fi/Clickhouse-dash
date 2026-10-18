@@ -475,6 +475,100 @@ def test_an_mcp_key_never_has_more_than_its_creator():
         call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
 
 
+def mcp_rpc(secret: str, method: str, params: dict | None = None) -> requests.Response:
+    body = {"jsonrpc": "2.0", "id": 1, "method": method, **({"params": params} if params is not None else {})}
+    return SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
+                        headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"})
+
+
+def listed_tools(secret: str) -> list[str]:
+    response = mcp_rpc(secret, "tools/list", {})
+    assert response.status_code == 200, response.text
+    return [tool["name"] for tool in response.json()["result"]["tools"]]
+
+
+@needs_access
+def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
+    # User decision 2026-10-18: tools/call checks the called tool only; tools/list shows the tools whose action the creator holds.
+    answer(default=False, allow=["mcp.keys.read", "mcp.keys.write", "explorer.read", "system.read"])
+    tok = token("operator")
+    made = make_mcp_key(tok, f"partial-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases", "system_overview"], ["*"])
+    assert made.status_code == 201, made.text
+    key, secret = made.json()["key"], made.json()["secret"]
+    try:
+        assert {"list_hosts", "list_databases", "system_overview"} <= set(listed_tools(secret))
+        # The creator loses system.read: the key keeps its other tools.
+        answer(default=False, allow=["mcp.keys.read", "mcp.keys.write", "explorer.read"])
+        tools = listed_tools(secret)
+        assert "system_overview" not in tools and "list_databases" in tools and "list_hosts" in tools, tools
+        refused = mcp_call(secret, "system_overview")
+        assert refused.status_code == 200 and refused.json()["error"]["code"] == -32602, refused.text
+        working = mcp_call(secret, "list_databases")
+        assert working.status_code == 200 and working.json()["result"]["isError"] is False, working.text
+        # The key is not an orphan: the list has no warning for it.
+        listed = [k for k in call("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
+        assert listed and listed[0]["orphan"] is None, listed
+        # The PDP fails: fail closed for every tool that uses an action, and the key is not called an orphan.
+        answer(status=500)
+        assert mcp_call(secret, "list_databases").json()["error"]["code"] == -32602
+        assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
+    finally:
+        answer(default=True)
+        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
+
+
+@needs_access
+def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
+    # User decision 2026-10-18: a key whose creator the PDP does not know any more is refused (401) and listed as an orphan. A person
+    # with mcp.keys.write and every action of its tools adopts it: the person becomes the creator, and the secret does not change.
+    answer(default=True)
+    made = make_mcp_key(token("leaver"), f"orphan-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases"], ["chdash_ui"])
+    assert made.status_code == 201, made.text
+    key, secret = made.json()["key"], made.json()["secret"]
+    heir = token("heir")
+    adopt = lambda tok: call("POST", f"/api/mcp/keys/{key['id']}/adopt", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})  # noqa: E731
+    try:
+        assert mcp_call(secret, "list_hosts").status_code == 200
+        # The creator still holds the actions: nobody can adopt the key.
+        refused = adopt(heir)
+        assert refused.status_code == 409 and refused.json()["error_code"] == "not_adoptable", refused.text
+        answer(deny_subjects=["leaver"])
+        stopped = mcp_call(secret, "list_hosts")
+        assert stopped.status_code == 401, stopped.text
+        listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
+        assert listed[0]["orphan"] == "creator_gone" and listed[0]["creator"] == "leaver", listed
+        # A person without an action of the key cannot adopt it: the key would have more than its creator.
+        answer(deny_subjects=["leaver"], deny=["explorer.read"])
+        lacking = adopt(heir)
+        assert lacking.status_code == 403 and lacking.json()["action"] == "explorer.read", lacking.text
+        # Nor without mcp.keys.write.
+        answer(deny_subjects=["leaver"], deny=["mcp.keys.write"])
+        assert adopt(heir).status_code == 403
+        answer(deny_subjects=["leaver"])
+        before = len(received())
+        adopted = adopt(heir)
+        assert adopted.status_code == 200, adopted.text
+        assert adopted.json()["key"]["creator"] == "heir" and "secret" not in adopted.json(), adopted.text
+        # One batch for the person: mcp.keys.write and the actions of the tools of the key.
+        batches = [r for r in received()[before:] if any(e["subject"]["id"] == "heir" and e["action"]["name"] == "explorer.read"
+                                                         for e in evaluations(r))]
+        assert len(batches) == 1, batches
+        names = {e["action"]["name"] for e in evaluations(batches[0])}
+        assert {"explorer.read"} <= names, names
+        # The same secret works again, for the new creator.
+        working = mcp_call(secret, "list_databases")
+        assert working.status_code == 200 and working.json()["result"]["isError"] is False, working.text
+        listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
+        assert listed[0]["orphan"] is None and listed[0]["creator"] == "heir", listed
+        if LOGS_CMD:
+            logs = subprocess.run(shlex.split(LOGS_CMD), capture_output=True, text=True, timeout=30).stdout
+            assert '"event":"mcp.key_refused"' in logs and '"reason":"creator_gone"' in logs
+            assert '"event":"mcp.key_adopted"' in logs
+    finally:
+        answer(default=True)
+        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
+
+
 @needs_access
 def test_one_batch_for_the_page_hides_what_is_denied():
     answer(deny=["system.read", "mcp.keys.write"])

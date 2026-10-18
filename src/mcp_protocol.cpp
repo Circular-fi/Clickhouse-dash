@@ -146,7 +146,7 @@ std::string discover_result(const McpServerInfo& info) {
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-std::string tools_list_result(const McpKey& key, const McpToolAvailability& availability) {
+std::string tools_list_result(const McpKey& key, McpToolBackend& backend) {
   rapidjson::StringBuffer sb;
   Writer w(sb);
   w.StartObject();
@@ -154,7 +154,8 @@ std::string tools_list_result(const McpKey& key, const McpToolAvailability& avai
   w.StartArray();
   // This lists the tools that the key holds and that the configuration offers.
   // The tools of the analysis of the usage are omitted while the usage is off.
-  for (const auto& name : mcp_effective_tools(key.tools, key.databases, availability)) {
+  // The access of humans can take more tools from a key of the page (McpToolBackend::permitted_tools).
+  for (const auto& name : backend.permitted_tools(key, mcp_effective_tools(key.tools, key.databases, backend.availability()))) {
     const McpToolInfo* info = mcp_find_tool(name);
     if (!info) continue;
     const char* schema = mcp_tool_input_schema(name);
@@ -722,7 +723,7 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     return result;
   }
   if (name == "tools/list") {
-    result.body = result_body(*id, with_result_type(tools_list_result(key, backend.availability()), modern));
+    result.body = result_body(*id, with_result_type(tools_list_result(key, backend), modern));
     return result;
   }
   if (name == "tools/call") {
@@ -734,7 +735,8 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     // A tool that the key does not have gets the answer for a tool that does not exist (contract 3.6).
     // The answer is -32602, with the same message.
     if (tool_info) result.tool = tool_name;
-    if (!tool_info || !mcp_scope_tool_allowed(key.tools, key.databases, tool_name)) {
+    // A tool that the access of humans takes from the key gets the same answer (McpToolBackend::tool_permitted).
+    if (!tool_info || !mcp_scope_tool_allowed(key.tools, key.databases, tool_name) || !backend.tool_permitted(key, *tool_info)) {
       McpRpcResult refused = finish_fail(kRpcInvalidParams, "Unknown tool: " + tool_name.substr(0, kMaxMethodShownBytes));
       refused.tool = result.tool;
       refused.client_name = result.client_name;

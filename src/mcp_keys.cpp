@@ -429,7 +429,7 @@ void write_optional_time(McpJsonWriter& w, const char* name, const std::optional
 
 } // namespace
 
-void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> last_used) {
+void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> last_used, const char* orphan) {
   w.StartObject();
   w.Key("id"); write_string(w, key.id);
   w.Key("name"); write_string(w, key.name);
@@ -452,6 +452,10 @@ void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> l
   w.Key("creator");
   if (key.creator.empty()) w.Null();
   else write_string(w, key.creator);
+  // A key of the page that is refused until a person adopts it: "no_creator" or "creator_gone". The value is null for every other key.
+  w.Key("orphan");
+  if (orphan) w.String(orphan);
+  else w.Null();
   write_optional_time(w, "expires_at", key.expires_at);
   write_optional_time(w, "created_at", key.created_at);
   write_optional_time(w, "last_used_at", last_used);
@@ -809,6 +813,33 @@ McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   keys_ = std::move(candidate);
   Result r;
   r.key = removed;
+  return r;
+}
+
+McpKeyStore::Result McpKeyStore::adopt(const std::string& id, const std::string& expected, const std::string& creator, int64_t now) {
+  std::lock_guard<std::mutex> writing(write_mu_);
+  std::unique_lock<std::mutex> lock(mu_);
+  if (!manage_from_ui()) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
+  const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
+  if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
+  if (it->source == "config") return fail(409, "config_key", "a key of the configuration has no creator");
+  if (it->creator != expected) return fail(409, "creator_changed", "the creator of the key changed: read the list of the keys again");
+  if (creator.empty() || creator.size() > kMcpCreatorMaxBytes ||
+      std::any_of(creator.begin(), creator.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7f; })) {
+    return fail(400, "validation", "the creator must be a subject of 1 to 256 bytes with no control character");
+  }
+  std::vector<McpKey> candidate = keys_;
+  McpKey& adopted = candidate[static_cast<size_t>(it - keys_.begin())];
+  adopted.creator = creator;
+  adopted.updated_at = now;
+  const McpKey copy = adopted;
+  lock.unlock();
+  std::string error;
+  if (!write_file(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
+  lock.lock();
+  keys_ = std::move(candidate);
+  Result r;
+  r.key = copy;
   return r;
 }
 

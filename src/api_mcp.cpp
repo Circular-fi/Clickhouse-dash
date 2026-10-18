@@ -17,6 +17,7 @@
 #include "log.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_cost.hpp"
+#include "mcp_creator_access.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
@@ -38,6 +39,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -453,6 +455,44 @@ const char* metric_method(const std::string& method) {
   return "other";
 }
 
+// The tools of a key of the page in the authzen mode (docs/mcp.md, "Keys and the access of humans"): tools/list keeps the tools of the
+// state of the key (one batch of the PDP for each period), and tools/call asks the PDP for the actions of the called tool only.
+class CreatorGatedTools final : public McpToolBackend {
+public:
+  CreatorGatedTools(McpToolBackend& inner, McpCreatorAccess& gate, McpCreatorState state)
+      : inner_(inner), gate_(gate), state_(std::move(state)) {}
+
+  McpToolAvailability availability() const override { return inner_.availability(); }
+  McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now) override {
+    return inner_.call_tool(key, tool, arguments, now);
+  }
+  McpToolOutcome call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
+                               const McpCallInfo& info) override {
+    return inner_.call_tool_for(key, tool, arguments, now, info);
+  }
+  std::vector<std::string> permitted_tools(const McpKey& key, std::vector<std::string> tools) override {
+    tools = inner_.permitted_tools(key, std::move(tools));
+    tools.erase(std::remove_if(tools.begin(), tools.end(),
+                               [&](const std::string& name) {
+                                 return std::find(state_.tools.begin(), state_.tools.end(), name) == state_.tools.end();
+                               }),
+                tools.end());
+    return tools;
+  }
+  bool tool_permitted(const McpKey& key, const McpToolInfo& tool) override {
+    if (!inner_.tool_permitted(key, tool)) return false;
+    const std::string refused = gate_.tool_refused_action(key, tool);
+    if (refused.empty()) return true;
+    log_event(LogLevel::Warn, "mcp.tool_refused", {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", refused}});
+    return false;
+  }
+
+private:
+  McpToolBackend& inner_;
+  McpCreatorAccess& gate_;
+  McpCreatorState state_;
+};
+
 } // namespace
 
 // ---- the analysis of the keys ---------------------------------------------------------------------------------
@@ -725,18 +765,23 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     return;
   }
   const McpKey& key = auth.key;
-  // A key of the page in the authzen mode works only while the PDP gives its creator each action that the tools of the key use
-  // (docs/mcp.md, "Keys and the access of humans"). Such a key gets the answer of a key that does not exist (contract 3.3); the
-  // log tells why.
-  if (const std::string refused = mcp_key_refused_action(key, current_request_context().request_id); !refused.empty()) {
-    log_event(LogLevel::Warn, "mcp.key_refused",
-              {{"key", key.id}, {"creator", key.creator.empty() ? std::string("-") : key.creator}, {"action", refused}});
-    if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
-    res.set_header("Connection", "close");
-    res.status = 401;
-    res.set_content(kMcpUnauthorizedBody, "application/json");
-    log_call("401");
-    return;
+  // A key of the page in the authzen mode never has more than its creator (docs/mcp.md, "Keys and the access of humans"). A key with no
+  // creator, or whose creator the PDP does not know any more, gets the answer of a key that does not exist (contract 3.3) until a person
+  // adopts it; the log tells why. The other keys lose only the tools whose actions the creator lost.
+  std::optional<McpCreatorState> creator_state;
+  if (mcp_creator_ && key.source == "ui") {
+    creator_state = mcp_creator_->state(key);
+    if (mcp_creator_orphan(creator_state->status)) {
+      log_event(LogLevel::Warn, "mcp.key_refused",
+                {{"key", key.id}, {"creator", key.creator.empty() ? std::string("-") : key.creator},
+                 {"reason", mcp_creator_status_name(creator_state->status)}});
+      if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
+      res.set_header("Connection", "close");
+      res.status = 401;
+      res.set_content(kMcpUnauthorizedBody, "application/json");
+      log_call("401");
+      return;
+    }
   }
   record.key = key.id;
   record.key_source = key.source;
@@ -825,7 +870,10 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   // 5. Check the message.
   McpServerInfo info;
   info.version = cfg_.version_semver;
-  McpRpcResult result = mcp_handle_message(body, key, *mcp_tools_, info, now, headers);
+  std::optional<CreatorGatedTools> gated;
+  if (creator_state) gated.emplace(*mcp_tools_, *mcp_creator_, *creator_state);
+  McpToolBackend& backend = gated ? static_cast<McpToolBackend&>(*gated) : static_cast<McpToolBackend&>(*mcp_tools_);
+  McpRpcResult result = mcp_handle_message(body, key, backend, info, now, headers);
   res.status = result.http_status;
   if (result.http_status == 202) {
     res.set_content("", 0, "application/json");
@@ -1078,7 +1126,13 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     const auto last_used = mcp_usage_ ? mcp_usage_->last_used_all() : std::unordered_map<std::string, int64_t>{};
     for (const auto& key : store.list()) {
       const auto used = last_used.find(key.id);
-      mcp_write_key(w, key, used == last_used.end() ? std::nullopt : std::optional<int64_t>(used->second));
+      // A key of the page that a person can adopt (docs/mcp.md, "Adoption of a key"): the page shows a warning and Adopt.
+      const char* orphan = nullptr;
+      if (mcp_creator_ && key.source == "ui") {
+        const McpCreatorStatus status = mcp_creator_->state(key).status;
+        if (mcp_creator_orphan(status)) orphan = mcp_creator_status_name(status);
+      }
+      mcp_write_key(w, key, used == last_used.end() ? std::nullopt : std::optional<int64_t>(used->second), orphan);
     }
     w.EndArray();
     w.EndObject();
@@ -1340,9 +1394,54 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       write_key_response(201, result, true);
       return;
     }
+    case McpApiRoute::KeyAdopt: {
+      // Only the authzen mode gives a key a creator (docs/mcp.md, "Adoption of a key").
+      if (!mcp_creator_) {
+        api_error(res, 409, "not_adoptable", "a key has a creator only in the authzen mode (access.mode = \"authzen\")");
+        return;
+      }
+      std::optional<McpKey> found;
+      for (auto& key : store.list()) {
+        if (key.id == id) found = std::move(key);
+      }
+      if (!found) {
+        api_error(res, 404, "not_found", "no key has the id " + id);
+        return;
+      }
+      if (found->source != "ui") {
+        api_error(res, 409, "config_key", "a key of the configuration has no creator");
+        return;
+      }
+      // The state now, not the state that the page saw.
+      mcp_creator_->forget(id);
+      const McpCreatorStatus status = mcp_creator_->state(*found).status;
+      if (status == McpCreatorStatus::Unknown) {
+        api_error(res, 503, "pdp_unavailable", "the PDP did not answer: the creator of the key cannot be checked");
+        return;
+      }
+      if (!mcp_creator_orphan(status)) {
+        api_error(res, 409, "not_adoptable", "the creator of the key still holds its actions: only a key with no creator, or whose creator the PDP does not know, can be adopted");
+        return;
+      }
+      // The person needs mcp.keys.write and each action that the tools of the key use, in one batch: a key never has more than its creator.
+      std::vector<AccessQuestion> questions{AccessQuestion{"mcp.keys.write", AccessResource{"service", cfg_.access.audience}}};
+      for (auto& question : mcp_key_access_questions(found->tools, found->databases, cfg_.access.audience)) questions.push_back(std::move(question));
+      if (!access_allows_all(res, questions)) return;
+      const std::string subject = access_subject();
+      const auto result = store.adopt(id, found->creator, subject, now);
+      if (!result.key) return write_failure(result);
+      mcp_creator_->forget(id);
+      log_event(LogLevel::Info, "mcp.key_adopted",
+                {{"key", id}, {"previous_creator", found->creator.empty() ? std::string("-") : found->creator}, {"creator", subject},
+                 {"reason", mcp_creator_status_name(status)}});
+      audit("-", "keys/adopt", "", "ok:" + id, 0, 0);
+      write_key_response(200, result, false);
+      return;
+    }
     case McpApiRoute::KeyDelete: {
       const auto result = store.remove(id);
       if (!result.key) return write_failure(result);
+      if (mcp_creator_) mcp_creator_->forget(id);
       // The usage of a key is kept until it is older than mcp.usage.retention_days.
       if (mcp_usage_) mcp_usage_->mark_deleted(mcp_usage_key_ref(*result.key), now);
       audit("-", "keys/delete", "", "ok:" + id, 0, 0);
