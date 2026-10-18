@@ -154,9 +154,22 @@ A question names the most specific resource. `properties.ancestors` gives the ch
 - A question on a host has the ancestors `[service]`.
 - A question on a database has the ancestors `[service, host]`.
 
+A question can also have `"context": {"match": "subtree"}`. The default match is `"node"`. Refer to [Match](#match).
+
 ### Grants
 
 The PDP keeps the grants (for example the portal). A grant has the form `<action> on service:<id>[/<type>:<id>]...`. Each id is percent-encoded (RFC 3986). A grant covers the resource that it names and every resource below it. Thus a grant on the service covers every host and every database, and a grant on a host covers every database of that host. ChDash does not read the grants. It sends the chain of each question, and the PDP applies the rule.
+
+### Match
+
+The match tells the PDP which grants apply to a question (addendum 1 of the format, contract 11.5):
+
+| Match | A grant applies when its path is | ChDash uses it for |
+|---|---|---|
+| `node` (the default) | the path of the resource, or a part at its start (the resource or a node above it) | every operation: each route asks `node` on its exact resource |
+| `subtree` | as for `node`, or a path that starts with the path of the resource (a node below it) | only to show or hide the navigation: the visible hosts, the host pickers, the pages, and `features.access` of `GET /api/version` |
+
+ChDash never lets an operation run on a `subtree` decision. A `subtree` question has its match in the `context` of its item. A `node` question has no `context`: the PDP takes the default. The key of the cache holds the match, so a `subtree` answer never answers a `node` question.
 
 ### The resource of each action
 
@@ -177,27 +190,27 @@ Rules:
 - A `host_id` that is not a host of the configuration makes a question on the service. Thus the PDP never receives a host name that the client chose.
 - A `database` that no grant can name makes a question on its host. Such a name is empty, has more than 256 bytes, is not UTF-8 or has a control character. Only a grant on the host or on the service can cover it.
 - `query.export` does not take `database` since 1.1.0. ChDash 1.0.8 never asked it for a database.
-- For a route that has the host in its JSON body, ChDash reads the body first. Before it reads the body, a run needs `query.run.read` or `query.run.write` on one host at least. An export also needs `query.export` on one host at least. Without them, the answer is `403` before the body is read.
+- For a route that has the host in its JSON body, ChDash reads the body first. Before it reads the body, a run needs `query.run.read` or `query.run.write` on one host at least (match `node`). An export also needs `query.export` on one host at least. Without them, the answer is `403` before the body is read.
 
 ### Hidden hosts
 
 ChDash shows only the hosts on which the human holds one action at least:
 
-- One batch asks each action that takes a host on each host of the configuration. The same batch asks each other action on the service. `GET /api/version`, `GET /api/hosts` and each page render ask the same questions, so the cache of the decisions serves them all.
-- A host is visible when one decision on the host itself is `true`. A grant on the service makes every host visible.
+- One batch asks each action that takes a host on each host of the configuration. The same batch asks each other action on the service. Each question of this batch has the match `subtree`. `GET /api/version`, `GET /api/hosts` and each page render ask the same questions, so the cache of the decisions serves them all.
+- A host is visible when one decision of the batch on the host is `true`. A grant on the service, on the host or on a database of the host makes the host visible.
 - `GET /api/hosts`, `GET /api/hosts/stream` and the hosts of `GET /api/mcp/meta` list only the visible hosts. The stream keeps the hosts of its start.
 - The host picker of a page shows only the visible hosts on which the human holds one action of that page. For example, the System page needs `system.read` on the host.
 - A request for a hidden host gets the same answer as a request for a host that does not exist: `403` with the action of the route. The answer does not tell that the host exists.
 - `GET /api/health`, `/readyz` and `/metrics` still count all the hosts, as in 1.0.8. `/metrics` names the hosts: keep it on the internal network.
 - The global features still name the host of each item, as in 1.0.8: the folders and the queries of the query library, and the keys of the MCP pages.
 
-Limit: a grant on one database alone does not make its host visible. The batch asks the host, and the PDP answers `false` for the host. The routes of that database still work, for example an address of the Explorer in that database. To show the host in the picker, give one action on the host.
+Example: a human holds only `explorer.read on service:db/host:local/database:analytics`. The host `local` is visible, and the Explorer page opens. The routes of the database `analytics` of `local` work. The catalog of all the databases of `local`, another database of `local` and a run on `local` get `403`: they ask `node` on their own resource.
 
 ### Upgrade from 1.0.8
 
 - A grant of one level on a database (`<action> on service:<id>/database:<name>`) covered that database on every host. Its chain does not follow the tree any more, so it covers nothing. Give the grant again on the database of one host: `<action> on service:<id>/host:<host>/database:<name>`.
 - A grant on the service does not change.
-- The PDP must read `properties.ancestors` and the top-level `resource_types` of the list of actions (contract 11.4). Update the PDP before you update ChDash. A PDP of the 1.0.8 format does not know the hosts: with it, only the grants on the service give the same decisions.
+- The PDP must read `properties.ancestors`, the match of the `context` and the top-level `resource_types` of the list of actions (contract 11.4 and 11.5). Update the PDP before you update ChDash. A PDP of the 1.0.8 format does not know the hosts: with it, only the grants on the service give the same decisions.
 
 ## Decisions
 
@@ -221,9 +234,9 @@ Rules:
 - Each call has `Authorization: Bearer <pdp token>`, `X-Request-ID` (the request id of the request that asks) and a `traceparent`.
 - **Fail closed.** No answer before `pdp.timeout`, a connection error, a status that is not `200`, a body that is larger than 256 KiB, and a body that is not a valid answer give the decision `false` for each question of the call. ChDash writes the line `access.pdp_failed` and never keeps a failure.
 - A decision can have a `context` object. A `context` that is not an object makes the answer not valid. A `false` decision with `"context": {"reason": "unknown_subject"}` tells that the PDP does not know the subject (contract 11.5). ChDash uses this reason, and only this reason, to make an MCP key of that subject an orphan ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). Every other `false` decision means "no permission". ChDash ignores the other members of `context`.
-- ChDash keeps an answer of the PDP for `pdp.cache_ttl` at most, with its reason `unknown_subject`. The key is the subject, the action and the path of the resource (the service, the host and the database). Thus the same database name on two hosts has two answers. A change of the policy applies after `cache_ttl` at most.
+- ChDash keeps an answer of the PDP for `pdp.cache_ttl` at most, with its reason `unknown_subject`. The key is the subject, the action, the path of the resource (the service, the host and the database) and the match. Thus the same database name on two hosts has two answers. A change of the policy applies after `cache_ttl` at most.
 - The cache holds 16384 answers and 8 MiB at most (the bytes of the keys, and a fixed part for each answer). The client chooses the `database` parameter, so a bound of bytes is necessary. When the cache is full, ChDash removes the expired answers. If the cache is still full, ChDash empties it. An answer that is larger than the whole budget is not kept. These bounds are not settings.
-- ChDash sends one batch for a page: the batch of the hosts (refer to [Hidden hosts](#hidden-hosts)). `GET /api/version` gives the result in `features.access`. `actions` holds each action: `true` when the human may use it on the service or on one host. `hosts` holds the decisions of each visible host for the actions that take a host. The questions that are in the cache do not go to the PDP.
+- ChDash sends one batch for a page: the batch of the hosts (refer to [Hidden hosts](#hidden-hosts)). `GET /api/version` gives the result in `features.access`. `actions` holds each action: `true` when the human may use it on the service, on one host or below one host. `hosts` holds the decisions of each visible host for the actions that take a host. The questions that are in the cache do not go to the PDP.
 
 ## Enforcement
 
@@ -254,7 +267,7 @@ Rules:
 
 The navigation shows only the pages that the human may use (decision of 2026-10-18). This applies to the header menu, the page tabs, the start page and each link from one page to another page. In the `open` mode, every page and every link stays.
 
-| Page | Addresses | Action on the service or on one host (one of them) |
+| Page | Addresses | Action on the service, on one host or below it (one of them, match `subtree`) |
 |---|---|---|
 | Query | `/`, `/query` | `query.run.read`, `query.run.write` |
 | Explorer | `/explorer/catalog...`, `/explorer/functions...` | `explorer.read` |
@@ -267,7 +280,7 @@ Rules:
 
 - For each page that it serves, ChDash sends one batch to the PDP: the batch of the hosts, as for `GET /api/version`. The cache of the decisions applies, so the two batches of one page normally make one call to the PDP. An address of the Explorer that names a database (`/explorer/catalog/<database>...`) also asks for `explorer.read` on that database of each host.
 - A human without the action of the page gets status `403` and a page with the name of the action and a link to each page that the human may use. This page has no script and no data of the page. The log has the line `access.page_denied`.
-- An address of the Explorer in one database opens with `explorer.read` on that database of one host. The Explorer link of the header needs `explorer.read` on the service or on one host.
+- An address of the Explorer in one database opens with `explorer.read` on that database of one host. The Explorer link of the header needs `explorer.read` on the service, on one host or below one host (match `subtree`).
 - The root (`/`) is the Query page. A human without a query action goes to the first page of the table that the human may use. A human with no page gets the `403` page.
 - In the shell that it serves, ChDash hides each link to a page that the human cannot use (`hidden` and `data-denied` on each element with `data-nav-page`). The links are hidden from the first paint. The meta element `chdash-pages` lists the pages of the human for the scripts of the page. The answer has `Cache-Control: no-store`, because it is for one human.
 - A human with `mcp.usage.read` and without `mcp.keys.read` keeps the MCP entry of the header. It opens the usage.
@@ -276,7 +289,7 @@ Rules:
 
 ## Logs and traces
 
-- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `decision`, `source` (`pdp`, `cache` or `error`) and `reason` (`unknown_subject`, or empty). `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
+- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `match` (`node` or `subtree`), `decision`, `source` (`pdp`, `cache` or `error`) and `reason` (`unknown_subject`, or empty). `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
 - The access log (`http.request`) has the field `subject` (`-` when there is none).
 - When the `telemetry` block is on, each call to the PDP is a CLIENT span `POST /access/v1/evaluation` or `POST /access/v1/evaluations`. Its parent is the span of the `traceparent` of the request; without one, the span starts a trace. The call sends the context of this span to the PDP (`traceparent`). Refer to [server-telemetry.md](server-telemetry.md#the-client-span-of-the-pdp).
 
