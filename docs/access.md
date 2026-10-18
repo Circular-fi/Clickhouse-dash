@@ -117,7 +117,7 @@ ChDash publishes its actions at `GET /.well-known/access-actions`, without a tok
 | `mcp.keys.write` | `service` | `POST /api/mcp/keys`, `DELETE /api/mcp/keys/<id>`, `POST /api/mcp/keys/<id>/adopt` |
 | `mcp.usage.read` | `service` | `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET /api/mcp/keys/<id>/usage`, `GET /api/mcp/keys/<id>/cost` |
 
-These routes need a valid token and no action: the page shells and the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
+The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
 
 A route that is not in this table is refused with `403` and the action `unknown` (fail closed), and the log has the line `access.no_rule`. A path that has no route gets `404`.
 
@@ -153,7 +153,7 @@ Rules:
 - ChDash checks the decision of each route before the route runs, also when the page does not show the action.
 - If the decision is `false`, ChDash sends status `403` with `{"error_code": "forbidden", "action": "<action>", "message": "The action <action> is not allowed."}`. The answer does not give the reason of the PDP.
 - A run without `query.run.write` runs each statement with `readonly = 1`. ClickHouse then refuses a statement that changes data or settings, also a `SETTINGS` clause and `SET`. ChDash sends `readonly = 1` also when it cannot read the settings profile of the runner (fail closed). A run needs `query.run.read` or `query.run.write`: without the two, the answer is `403` with the action `query.run.read`. The same rule applies to Deep Analyze and to the statements of an export. An export also needs `query.export`: without it, the answer is `403` with the action `query.export`.
-- The pages hide what the subject cannot do. `GET /api/version` gives the decisions in `features.access`, and the pages read them: the System page needs `system.read`, the Traces, Logs and Metrics pages need `observability.read`, the query library needs `library.read` (and `library.write` to change it), and the MCP page needs `mcp.keys.read` or `mcp.usage.read`. `GET /api/mcp/meta` says `can_manage = false` without `mcp.keys.write`, so the MCP page shows no New key and no Delete. The Explorer and the Query page stay visible: a grant on one database can let the user open it.
+- The pages hide what the subject cannot do. `GET /api/version` gives the decisions in `features.access`, and the pages read them. The query library needs `library.read` (and `library.write` to change it). `GET /api/mcp/meta` says `can_manage = false` without `mcp.keys.write`, so the MCP page shows no New key and no Delete. The pages and their links follow the rules of [Navigation](#navigation).
 
 ### Limits of a grant on one database
 
@@ -162,6 +162,30 @@ Rules:
 - The card of a table (`GET /api/explorer/table`) and the definition of a graph object (`GET /api/explorer/graph/definition`) can name other databases. These are the related objects (`dependencies`) and the target of a materialized view, a Buffer or a Distributed table. ChDash asks the PDP, in one batch, for `explorer.read` on the service and on each of these databases. A related object in a database without a `true` decision is removed. A target in such a database is not visible: the card gives an empty `database` and `table` in `distributed`, and the definition gives `target_visible: false` and `target: null`. The DDL text and `engine_full` stay as the runner reads them.
 - The focus of the graph (`focus_database`) names its own database. Without a `true` decision on the service or on that database, the answer is `403` with the action `explorer.read`.
 - The Query page names no database. Thus a grant of `query.run.read` on one database does not let the user run a query: ChDash asks for the service. The SQL of a query can name any table, so a decision for one database cannot limit what the SQL reads. The grants of the ClickHouse runner user of each host stay the limit of the data.
+
+## Navigation
+
+The navigation shows only the pages that the human may use (decision of 2026-10-18). This applies to the header menu, the page tabs, the start page and each link from one page to another page. In the `open` mode, every page and every link stays.
+
+| Page | Addresses | Action on the service (one of them) |
+|---|---|---|
+| Query | `/`, `/query` | `query.run.read`, `query.run.write` |
+| Explorer | `/explorer/catalog...`, `/explorer/functions...` | `explorer.read` |
+| Observability | `/observability/traces...`, `/observability/logs`, `/observability/metrics` | `observability.read` |
+| System | `/system...` | `system.read` |
+| MCP integration (the keys) | `/mcp-integration` | `mcp.keys.read` |
+| MCP usage | `/mcp-integration/usage` | `mcp.usage.read` |
+
+Rules:
+
+- For each page that it serves, ChDash sends one batch to the PDP: every action on the service, as for `GET /api/version`. The cache of the decisions applies, so the two batches of one page normally make one call to the PDP. An address of the Explorer that names a database (`/explorer/catalog/<database>...`) also asks for `explorer.read` on that database.
+- A human without the action of the page gets status `403` and a page with the name of the action and a link to each page that the human may use. This page has no script and no data of the page. The log has the line `access.page_denied`.
+- An address of the Explorer in one database opens with `explorer.read` on that database. The Explorer link of the header needs `explorer.read` on the service.
+- The root (`/`) is the Query page. A human without a query action goes to the first page of the table that the human may use. A human with no page gets the `403` page.
+- In the shell that it serves, ChDash hides each link to a page that the human cannot use (`hidden` and `data-denied` on each element with `data-nav-page`). The links are hidden from the first paint. The meta element `chdash-pages` lists the pages of the human for the scripts of the page. The answer has `Cache-Control: no-store`, because it is for one human.
+- A human with `mcp.usage.read` and without `mcp.keys.read` keeps the MCP entry of the header. It opens the usage.
+- The links between pages follow the same rules: Open in Query (Explorer and System), a table or a database of the System page (Explorer), a trace of a result row (Observability) and Open in Usage of an MCP key.
+- The pages still check each action on their routes. A link that a page hides is not a permission.
 
 ## Logs and traces
 

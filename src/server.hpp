@@ -58,6 +58,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -448,6 +449,14 @@ private:
   // Return the decision of `action` on the service for the subject of this request.
   // The page uses it to show or hide a control. Return true when no check applies.
   bool access_permits(const char* action);
+  // The pages of one render for the subject of this request (docs/access.md, "Navigation"), from one batch of the PDP. A `database`
+  // that is not empty adds explorer.read on it; *database_allowed receives that decision. In the open mode, every page.
+  std::set<std::string> navigation_pages(const std::string& database, bool* database_allowed = nullptr);
+  // Serve the shell `file` of a page. In the authzen mode, a human who cannot use the page gets the 403 page (no script, no data), and
+  // the other humans get the shell with the links to the pages that they cannot use hidden (access_pages.hpp).
+  void serve_shell(const httplib::Request& req, httplib::Response& res, const std::string& file);
+  // GET /: the Query page, or in the authzen mode the first page that the human can use.
+  void serve_root(const httplib::Request& req, httplib::Response& res);
   // Return true when the statements of this request must run with readonly = 1.
   // This is the case when the subject has query.run.read and not query.run.write.
   // It is also the case for an export (query.export and query.run.read) without query.run.write.

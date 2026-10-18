@@ -483,6 +483,28 @@ function allowsAction(access, name) {
   return access.actions[name] === true;
 }
 
+// The pages that the server let this human use when it served the page (the meta element chdash-pages, docs/access.md "Navigation").
+// app_header.js gives them (features.servePages). null: the server named no list (the open mode), so every page is allowed.
+let served = null;
+const servedPages = () => served;
+
+// Whether the page `name` is on and allowed: query, explorer, observability, system, mcp-keys or mcp-usage. A link or a button that
+// leads to another page shows only when it gives true. The server checks each page and each route again.
+function pageAllowed(features, name) {
+  const served = servedPages();
+  if (served && !served.has(name)) return false;
+  const allowed = (action) => allowsAction(features.access, action);
+  switch (name) {
+    case "query": return allowed("query.run.read") || allowed("query.run.write");
+    case "explorer": return features.explorer.enabled && allowed("explorer.read");
+    case "observability": return features.traces.enabled || features.logs.enabled || features.metrics.enabled;
+    case "system": return features.system.enabled;
+    case "mcp-keys": return features.mcp.enabled && allowed("mcp.keys.read");
+    case "mcp-usage": return features.mcp.enabled && allowed("mcp.usage.read");
+    default: return false;
+  }
+}
+
 let resolveReady = null;
 let answered = false;
 const ready = new Promise((resolve) => { resolveReady = resolve; });
@@ -499,6 +521,9 @@ const ready = new Promise((resolve) => { resolveReady = resolve; });
 //   set(raw)             app_ui.js: it sets the features of /api/version.
 //   allows(name)         the decision for one action of the access of humans.
 //                        The open mode always allows it.
+//   page(name)           the page (query, explorer, observability, system, mcp-keys, mcp-usage) is on and the
+//                        human may use it: a link to another page shows only then.
+//   servePages(text)     app_header.js: the pages that the server allowed for this render (meta chdash-pages).
 //   DEFAULTS             the defaults table
 const features = {
   DEFAULTS: FEATURE_DEFAULTS,
@@ -514,6 +539,11 @@ const features = {
   },
   // The decision of the PDP for one action. An action name has dots, so get() cannot read it.
   allows: (name) => allowsAction(state.features.access, name),
+  page: (name) => pageAllowed(state.features, name),
+  // The list of the meta element chdash-pages (space-separated page names), or null/undefined when the page has none.
+  servePages(text) {
+    served = typeof text === "string" ? new Set(text.split(/\s+/).filter(Boolean)) : null;
+  },
   // The flags changed. Every on(fn) listener receives the new flags.
   set(raw) {
     state.features = normalizeFeatures(raw);

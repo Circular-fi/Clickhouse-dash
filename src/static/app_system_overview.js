@@ -51,7 +51,8 @@ const TREEMAP_LABEL = "Databases by bytes on disk";
 
 const keeperEnabled = () => !!kit.features()?.keeper;
 const activityEnabled = () => !!kit.features()?.activity && !!systemActivity;
-const explorerEnabled = () => !!features.get("explorer.enabled");
+// The Explorer is on and the human may use it (docs/access.md, "Navigation"): a database or a table then opens its card there.
+const explorerEnabled = () => features.page("explorer");
 
 // Server tiles: the current values of an overview answer.
 function serverTiles(data) {
@@ -136,7 +137,7 @@ function createOverview(ctx) {
   const databasesNotes = h("div", { class: "systemDatabases__notes", id: "systemDatabasesNotes" });
   databases.body.append(databasesNotes, treemapHost);
   const cluster = kit.part("cluster", "Cluster");
-  const activity = activityEnabled() ? systemActivity.create({ openTable: ctx.openTable }) : null;
+  const activity = activityEnabled() ? systemActivity.create({ openTable: explorerEnabled() ? ctx.openTable : null }) : null;
   const activityPart = activity ? kit.part("activity", "Activity") : null;
   if (activityPart) activityPart.body.appendChild(activity.el);
   const body = h("div", { class: "systemOverview", id: "systemOverview" },

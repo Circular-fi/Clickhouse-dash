@@ -23,6 +23,7 @@ import { dom, h } from "./app_dom.js";
 import { explorerTreemap } from "./app_explorer_treemap.js";
 import { format } from "./app_format.js";
 import { systemCharts } from "./app_system_charts.js";
+import { features } from "./app_state.js";
 import { kit } from "./app_system_kit.js";
 import { timeRange } from "./app_timerange.js";
 import { badge } from "./app_ui_badge.js";
@@ -530,7 +531,9 @@ function createDisks(ctx) {
   // --- Bytes by database -----------------------------------------------------
 
   // The link of a database leads to its Explorer page, scrolled to its storage.
+  // Text, not a link, when the human cannot use the Explorer (docs/access.md, "Navigation").
   function databaseLink(name, { className = "", label = null } = {}) {
+    if (!features.page("explorer")) return h("span", { class: ["systemDiskDb__text", className], dataset: { database: name } }, label ?? [icon.el("database", { size: "sm" }), h("span", { class: "mono" }, name)]);
     const href = ctx.databaseHref(name, { tab: "storage" });
     const link = h(href ? "a" : "button", {
       class: ["systemDiskDb__link", className],
@@ -581,7 +584,7 @@ function createDisks(ctx) {
         ariaLabel: `Databases on ${disk}`,
         strip: "always",
         legend: false,
-        onOpen: (target) => ctx.openDatabase(target.database, { tab: "storage" }),
+        onOpen: features.page("explorer") ? (target) => ctx.openDatabase(target.database, { tab: "storage" }) : null,
       });
       const tableRows = top.map((row) => {
         const shareCell = h("td", { class: "systemDiskDb__share" });

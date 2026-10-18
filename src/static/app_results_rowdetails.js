@@ -359,7 +359,8 @@ function spanOf(ctx, row, place) {
 
 // Returns a list of { traceId, spanId, label, columnIndex, others: [labels], href } entries. There is one entry for each distinct trace id.
 function rowTraceLinks(ctx, row) {
-  if (!features.get("traces.enabled") || !ctx || !Array.isArray(row)) return [];
+  // A trace link needs Traces on and the human allowed to use Observability (docs/access.md, "Navigation").
+  if (!features.get("traces.enabled") || !features.page("observability") || !ctx || !Array.isArray(row)) return [];
   const itemById = new Map();
   for (const place of traceCandidates(ctx, row)) {
     let link = itemById.get(place.traceId);

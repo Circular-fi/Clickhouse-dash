@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase, horizontalOverflow, runSuccessfulQuery, smallTouchTargets } from '../helpers/app.js';
 import { appReady } from '../helpers/modules.js';
+import { requireInstance } from '../helpers/instances.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // The page shell (style.css "Page shell" block) gives one full-bleed chrome to
@@ -473,3 +475,161 @@ test.describe('touch screens', () => {
     }
   });
 });
+
+// ---- the navigation follows the access of the human (docs/access.md, "Navigation", user decision 2026-10-18) -----------------------
+//
+// The instance is ACCESS_BASE_URL: tests/config/access.authzen.hcl (compose service chdash_access), in the authzen mode, with the fake
+// PDP ACCESS_PDP_URL. That configuration has no OpenTelemetry tables, so Observability is not a page there. Each request of the browser carries an identity token, signed here with the Ed25519 test key
+// (tests/config/secrets/access-identity-keys.pem has its public key). The PDP gives each test subject its whole grant.
+const ACCESS = (process.env.ACCESS_BASE_URL || '').replace(/\/$/, '');
+const ACCESS_PDP = (process.env.ACCESS_PDP_URL || '').replace(/\/$/, '');
+const ACCESS_KEY = crypto.createPrivateKey({
+  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1))]),
+  format: 'der',
+  type: 'pkcs8',
+});
+const b64url = (data) => Buffer.from(data).toString('base64url');
+function identityToken(sub) {
+  const now = Math.floor(Date.now() / 1000);
+  const input = `${b64url(JSON.stringify({ alg: 'EdDSA', typ: 'JWT' }))}.${b64url(JSON.stringify({ iss: 'https://access.test', sub, aud: 'db', iat: now - 5, exp: now + 240 }))}`;
+  return `${input}.${b64url(crypto.sign(null, Buffer.from(input), ACCESS_KEY))}`;
+}
+const ALL_ACTIONS = ['query.run.read', 'query.run.write', 'query.export', 'library.read', 'library.write', 'explorer.read', 'system.read',
+  'system.kill_query', 'observability.read', 'mcp.keys.read', 'mcp.keys.write', 'mcp.usage.read'];
+const GRANTS = {
+  'nav-querier': ['query.run.read', 'query.run.write', 'query.export'],
+  'nav-explorer': ['explorer.read'],
+  'nav-usage': ['query.run.read', 'mcp.usage.read'],
+  'nav-admin': ALL_ACTIONS,
+};
+const NAV_LINKS = { query: '#navQueryLink', explorer: '#navExplorerLink', observability: '#navObservabilityLink', system: '#navSystemLink', mcp: '#navMcpLink' };
+const DENIED_PATHS = { explorer: '/explorer/catalog', system: '/system', 'mcp-keys': '/mcp-integration', 'mcp-usage': '/mcp-integration/usage', query: '/query' };
+
+async function asHuman(page, sub) {
+  await page.setExtraHTTPHeaders({ 'X-Identity-Token': identityToken(sub) });
+}
+// The links of the header that a human sees. A wide window shows the switcher as a row of links; a narrow one has a button that opens it.
+async function visibleNavLinks(page) {
+  const shown = [];
+  if (await page.locator('#pageSelect').isHidden()) return shown;
+  const toggle = page.locator('#pageSelectButton');
+  const narrow = await toggle.isVisible();
+  if (narrow) await toggle.click();
+  for (const [name, selector] of Object.entries(NAV_LINKS)) {
+    if (await page.locator(selector).isVisible()) shown.push(name);
+  }
+  if (narrow) await page.keyboard.press('Escape');
+  return shown;
+}
+async function expectDenied(page, path, label, action, allowed) {
+  const response = await page.goto(`${ACCESS}${path}`);
+  expect(response.status(), path).toBe(403);
+  await expect(page.locator('#accessDenied h1')).toHaveText(`You cannot open ${label}`);
+  await expect(page.locator('#accessDenied code')).toHaveText(action);
+  // No partial render: no script, no header, no data of the page.
+  expect(await page.evaluate(() => ({ scripts: document.scripts.length, header: !!document.querySelector('header.appHeader') }))).toEqual({ scripts: 0, header: false });
+  await expect(page.locator('#accessDeniedPages a')).toHaveText(allowed);
+}
+
+test.describe('the navigation follows the access of the human', () => {
+  test.describe.configure({ mode: 'serial' });
+  test.beforeAll(async ({ request }, testInfo) => {
+    if (!ACCESS || !ACCESS_PDP || testInfo.project.name !== 'desktop-1440') return;
+    const answer = await request.post(`${ACCESS_PDP}/control/answer`, { data: { default: false, subjects: GRANTS } });
+    expect(answer.ok()).toBe(true);
+    // The cache of the decisions of the instance (pdp.cache_ttl = 1s) forgets the former answers.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  });
+  test.afterAll(async ({ request }, testInfo) => {
+    if (ACCESS_PDP && testInfo.project.name === 'desktop-1440') await request.post(`${ACCESS_PDP}/control/reset`, { data: {} });
+  });
+  test.beforeEach(({}, testInfo) => {
+    // The fake PDP is one for the whole run: one project sets it and runs these tests, so no other project resets it meanwhile.
+    test.skip(testInfo.project.name !== 'desktop-1440', 'the access of a human does not depend on the viewport: one project is enough');
+    requireInstance(test, 'ACCESS_BASE_URL', ACCESS);
+    requireInstance(test, 'ACCESS_PDP_URL', ACCESS_PDP);
+  });
+
+  test('a human with only query actions sees the Query page and no link to another page; the other pages answer 403', async ({ page }) => {
+    await asHuman(page, 'nav-querier');
+    await page.goto(`${ACCESS}/query`);
+    await expect(page.locator('#runButton')).toBeVisible({ timeout: 15_000 });
+    // The server lists the pages of this render, and hides the links of the others from the first paint.
+    await expect(page.locator('#chdashPages')).toHaveAttribute('content', 'query');
+    for (const name of ['explorer', 'observability', 'system', 'mcp']) {
+      await expect(page.locator(NAV_LINKS[name])).toHaveAttribute('data-denied', '');
+    }
+    // After /api/version answers, nothing comes back: the page switcher has no other page, so it is not shown.
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect(page.locator('#pageSelect')).toBeHidden();
+    expect(await visibleNavLinks(page)).toEqual([]);
+    expect(await page.evaluate(() => ['query', 'explorer', 'observability', 'system', 'mcp-keys', 'mcp-usage'].filter((name) => window.ChDash.features.page(name))))
+      .toEqual(['query']);
+    // Each page that the human cannot use answers 403 with a clear page and the links that the human can use.
+    await expectDenied(page, DENIED_PATHS.explorer, 'Explorer', 'explorer.read', ['Query']);
+    await expectDenied(page, '/explorer/catalog/chdash_ui/weather_observations', 'Explorer', 'explorer.read', ['Query']);
+    await expectDenied(page, DENIED_PATHS.system, 'System', 'system.read', ['Query']);
+    await expectDenied(page, '/system/disks', 'System', 'system.read', ['Query']);
+    await expectDenied(page, DENIED_PATHS['mcp-keys'], 'MCP integration', 'mcp.keys.read', ['Query']);
+    await expectDenied(page, DENIED_PATHS['mcp-usage'], 'MCP usage', 'mcp.usage.read', ['Query']);
+    // The link of the 403 page opens the Query page under the same root.
+    await page.locator('#accessDeniedPages a', { hasText: 'Query' }).click();
+    await expect(page.locator('#runButton')).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('a human with only explorer.read: the root opens the Explorer, Query is not a link, and Open in Query is not offered', async ({ page }) => {
+    await asHuman(page, 'nav-explorer');
+    await page.goto(`${ACCESS}/`);
+    await expect(page).toHaveURL(/\/explorer\/catalog$/);
+    await expect(page.locator('#chdashPages')).toHaveAttribute('content', 'explorer');
+    await expect(page.locator('#navQueryLink')).toHaveAttribute('data-denied', '');
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    expect(await visibleNavLinks(page)).toEqual(['explorer']);
+    // The preview of a table has no Open in Query.
+    await page.goto(`${ACCESS}/explorer/catalog/chdash_ui/weather_observations/preview`);
+    await expect(page.locator('.explorerDataToolbar__actions')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Open in Query' })).toHaveCount(0);
+    await expectDenied(page, DENIED_PATHS.query, 'Query', 'query.run.read', ['Explorer']);
+    await expectDenied(page, DENIED_PATHS.system, 'System', 'system.read', ['Explorer']);
+    await expectDenied(page, DENIED_PATHS['mcp-keys'], 'MCP integration', 'mcp.keys.read', ['Explorer']);
+  });
+
+  test('a human with the usage of the keys and not the keys: the MCP entry leads to the usage, and the Keys tab is not a link', async ({ page }) => {
+    await asHuman(page, 'nav-usage');
+    await page.goto(`${ACCESS}/mcp-integration/usage`);
+    await expect(page.locator('#mcpTab-usage')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#mcpTab-keys')).toBeHidden();
+    await expect(page.locator('#mcpTab-keys')).toHaveAttribute('data-denied', '');
+    expect(new URL(await page.locator('#navMcpLink').getAttribute('href'), ACCESS).pathname).toBe('/mcp-integration/usage');
+    await expectDenied(page, DENIED_PATHS['mcp-keys'], 'MCP integration', 'mcp.keys.read', ['Query', 'MCP usage']);
+  });
+
+  test('a human with every action sees every page and every link', async ({ page }) => {
+    await asHuman(page, 'nav-admin');
+    await page.goto(`${ACCESS}/query`);
+    await expect(page.locator('#runButton')).toBeVisible({ timeout: 15_000 });
+    // Every page of this configuration: it turns Observability off, so its link is the one that is denied.
+    await expect(page.locator('#chdashPages')).toHaveAttribute('content', 'query explorer system mcp-keys mcp-usage');
+    await expect(page.locator('[data-denied]')).toHaveCount(1);
+    await expect(page.locator('#navObservabilityLink')).toHaveAttribute('data-denied', '');
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    expect(await visibleNavLinks(page)).toEqual(['query', 'explorer', 'system', 'mcp']);
+    for (const path of ['/explorer/catalog', '/explorer/functions', '/system', '/system/disks', '/mcp-integration', '/mcp-integration/usage']) {
+      const response = await page.goto(`${ACCESS}${path}`);
+      expect(response.status(), path).toBe(200);
+      // The shell of a human is never kept by a cache.
+      expect(response.headers()['cache-control'], path).toBe('no-store');
+    }
+    await page.goto(`${ACCESS}/explorer/catalog/chdash_ui/weather_observations/preview`);
+    await expect(page.getByRole('button', { name: 'Open in Query' })).toBeVisible({ timeout: 15_000 });
+  });
+});
+
+test('the open mode keeps every link: no list of pages, nothing denied', async ({ page }) => {
+  await page.goto('/query');
+  await expect(page.locator('#runButton')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#chdashPages')).toHaveCount(0);
+  await expect(page.locator('[data-denied]')).toHaveCount(0);
+  expect(await page.evaluate(() => ['query', 'explorer', 'system'].every((name) => window.ChDash.features.page(name)))).toBe(true);
+});
+

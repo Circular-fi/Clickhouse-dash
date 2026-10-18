@@ -5,6 +5,7 @@
 #include "server.hpp"
 
 #include "access_actions.hpp"
+#include "access_pages.hpp"
 #include "api_error.hpp"
 #include "json_text.hpp"
 #include "log.hpp"
@@ -17,6 +18,7 @@
 
 #include <chrono>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -276,6 +278,26 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
     }
   }
   return out;
+}
+
+std::set<std::string> Server::navigation_pages(const std::string& database, bool* database_allowed) {
+  if (database_allowed) *database_allowed = true;
+  const AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) {
+    std::set<std::string> all;
+    for (const auto& page : access_pages()) all.insert(page.name);
+    return all;
+  }
+  // One batch: the questions of GET /api/version, so the cache of the PDP answers both, and the database of the address.
+  const auto questions = access_navigation_questions(cfg_.access.audience, database);
+  const auto decisions = access_decide(questions);
+  if (database_allowed) *database_allowed = !database.empty() && decisions.back().allowed;
+  std::set<std::string> pages = access_navigation_pages(questions, decisions);
+  // A page that the configuration turns off is not a page of the navigation. The MCP pages are always served: they say how to turn MCP on.
+  if (!cfg_.explorer.enabled()) pages.erase("explorer");
+  if (!cfg_.traces_on() && !cfg_.logs_on() && !cfg_.metrics_on()) pages.erase("observability");
+  if (!cfg_.system.enabled) pages.erase("system");
+  return pages;
 }
 
 bool Server::access_permits(const char* action) {

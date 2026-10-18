@@ -447,18 +447,28 @@ function getResolvedTheme(mode) {
 // The page switcher (Query, Explorer, Observability, System, MCP) is visible by default in every page shell.
 // Only a server without Explorer, System, any Observability view (Traces, Logs, Metrics) and MCP hides it.
 // The head script of each page applies the last known availability (chdash-page-select-hidden) before the first paint.
+// The pages that the server allowed for this render (docs/access.md, "Navigation"). The open mode has no such element.
+features.servePages(dom.byId("chdashPages")?.getAttribute("content") ?? null);
+
+// In the authzen mode, a link that the server marked data-denied (the human cannot use its page) stays hidden, and the access of
+// /api/version hides the Query and Explorer links too (docs/access.md, "Navigation").
 function applyPageNavigation(nav) {
-  const explorerEnabled = nav.explorer !== false;
-  const systemEnabled = nav.system !== false;
-  const observabilityEnabled = nav.traces === true || nav.logs === true || nav.metrics === true;
-  const mcpEnabled = nav.mcp === true;
+  const denied = (link) => !!link?.hasAttribute("data-denied");
+  const queryEnabled = features.page("query") && !denied(dom.navQueryLink);
+  const explorerEnabled = nav.explorer !== false && features.page("explorer") && !denied(dom.navExplorerLink);
+  const systemEnabled = nav.system !== false && !denied(dom.navSystemLink);
+  const observabilityEnabled = (nav.traces === true || nav.logs === true || nav.metrics === true) && !denied(dom.navObservabilityLink);
+  const mcpEnabled = nav.mcp === true && !denied(dom.navMcpLink);
   const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled && !mcpEnabled;
   dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
   if (dom.pageSelect) dom.pageSelect.hidden = hidden;
+  if (dom.navQueryLink && dom.navQueryLink.getAttribute("aria-current") !== "page") dom.navQueryLink.hidden = !queryEnabled;
   if (dom.navExplorerLink) dom.navExplorerLink.hidden = !explorerEnabled;
   if (dom.navObservabilityLink) dom.navObservabilityLink.hidden = !observabilityEnabled;
   if (dom.navSystemLink) dom.navSystemLink.hidden = !systemEnabled;
   if (dom.navMcpLink) dom.navMcpLink.hidden = !mcpEnabled;
+  // A human with the usage of the keys and not the keys: the MCP entry leads to the usage.
+  if (dom.navMcpLink && mcpEnabled && !features.page("mcp-keys") && features.page("mcp-usage")) dom.navMcpLink.setAttribute("href", api.resolveUrl("mcp-integration/usage"));
 }
 
 function applyProductFeatures() {

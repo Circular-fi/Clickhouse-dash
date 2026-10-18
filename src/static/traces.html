@@ -129,11 +129,11 @@
       <nav id="pageSelect" class="themeSelect pageNav" aria-label="Pages">
         <button id="pageSelectButton" class="button themeSelect__button pageNav__toggle" type="button" aria-haspopup="false" aria-expanded="false" aria-controls="pageSelectMenu">Observability</button>
         <div id="pageSelectMenu" class="themeSelect__menu pageNav__list" tabindex="-1">
-          <a id="navQueryLink" class="pageNav__link" href="/query">Query</a>
-          <a id="navExplorerLink" class="pageNav__link" href="/explorer/catalog">Explorer</a>
-          <a id="navObservabilityLink" class="pageNav__link" href="/observability" aria-current="page">Observability</a>
-          <a id="navSystemLink" class="pageNav__link" href="/system">System</a>
-          <a id="navMcpLink" class="pageNav__link" href="/mcp-integration" hidden>MCP</a>
+          <a id="navQueryLink" class="pageNav__link" data-nav-page="query" href="/query">Query</a>
+          <a id="navExplorerLink" class="pageNav__link" data-nav-page="explorer" href="/explorer/catalog">Explorer</a>
+          <a id="navObservabilityLink" class="pageNav__link" data-nav-page="observability" href="/observability" aria-current="page">Observability</a>
+          <a id="navSystemLink" class="pageNav__link" data-nav-page="system" href="/system">System</a>
+          <a id="navMcpLink" class="pageNav__link" data-nav-page="mcp" href="/mcp-integration" hidden>MCP</a>
         </div>
       </nav>
     </div>
@@ -182,6 +182,8 @@
             var links = document.querySelectorAll("#pageSelectMenu a");
             for (var j = 0; j < links.length; j += 1) {
               if (window.__chdashUrl) links[j].setAttribute("href", window.__chdashUrl(links[j].getAttribute("href")));
+              // A page that the access of the human does not allow (data-denied, set by the server) stays hidden.
+              if (links[j].hasAttribute("data-denied")) continue;
               var shown = nav ? { navExplorerLink: nav.explorer !== false, navObservabilityLink: nav.traces === true || nav.logs === true || nav.metrics === true, navSystemLink: nav.system !== false, navMcpLink: nav.mcp === true }[links[j].id] : undefined;
               if (shown !== undefined && links[j].getAttribute("aria-current") !== "page") links[j].hidden = !shown;
             }

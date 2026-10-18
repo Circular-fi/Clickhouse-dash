@@ -2,6 +2,8 @@
      tools/build_page_css.py copies it into each shell between the
      "shell:header" markers: edit it here, then rerun the script.
      {{page.label}}: the page name; {{main.id}}: the id of the page's <main> (the skip link's target); {{current.<page>}}: aria-current="page" on that page's link (the page switcher is a nav of links);
+     data-nav-page: the page of a link; in the authzen mode, the server hides the link of a page that the human cannot use
+     (hidden data-denied, src/access_pages.cpp);
      {{observability.hidden}}: " hidden" off the Observability page (app_ui.js
      shows the entry once /api/version enables a view); {{system.hidden}} stays
      empty (the System entry ships visible: app_ui.js hides it when
@@ -24,11 +26,11 @@
       <nav id="pageSelect" class="themeSelect pageNav" aria-label="Pages">
         <button id="pageSelectButton" class="button themeSelect__button pageNav__toggle" type="button" aria-haspopup="false" aria-expanded="false" aria-controls="pageSelectMenu">{{page.label}}</button>
         <div id="pageSelectMenu" class="themeSelect__menu pageNav__list" tabindex="-1">
-          <a id="navQueryLink" class="pageNav__link" href="/query"{{current.query}}>Query</a>
-          <a id="navExplorerLink" class="pageNav__link" href="/explorer/catalog"{{current.explorer}}>Explorer</a>
-          <a id="navObservabilityLink" class="pageNav__link" href="/observability"{{current.observability}}{{observability.hidden}}>Observability</a>
-          <a id="navSystemLink" class="pageNav__link" href="/system"{{current.system}}{{system.hidden}}>System</a>
-          <a id="navMcpLink" class="pageNav__link" href="/mcp-integration"{{current.mcp}}{{mcp.hidden}}>MCP</a>
+          <a id="navQueryLink" class="pageNav__link" data-nav-page="query" href="/query"{{current.query}}>Query</a>
+          <a id="navExplorerLink" class="pageNav__link" data-nav-page="explorer" href="/explorer/catalog"{{current.explorer}}>Explorer</a>
+          <a id="navObservabilityLink" class="pageNav__link" data-nav-page="observability" href="/observability"{{current.observability}}{{observability.hidden}}>Observability</a>
+          <a id="navSystemLink" class="pageNav__link" data-nav-page="system" href="/system"{{current.system}}{{system.hidden}}>System</a>
+          <a id="navMcpLink" class="pageNav__link" data-nav-page="mcp" href="/mcp-integration"{{current.mcp}}{{mcp.hidden}}>MCP</a>
         </div>
       </nav>
     </div>
@@ -77,6 +79,8 @@
             var links = document.querySelectorAll("#pageSelectMenu a");
             for (var j = 0; j < links.length; j += 1) {
               if (window.__chdashUrl) links[j].setAttribute("href", window.__chdashUrl(links[j].getAttribute("href")));
+              // A page that the access of the human does not allow (data-denied, set by the server) stays hidden.
+              if (links[j].hasAttribute("data-denied")) continue;
               var shown = nav ? { navExplorerLink: nav.explorer !== false, navObservabilityLink: nav.traces === true || nav.logs === true || nav.metrics === true, navSystemLink: nav.system !== false, navMcpLink: nav.mcp === true }[links[j].id] : undefined;
               if (shown !== undefined && links[j].getAttribute("aria-current") !== "page") links[j].hidden = !shown;
             }

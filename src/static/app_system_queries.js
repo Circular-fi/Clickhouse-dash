@@ -27,7 +27,7 @@ import { chartCore } from "./app_chart_core.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { meta } from "./app_meta.js";
-import { state as stateMod } from "./app_state.js";
+import { features, state as stateMod } from "./app_state.js";
 import { systemCharts } from "./app_system_charts.js";
 import { kit } from "./app_system_kit.js";
 import { timeRange } from "./app_timerange.js";
@@ -814,7 +814,9 @@ function createQueries(ctx) {
       const current = $("#systemQuerySql", drillView);
       if (current && text) current.replaceWith(shapeSql(text, data?.normalized_formatted));
     } });
-    return h("div", { class: "systemQuery__actions" }, view, openExample, openHistory);
+    // The two "Open in Query" buttons show only when the human may use the Query page (docs/access.md, "Navigation").
+    const query = features.page("query");
+    return h("div", { class: "systemQuery__actions" }, view, query ? openExample : null, query ? openHistory : null);
   }
 
   function drillTiles(data) {

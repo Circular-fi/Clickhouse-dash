@@ -214,6 +214,12 @@
   text-decoration: underline;
 }
 
+/* The name of a table for a human who cannot use the Explorer: the look of the link, without the link. */
+.systemActivityTable__name {
+  display: block;
+  font-weight: var(--fw-semibold);
+}
+
 .systemActivityTable__database {
   display: block;
   color: var(--muted);
@@ -1016,6 +1022,16 @@
 .systemDiskDb__link:focus-visible {
   color: color-mix(in srgb, var(--accent-fill) 80%, var(--text));
   text-decoration: underline;
+}
+
+/* The name of a database for a human who cannot use the Explorer: the look of the link, without the link. */
+.systemDiskDb__text {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--space-6);
+  font-weight: var(--fw-semibold);
 }
 
 .systemDiskDb__link .mono {

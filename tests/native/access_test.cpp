@@ -9,6 +9,7 @@
 #include "native_check.hpp"
 
 #include "access_actions.hpp"
+#include "access_pages.hpp"
 #include "access_identity.hpp"
 #include "access_pdp.hpp"
 #include "signature_verify.hpp"
@@ -23,6 +24,7 @@ extern "C" {
 #include <chrono>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -528,6 +530,81 @@ void test_pdp_cache_bytes() {
 
 } // namespace
 
+// The navigation follows the access (docs/access.md, "Navigation", user decision 2026-10-18): the page of each shell, the pages of
+// one batch, the links of a shell that the human cannot use, the 403 page and the root.
+void test_navigation_pages() {
+  CHECK_EQ(std::string(access_page_of_shell("query.html")->name), std::string("query"));
+  CHECK_EQ(std::string(access_page_of_shell("functions.html")->name), std::string("explorer"));
+  CHECK_EQ(std::string(access_page_of_shell("trace.html")->name), std::string("observability"));
+  CHECK_EQ(std::string(access_page_of_shell("shape.html")->name), std::string("system"));
+  CHECK_EQ(std::string(access_page_of_shell("mcp.html")->name), std::string("mcp-keys"));
+  CHECK_EQ(std::string(access_page_of_shell("mcpusage.html")->name), std::string("mcp-usage"));
+  CHECK(access_page_of_shell("icons.svg") == nullptr);
+
+  // One batch: the twelve actions on the service (the questions of /api/version), then the database of the address.
+  const auto questions = access_navigation_questions("db", "chdash_ui");
+  CHECK_EQ(questions.size(), access_actions().size() + 1);
+  CHECK(questions.back().action == "explorer.read" && questions.back().resource.type == "database" && questions.back().resource.id == "chdash_ui");
+  CHECK_EQ(access_navigation_questions("db", "").size(), access_actions().size());
+  const auto decide = [&](std::set<std::string> allowed) {
+    std::vector<AccessDecision> out;
+    for (const auto& q : questions) out.push_back(AccessDecision{allowed.count(q.action + "@" + q.resource.type) != 0, "pdp"});
+    return access_navigation_pages(questions, out);
+  };
+  // A human with the query actions only: the Query page only.
+  CHECK(decide({"query.run.read@service", "query.export@service"}) == (std::set<std::string>{"query"}));
+  CHECK(decide({"query.run.write@service"}) == (std::set<std::string>{"query"}));
+  // explorer.read on one database opens an address of it, never the page of the navigation.
+  CHECK(decide({"explorer.read@database"}).empty());
+  CHECK(decide({"explorer.read@service"}) == (std::set<std::string>{"explorer"}));
+  CHECK(decide({"mcp.usage.read@service", "system.read@service", "observability.read@service"}) ==
+        (std::set<std::string>{"mcp-usage", "system", "observability"}));
+
+  const std::string shell =
+      "<!doctype html>\n<html>\n<head>\n<title>x</title>\n</head>\n<body data-page=\"explorer\">\n"
+      "<a id=\"navQueryLink\" data-nav-page=\"query\" href=\"/query\">Query</a>\n"
+      "<a id=\"navExplorerLink\" data-nav-page=\"explorer\" href=\"/explorer/catalog\">Explorer</a>\n"
+      "<a id=\"navSystemLink\" data-nav-page=\"system\" href=\"/system\">System</a>\n"
+      "<a id=\"navMcpLink\" class=\"pageNav__link\" data-nav-page=\"mcp\" href=\"/mcp-integration\" hidden>MCP</a>\n"
+      "<a id=\"mcpTab-keys\" data-nav-page=\"mcp-keys\" href=\"/mcp-integration\">Keys</a>\n"
+      "</body>\n</html>\n";
+  const std::string query_only = access_mark_navigation(shell, {"query"});
+  CHECK(query_only.find("<head>\n  <meta id=\"chdashPages\" name=\"chdash-pages\" content=\"query\" />") != std::string::npos);
+  CHECK(query_only.find("data-nav-page=\"query\" href") != std::string::npos);
+  CHECK(query_only.find("data-nav-page=\"explorer\" hidden data-denied href") != std::string::npos);
+  CHECK(query_only.find("data-nav-page=\"system\" hidden data-denied") != std::string::npos);
+  CHECK(query_only.find("data-nav-page=\"mcp\" hidden data-denied") != std::string::npos);
+  CHECK(query_only.find("data-nav-page=\"mcp-keys\" hidden data-denied") != std::string::npos);
+  // The page itself is never hidden: data-page of the body is not a link.
+  CHECK(query_only.find("<body data-page=\"explorer\">") != std::string::npos);
+  // The usage alone: the MCP entry stays and leads to the usage.
+  const std::string usage_only = access_mark_navigation(shell, {"mcp-usage"});
+  CHECK(usage_only.find("data-nav-page=\"mcp\" href=\"/mcp-integration/usage\"") != std::string::npos);
+  CHECK(usage_only.find("data-nav-page=\"mcp\" hidden data-denied") == std::string::npos);
+  CHECK(usage_only.find("content=\"mcp-usage\"") != std::string::npos);
+  // Every page: nothing is hidden.
+  std::set<std::string> all;
+  for (const auto& page : access_pages()) all.insert(page.name);
+  const std::string full = access_mark_navigation(shell, all);
+  CHECK(full.find("data-denied") == std::string::npos);
+  CHECK(full.find("content=\"query explorer observability system mcp-keys mcp-usage\"") != std::string::npos);
+
+  // The 403 page: no script, the action, a link to each allowed page under the root of the address.
+  const std::string denied = access_denied_page(*access_page("explorer"), {"query", "system"}, access_root_of("/explorer/catalog/x"));
+  CHECK(denied.find("<script") == std::string::npos);
+  CHECK(denied.find("<code>explorer.read</code>") != std::string::npos);
+  CHECK(denied.find("<a href=\"../../query\">Query</a>") != std::string::npos);
+  CHECK(denied.find("<a href=\"../../system\">System</a>") != std::string::npos);
+  CHECK(denied.find("MCP") == std::string::npos);
+  CHECK(access_denied_page(*access_page("query"), {}, "").find("accessDeniedNone") != std::string::npos);
+  CHECK_EQ(access_root_of("/"), std::string(""));
+  CHECK_EQ(access_root_of("/query"), std::string(""));
+  CHECK_EQ(access_root_of("/mcp-integration/usage"), std::string("../"));
+  CHECK_EQ(access_root_of("/explorer/catalog/db/t"), std::string("../../../"));
+  CHECK_EQ(std::string(access_first_page({"system", "mcp-usage"})->name), std::string("system"));
+  CHECK(access_first_page({}) == nullptr);
+}
+
 int main() {
   RUN(test_ed25519_vectors);
   RUN(test_es256_vectors);
@@ -539,6 +616,7 @@ int main() {
   RUN(test_pdp_body_and_answer);
   RUN(test_pdp_client);
   RUN(test_pdp_cache_bytes);
+  RUN(test_navigation_pages);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

@@ -6,10 +6,11 @@ the headers that matter and the body). The tests set its answers and read what i
     GET  /control/received   {"requests": [{"path", "authorization", "request_id", "traceparent", "body"}, ...]}
     POST /control/reset      forgets the requests and sets the default answers again
     POST /control/answer     {"default": true, "deny": ["query.export", ...], "allow": [...], "deny_subjects": ["leaver"],
-                              "status": 500, "delay_ms": 2000}
+                              "subjects": {"querier": ["query.run.read", ...]}, "status": 500, "delay_ms": 2000}
                              deny and allow are lists of action names, or of "action@type:id" for one resource. deny_subjects
-                             lists the subjects that the PDP does not know: false for every action. status and delay_ms apply
-                             to every evaluation request until the next /control/answer or /control/reset.
+                             lists the subjects that the PDP does not know: false for every action. subjects gives the whole
+                             grant of a subject: true for the actions of its list only. status and delay_ms apply to every
+                             evaluation request until the next /control/answer or /control/reset.
     GET  /healthz            200
 
 A request with a wrong token (Authorization: Bearer <FAKE_PDP_TOKEN>) gets 401. It uses the standard library only. The port is
@@ -29,7 +30,7 @@ TOKEN = os.environ.get("FAKE_PDP_TOKEN", "pdp-test-token")
 
 LOCK = threading.Lock()
 RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
-DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "status": 200, "delay_ms": 0}
+DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "subjects": {}, "status": 200, "delay_ms": 0}
 ANSWER = dict(DEFAULT_ANSWER)
 
 
@@ -38,8 +39,12 @@ def decide(subject: dict, action: dict, resource: dict) -> bool:
     target = f"{name}@{(resource or {}).get('type', '')}:{(resource or {}).get('id', '')}"
     with LOCK:
         answer = dict(ANSWER)
-    if str((subject or {}).get("id", "")) in answer["deny_subjects"]:
+    subject_id = str((subject or {}).get("id", ""))
+    if subject_id in answer["deny_subjects"]:
         return False
+    grant = (answer["subjects"] or {}).get(subject_id)
+    if isinstance(grant, list):
+        return target in grant or name in grant
     if target in answer["deny"] or name in answer["deny"]:
         return False
     if target in answer["allow"] or name in answer["allow"]:

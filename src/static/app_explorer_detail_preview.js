@@ -11,7 +11,7 @@ import { appRoute } from "./app_explorer_route.js";
 import { actions, model, setError } from "./app_explorer_store.js";
 import { format } from "./app_format.js";
 import { results } from "./app_results.js";
-import { state, storage } from "./app_state.js";
+import { features, state, storage } from "./app_state.js";
 import { icon as iconMod } from "./app_ui_icon.js";
 import { menu as menuMod } from "./app_ui_menu.js";
 import { segmented } from "./app_ui_segmented.js";
@@ -195,7 +195,9 @@ function renderPreviewToolbar(container, detail) {
     }
   });
   const actions = h("div", { class: "explorerDataToolbar__actions" });
-  actions.append(open, createDataSettingsControl());
+  // "Open in Query" shows only when the human may use the Query page (docs/access.md, "Navigation").
+  if (features.page("query")) actions.append(open);
+  actions.append(createDataSettingsControl());
   toolbar.append(info, actions);
   container.appendChild(toolbar);
 }

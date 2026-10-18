@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include "access_actions.hpp"
+#include "access_pages.hpp"
 
 #include "api_error.hpp"
 #include "host_util.hpp"
@@ -24,6 +25,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <utility>
 #include <memory>
@@ -233,6 +235,83 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
 
 } // namespace
 
+namespace {
+
+// The database that an address of the Explorer names: /explorer/catalog/<database>[/...], or the parameter database of
+// /explorer/_system. Empty for any other address.
+std::string explorer_address_database(const httplib::Request& req) {
+  static const std::string marker = "/explorer/catalog/";
+  if (const auto at = req.path.find(marker); at != std::string::npos) {
+    const std::string rest = req.path.substr(at + marker.size());
+    return rest.substr(0, rest.find('/'));
+  }
+  if (req.path.find("/explorer/_system") != std::string::npos && req.has_param("database")) return req.get_param_value("database");
+  return {};
+}
+
+// The 403 page of a page that the human cannot open (docs/access.md, "Navigation"): no script, no data.
+void write_denied_page(httplib::Response& res, const httplib::Request& req, const AccessPage& page, const std::set<std::string>& pages) {
+  const std::string html = access_denied_page(page, pages, access_root_of(req.path));
+  res.status = 403;
+  res.set_header("Cache-Control", "no-store");
+  set_page_security_policy(res, html);
+  res.set_content(html, "text/html; charset=utf-8");
+}
+
+} // namespace
+
+void Server::serve_shell(const httplib::Request& req, httplib::Response& res, const std::string& file) {
+  httplib::Request shell_req = req;
+  shell_req.path = "/" + file;
+  const AccessPage* page = cfg_.access.enforced() ? access_page_of_shell(file) : nullptr;
+  if (!page) {
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
+      res.status = 404;
+      res.set_content(file + " not found", "text/plain");
+    }
+    return;
+  }
+  // One batch for the render. An address of the Explorer in one database also opens with explorer.read on that database.
+  const std::string database = std::string(page->name) == "explorer" ? explorer_address_database(req) : std::string();
+  bool database_allowed = false;
+  const std::set<std::string> pages = navigation_pages(database, &database_allowed);
+  if (pages.count(page->name) == 0 && !database_allowed) {
+    log_event(LogLevel::Info, "access.page_denied",
+              {{"request_id", current_request_context().request_id}, {"page", page->name}, {"path", req.path.substr(0, 512)}});
+    return write_denied_page(res, req, *page, pages);
+  }
+  // The shell of this human: the plain bytes (no gzip, no 304), with the links that the human cannot use hidden. It is never kept.
+  shell_req.headers.erase("Accept-Encoding");
+  shell_req.headers.erase("If-None-Match");
+  httplib::Response plain;
+  if (!try_serve_embedded(shell_req, plain) && !try_serve_fs(shell_req, plain, *fs_static_cache_)) {
+    res.status = 404;
+    res.set_content(file + " not found", "text/plain");
+    return;
+  }
+  const std::string html = access_mark_navigation(plain.body, pages);
+  res.status = 200;
+  res.set_header("Cache-Control", "no-store");
+  set_page_security_policy(res, html);
+  res.set_content(html, "text/html; charset=utf-8");
+}
+
+void Server::serve_root(const httplib::Request& req, httplib::Response& res) {
+  if (cfg_.access.enforced()) {
+    const std::set<std::string> pages = navigation_pages(std::string());
+    if (pages.count("query") == 0) {
+      // The root is the Query page. A human without it goes to the first page that the human can use, or gets the 403 page.
+      const AccessPage* first = access_first_page(pages);
+      if (!first) return write_denied_page(res, req, *access_page("query"), pages);
+      res.status = 302;
+      res.set_header("Location", access_root_of(req.path) + first->path);
+      res.set_header("Cache-Control", "no-store");
+      return;
+    }
+  }
+  serve_shell(req, res, "query.html");
+}
+
 AclService::Options Server::acl_options() {
   AclService::Options options;
   options.ttl = std::chrono::milliseconds(std::max(0, cfg_.explorer.acl_cache_ttl_ms));
@@ -304,36 +383,16 @@ Server::Server(AppConfig cfg, bool start_background)
     session_reaper_thread_ = std::thread([this] { session_reaper_loop(); });
   }
 
-  const auto serve_query_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/query.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
-      res.status = 404;
-      res.set_content("query.html not found", "text/plain");
-    }
-  };
-  const auto serve_explorer_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/explorer.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
-      res.status = 404;
-      res.set_content("explorer.html not found", "text/plain");
-    }
-  };
+  // Each shell goes through serve_shell: in the authzen mode, the access of the human decides the page and its links (access_pages.hpp).
+  const auto serve_query_shell = [this](const auto& req, auto& res) { serve_shell(req, res, "query.html"); };
+  const auto serve_explorer_shell = [this](const auto& req, auto& res) { serve_shell(req, res, "explorer.html"); };
 
   // Traces, Logs and Metrics are three pages (traces.html, logs.html, metrics.html):
   // /observability/traces, /observability/logs and /observability/metrics.
   // The /observability address sends the browser to the first enabled one.
   // One trace is a page of its own too (trace.html, /observability/traces/<trace id>).
-  const auto serve_view_shell = [&](const char* file) {
-    return [&, file](const auto& req, auto& res) {
-      httplib::Request shell_req = req;
-      shell_req.path = std::string("/") + file;
-      if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
-        res.status = 404;
-        res.set_content(std::string(file) + " not found", "text/plain");
-      }
-    };
+  const auto serve_view_shell = [this](const char* file) {
+    return [this, file](const auto& req, auto& res) { serve_shell(req, res, file); };
   };
   // Any other /observability address is the bare one, a disabled view, or an unknown one.
   // It goes to the first enabled view, and the query string is kept.
@@ -378,24 +437,10 @@ Server::Server(AppConfig cfg, bool start_background)
   };
 
   // One trace is a page of its own (trace.html): /observability/traces/<trace id>.
-  const auto serve_trace_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/trace.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
-      res.status = 404;
-      res.set_content("trace.html not found", "text/plain");
-    }
-  };
+  const auto serve_trace_shell = [this](const auto& req, auto& res) { serve_shell(req, res, "trace.html"); };
 
   // One query shape is a page of its own (shape.html): /system/queries/<hash>.
-  const auto serve_shape_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/shape.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
-      res.status = 404;
-      res.set_content("shape.html not found", "text/plain");
-    }
-  };
+  const auto serve_shape_shell = [this](const auto& req, auto& res) { serve_shell(req, res, "shape.html"); };
 
   // The System sections are three pages of their own (docs/system.md): /system
   // (system.html, the Overview), /system/queries (queries.html) and /system/disks
@@ -437,7 +482,7 @@ Server::Server(AppConfig cfg, bool start_background)
     res.set_header("Cache-Control", "no-store");
   };
 
-  http_.Get("/", serve_query_shell);
+  http_.Get("/", [this](const auto& req, auto& res) { serve_root(req, res); });
   http_.Get("/query", serve_query_shell);
   if (cfg_.system.enabled) {
     if (cfg_.system.top_queries_enabled()) {

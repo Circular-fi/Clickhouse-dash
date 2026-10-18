@@ -88,9 +88,11 @@ function create({ openTable = null } = {}) {
   // This is not a live region. Each refresh would read the tables again.
   const body = h("div", { class: "systemActivity", id: "systemActivity" });
 
+  // Without openTable (the human cannot use the Explorer), the table is text, not a link.
   function objectCell(item) {
+    if (!openTable) return h("td", { class: "systemActivityTable__object" }, h("span", { class: "systemActivityTable__name" }, item.table), h("span", { class: "systemActivityTable__database" }, item.database));
     const button = h("button", { type: "button", class: "systemActivityTable__link", title: `Open ${item.database}.${item.table} in the Explorer` }, item.table);
-    button.addEventListener("click", () => openTable?.(item.database, item.table));
+    button.addEventListener("click", () => openTable(item.database, item.table));
     return h("td", { class: "systemActivityTable__object" }, button, h("span", { class: "systemActivityTable__database" }, item.database));
   }
 

@@ -21,6 +21,7 @@ import { h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { mcpInstances } from "./app_mcp_instances.js";
 import { mcpView } from "./app_mcp_view.js";
+import { features } from "./app_state.js";
 import { chartUi } from "./app_ui_chart.js";
 import { icon } from "./app_ui_icon.js";
 import { segmented } from "./app_ui_segmented.js";
@@ -168,7 +169,7 @@ function usageSection(key, meta, onWindow) {
   link();
   const body = h("div", { class: "mcpUsage__body" });
   const section = h("section", { class: "mcpUsage", dataset: { usage: key.id }, "aria-label": `What ${key.name} did` },
-    h("h3", { class: "mcpDetails__title mcpUsage__head" }, "Usage", range, instances.el, open, picker), body);
+    h("h3", { class: "mcpDetails__title mcpUsage__head" }, "Usage", range, instances.el, features.page("mcp-usage") ? open : null, picker), body);
   const slot = `${USAGE_SLOT}${key.id}`;
   const show = (usage) => {
     const from = usage.since != null && usage.from != null ? Math.max(usage.from, usage.since) : usage.from;
