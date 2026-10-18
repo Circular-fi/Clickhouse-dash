@@ -322,7 +322,8 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
   expect(real.byInstance.body.group).toBe('instance');
   expect(real.byInstance.body.series.groups.map((item) => item.id)).toEqual([INSTANCE]);
   expect(real.ofInstance.body.filters.instance).toEqual([INSTANCE]);
-  expect(real.ofInstance.body.totals.requests).toBe(real.plain.body.totals.requests);
+  // The two answers have the same window (24h). The plain answer has 7 days: on a stack whose usage is older than a day, it holds more.
+  expect(real.ofInstance.body.totals.requests).toBe(real.byInstance.body.totals.requests);
   expect(real.ofOtherInstance.status).toBe(200);
   expect(real.ofOtherInstance.body.totals.requests).toBe(0);
   expect(real.ofOtherInstance.body.instances.map((item) => item.instance)).toEqual([INSTANCE, 'nobody-writes-this']);
