@@ -565,6 +565,7 @@ async function getMetricsAttributes(params, { signal } = {}) {
 //                                 The groups are the biggest by `order`. The same groups are ranked once more by each of `orders` (`series.rankings`).
 //                                 It also has the facet of each dimension and the instances with their figures (the facet of the filter by instance).
 //   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
+//   adoptMcpKey(id)               key (the person becomes the creator of an orphan key; the secret does not change)
 //   deleteMcpKey(id)              id
 // A failed call rejects with an Error. The Error has err.mcp = { status, code, message, field, reason }.
 // These values come from the answer: `error_code`, `message`, `field` and `reason`. `field` has no position suffix, so "tools[1]" gives "tools".
@@ -712,6 +713,10 @@ function normalizeMcpKey(raw) {
         // The user for whom a key of the configuration acts, and the expiry of that key (mcp_key.subject, mcp_key.expires).
     subject: mcpText(key.subject) || null,
     expiresAt: mcpText(key.expires_at) || null,
+        // The person who made a key of the page in the authzen mode. A key that has no creator, or whose creator the PDP does not know
+        // any more, is refused until a person adopts it (orphan: "no_creator" or "creator_gone").
+    creator: mcpText(key.creator) || null,
+    orphan: key.orphan === "no_creator" || key.orphan === "creator_gone" ? key.orphan : null,
     hosts: mcpList(key.hosts),
     tools: mcpList(key.tools),
     databases: mcpList(key.databases),
@@ -1143,6 +1148,12 @@ async function getMcpKeyCost(id, { window = "", refresh = false, signal } = {}) 
   };
 }
 
+// The person becomes the creator of an orphan key. The secret does not change.
+async function adoptMcpKey(id, { signal } = {}) {
+  const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/adopt`, { method: "POST", body: {}, signal });
+  return normalizeMcpKey(payload?.key);
+}
+
 async function deleteMcpKey(id, { signal } = {}) {
   await mcpRequest(`/keys/${encodeURIComponent(id)}`, { method: "DELETE", signal });
   return id;
@@ -1306,6 +1317,6 @@ export const api = { resolveUrl, request, getJson, postJson, getHosts, getVersio
   getTraceServices, getTraceServicesDb,
   searchTraceSpans, getTraceSpan,
   getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-  getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, getMcpUsageSummary, getMcpKeyUsage, getMcpUsageOverview, getMcpKeyCost, deleteMcpKey,
+  getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, getMcpUsageSummary, getMcpKeyUsage, getMcpUsageOverview, getMcpKeyCost, adoptMcpKey, deleteMcpKey,
   humanizeErrors,
 };

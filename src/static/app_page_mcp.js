@@ -34,6 +34,7 @@ const state = { meta: null, keys: [], status: "loading", error: null, access: nu
 const STATE_KEY = "mcp.state";
 const actions = () => ({
   onCreate: createKey,
+  onAdopt: adoptKey,
   onDelete: deleteKey,
   onRefresh: (button) => reload(button),
   onRetry: () => load(),
@@ -264,6 +265,22 @@ async function createKey(opener) {
 function reach(key) {
   const hosts = !key.hosts.length ? "no host" : key.hosts.includes("*") ? "all hosts" : key.hosts.join(", ");
   return `This key reads ${hosts}.`;
+}
+
+// A person adopts an orphan key (docs/mcp.md, "Adoption of a key"): the person becomes its creator, and the key works again with the same
+// secret. The server asks the PDP for each action that the tools of the key use.
+async function adoptKey(key) {
+  const ok = await dialog.confirm({
+    title: `Adopt key ${key.name}?`,
+    message: `You become the creator of this key. The secret does not change: the clients that hold it get access again, with your permissions. ${reach(key)}`,
+    confirmLabel: "Adopt key",
+    className: "mcpDialog",
+  });
+  if (!ok) {
+    focusRow(key.id, "adopt");
+    return;
+  }
+  await run(() => api.adoptMcpKey(key.id), { id: key.id, action: "open", message: `Key ${key.name} adopted` });
 }
 
 async function deleteKey(key) {

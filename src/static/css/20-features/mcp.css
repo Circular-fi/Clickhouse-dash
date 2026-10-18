@@ -308,6 +308,8 @@ body[data-page="mcp"] #mcpPanel {
 .mcpTable .mcpCell--used { width: 8.5rem; }
 .mcpTable .mcpCell--deleted { width: 9rem; }
 .mcpTable .mcpCell--actions { width: 3.25rem; }
+/* A table with an orphan key: Adopt and Delete on the row of that key. */
+.mcpTable--adopt .mcpCell--actions { width: 5.5rem; }
 
 /* A key that cannot be deleted: the lock stands where the Delete icon would be. */
 .mcpLock {
@@ -412,6 +414,16 @@ body[data-page="mcp"] #mcpPanel {
 .mcpAction--danger:not(:disabled):hover {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Adopt: an icon without a frame, in the accent colour (docs/mcp.md, "Adoption of a key"). */
+.mcpAction--adopt {
+  color: var(--accent-text);
+}
+
+.mcpAction--adopt:not(:disabled):hover {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent-fill) 12%, transparent);
 }
 
 /* The heading of the keys: the title and the count, the filter, and at the right end Refresh and New key. */

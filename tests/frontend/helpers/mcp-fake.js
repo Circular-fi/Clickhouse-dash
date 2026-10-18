@@ -127,7 +127,7 @@ export const key = (over) => {
   const made = {
     id: 'ui_0a1b2c3d4e5f', name: 'ci-bot', source: 'ui', secret_hint: 'a1b2c3d4',
     hosts: ['prod'], tools: ['list_databases', 'query_table'], databases: ['otel', 'analytics.events'],
-    max_rows: null, timeout_seconds: null, subject: null, creator: null, expires_at: null, created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
+    max_rows: null, timeout_seconds: null, subject: null, creator: null, orphan: null, expires_at: null, created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
   };
   return { ...made, secret_mask: maskOf(made.secret_hint) };
 };
@@ -596,6 +596,15 @@ export async function install(page, server) {
       const owner = server.keys.find((k) => k.id === decodeURIComponent(reach[1]));
       if (!owner) return json(route, 404, { error_code: 'not_found', message: 'No such key.', retryable: false });
       return json(route, 200, server.access(owner, url.searchParams.get('refresh') === '1'));
+    }
+    // A person adopts an orphan key (docs/mcp.md, "Adoption of a key"): the person becomes the creator; the secret does not change.
+    const adopt = method === 'POST' ? /^\/keys\/([^/]+)\/adopt$/.exec(path) : null;
+    if (adopt) {
+      const owner = server.keys.find((k) => k.id === decodeURIComponent(adopt[1]));
+      if (!owner) return json(route, 404, { error_code: 'not_found', message: 'No such key.', retryable: false });
+      if (!owner.orphan) return json(route, 409, { error_code: 'not_adoptable', message: 'the creator of the key still holds its actions', retryable: false });
+      Object.assign(owner, { creator: server.adopter || 'heir', orphan: null });
+      return json(route, 200, { key: owner });
     }
     const match = /^\/keys\/([^/]+)$/.exec(path);
     const found = match ? server.keys.find((k) => k.id === decodeURIComponent(match[1])) : null;

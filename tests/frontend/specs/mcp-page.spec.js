@@ -289,6 +289,42 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await screenshot(page, 'keys-desktop');
 });
 
+test('an orphan key says that it is refused, and Adopt makes the person its creator with the same secret', async ({ page }) => {
+  // User decision 2026-10-18: a key of the page with no creator, or whose creator the PDP does not know any more, is refused until a
+  // person adopts it. The list shows it with a warning and Adopt beside Delete.
+  const server = newServer();
+  const orphan = server.keys.find((k) => k.name === 'second-ui-key');
+  Object.assign(orphan, { creator: 'leaver', orphan: 'creator_gone' });
+  await open(page, server);
+  const target = row(page, 'second-ui-key');
+  await expect(target.locator('.mcpCell--name .badge')).toHaveText('Refused');
+  await expect(target.locator('.mcpCell--name .badge')).toHaveAttribute('title', /holds none of its actions any more.*until a person adopts it/);
+  // Only the orphan key has Adopt. The other keys keep Delete alone.
+  await expect(page.locator('#mcpKeysBody [data-action="adopt"]')).toHaveCount(1);
+  await expect(target.locator('[data-action="adopt"]')).toHaveAttribute('aria-label', 'Adopt second-ui-key');
+  await expect(row(page, 'ci-bot').locator('.badge')).toHaveCount(0);
+  // The two actions fit their column: nothing overflows the cell or the page.
+  const cell = await target.locator('td.mcpCell--actions').evaluate((td) => ({ scroll: td.scrollWidth, client: td.clientWidth }));
+  expect(cell.scroll).toBeLessThanOrEqual(cell.client);
+  expect(await horizontalOverflow(page)).toBe(0);
+  await target.locator('[data-action="adopt"]').click();
+  await expect(dialog(page)).toContainText('You become the creator of this key. The secret does not change');
+  await dialog(page).getByRole('button', { name: 'Adopt key' }).click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect(server.calls.filter((c) => c.method === 'POST' && c.path === `/keys/${orphan.id}/adopt`)).toHaveLength(1);
+  // The list is read again: the key has a creator, no warning and no Adopt.
+  await expect(target.locator('.badge')).toHaveCount(0);
+  await expect(page.locator('#mcpKeysBody [data-action="adopt"]')).toHaveCount(0);
+  // A refusal of the server shows its message.
+  Object.assign(orphan, { creator: null, orphan: 'no_creator' });
+  server.errors[`POST /keys/${orphan.id}/adopt`] = { status: 403, body: { error_code: 'forbidden', action: 'explorer.read', message: 'The action explorer.read is not allowed.', retryable: false } };
+  await page.locator('#mcpRefresh').click();
+  await expect(target.locator('.mcpCell--name .badge')).toHaveAttribute('title', /has no creator/);
+  await target.locator('[data-action="adopt"]').click();
+  await dialog(page).getByRole('button', { name: 'Adopt key' }).click();
+  await expect(page.locator('#mcpAlert')).toContainText('explorer.read');
+});
+
 test('the details of a key: Observability is one card for each signal, with the tools the key holds in it', async ({ page }) => {
   const server = newServer();
   server.keys.push(key({ id: 'ui_obs', name: 'obs-key', tools: ['search_traces', 'search_logs', 'query_metric', 'traces_search'], databases: ['*'] }));

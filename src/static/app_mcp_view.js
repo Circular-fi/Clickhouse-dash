@@ -318,6 +318,29 @@ function deleteButton(key, onClick) {
   return button;
 }
 
+// An orphan key (no creator, or a creator that the PDP does not know any more) is refused until a person adopts it. Adopt makes the
+// person the creator. The secret does not change.
+const ORPHAN_TEXT = {
+  no_creator: "This key has no creator. Every request of the key is refused until a person adopts it.",
+  creator_gone: "The creator of this key holds none of its actions any more. Every request of the key is refused until a person adopts it.",
+};
+
+function orphanBadge(key) {
+  return badge("Refused", "warn", ORPHAN_TEXT[key.orphan] || "");
+}
+
+function adoptButton(key, onClick) {
+  const button = h("button", {
+    type: "button",
+    class: "button button--small mcpAction mcpAction--adopt",
+    dataset: { action: "adopt" },
+    title: `Adopt ${key.name}: you become its creator, and the secret does not change`,
+    "aria-label": `Adopt ${key.name}`,
+  }, icon.el("check", { size: "sm" }), h("span", { class: "mcpAction__label" }, "Adopt"));
+  button.addEventListener("click", () => onClick(key, button));
+  return button;
+}
+
 // The host of a key is shown by name. A key reads one host.
 // A key of an older file can name several hosts, or "*". Such a key shows "n hosts" in the warning colour. Its details say what to do.
 function hostCell(key, meta) {
@@ -639,10 +662,11 @@ function keyRow(key, meta, actions, reason) {
   const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}`, "aria-expanded": "false", "aria-controls": `mcpDetail-${key.id}` },
     icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, key.name));
   open.addEventListener("click", () => actions.onOpen(key, open));
-  const nameCell = cell("Name", columnClass("name"), open);
+  const nameCell = cell("Name", columnClass("name"), open, key.orphan ? orphanBadge(key) : null);
   const lockTitle = readOnly ? SOURCE_TITLE.config : reason;
   const lock = locked ? h("span", { class: "mcpLock", title: lockTitle, role: "img", "aria-label": lockTitle }, icon.el("lock", { size: "sm" })) : null;
-  const actionsCell = cell("Actions", columnClass("actions"), locked ? lock : deleteButton(key, actions.onDelete));
+  const actionsCell = cell("Actions", columnClass("actions"), ...(locked ? [lock]
+    : [key.orphan && actions.onAdopt ? adoptButton(key, actions.onAdopt) : null, deleteButton(key, actions.onDelete)]));
   return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
     nameCell,
     cell("Secret", columnClass("secret"), secretCell(key)),
@@ -716,7 +740,9 @@ function keysTable(keys, meta, actions, view) {
     view.openKeyId = "";
     actions.onOpenChange?.("");
   }
-  const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), tbody);
+  // A table with an orphan key has two actions on its row: Adopt and Delete.
+  const adoptable = !reason && keys.some((key) => key.orphan && key.source === "ui");
+  const table = h("table", { class: `dataTable dataTable--compact mcpTable${adoptable ? " mcpTable--adopt" : ""}` }, h("thead", { role: "rowgroup" }, head), tbody);
   table.setAttribute("role", "table");
   table.setAttribute("aria-label", "Access keys");
   const wrap = tableMod.scrollCues(h("div", { class: "dataTableWrap mcpTableWrap" }, table));
@@ -746,7 +772,7 @@ function applyFilter(container, filterText) {
 }
 
 // view: { status: "loading" | "error" | "ready", keys, meta, error, openKeyId, filterText }
-// actions: { onCreate, onDelete(key), onRefresh, onRetry, onOpenChange(id), onFilter(text) }
+// actions: { onCreate, onAdopt(key), onDelete(key), onRefresh, onRetry, onOpenChange(id), onFilter(text) }
 function renderKeys(container, view, actions) {
   const { meta, keys = [] } = view;
   const reason = manageReason(meta);
