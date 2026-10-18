@@ -233,3 +233,50 @@ def test_the_release_checks_the_kernels_before_it_builds_what_it_attests():
     assert "CHDASH_WASM_LENIENT" not in check
     build = release.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
     assert "needs: [prepare, wasm-check]" in build
+
+
+WRAP_PROBE = r"""
+const fs = require("fs");
+const env = Object.fromEntries(["sin", "cos", "atan2", "pow", "exp", "log", "cbrt", "hypot"].map((name) => [name, Math[name]]));
+const out = {};
+(async () => {
+  const { instance } = await WebAssembly.instantiate(fs.readFileSync(process.argv[1]), { env });
+  const k = instance.exports;
+  const mark = k.wasm_mark();
+  // A size whose alignment wraps around: no block, not a block of 0 bytes.
+  out.alloc_wrap = k.wasm_alloc_bytes(0xfffffff8) >>> 0;
+  k.wasm_release(mark);
+  const text = k.wasm_alloc_bytes(64);
+  // 2^29 names: their slots take 2^30 u32, 2^32 bytes, which wraps to 0 in wasm32. NEW() refuses it.
+  try { out.names_wrap = k.hl_set_names(0, text, 1, 0x20000000); } catch (error) { out.names_wrap = String(error); }
+  // Past 2^30 names, the table cannot be sized at all.
+  try { out.names_huge = k.hl_set_names(0, text, 1, 0x7fffffff); } catch (error) { out.names_huge = String(error); }
+  k.wasm_release(mark);
+  // A text longer than the bound of hl_run(): -1 before the kernel reads one code unit.
+  try { out.run_long = k.hl_run(text, 16 * 1024 * 1024 + 1); } catch (error) { out.run_long = String(error); }
+  k.wasm_release(mark);
+  console.log(JSON.stringify(out));
+})().catch((error) => { console.error(error); process.exit(1); });
+"""
+
+
+def test_the_runtime_refuses_a_size_that_wraps_and_hl_run_bounds_its_text():
+    # Why: in wasm32, sizeof(type) * count wraps at 2^32. A wrapped size gave a small block, and the kernel wrote past it into the arena.
+    # NEW() and wasm_alloc() now refuse such a size, and hl_run() bounds the length of its text (user decision 2026-10-18). The committed
+    # binary runs here, so a binary that is not rebuilt from the fixed sources fails.
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed: run the harness in the tests image (tests/Dockerfile.tests)")
+    proc = subprocess.run([node, "-e", WRAP_PROBE, str(WASM_DIR / "highlight.wasm")], capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
+    assert result == {"alloc_wrap": 0, "names_wrap": -1, "names_huge": -1, "run_long": -1}, result
+
+
+def test_the_native_runtime_has_the_same_bound_as_the_runtime_of_the_page():
+    # Why: the fuzz targets and tests/native/wasm_kernel_*.c build the kernels with tests/fuzz/wasm_native_rt.h. A NEW() without the bound
+    # there would hide from AddressSanitizer the wrap that the page has.
+    for header in (SOURCES / "rt.h", ROOT / "tests" / "fuzz" / "wasm_native_rt.h"):
+        text = header.read_text(encoding="utf-8")
+        assert re.search(r"#define NEW\(type, count\) \(\(type \*\)wasm_alloc_array\(sizeof\(type\), \(u64\)\(i64\)\(count\)\)\)", text), header
+

@@ -10,6 +10,10 @@
 
 enum { K_PLAIN = 0, K_KW = 1, K_FN = 2, K_NUM = 3, K_NULL = 4, K_TYPE = 5, K_STR = 6, K_COM = 7 };
 enum { SET_KW = 0, SET_CS = 1, SET_CI = 2, SET_AGG_CS = 3, SET_AGG_CI = 4, SET_COUNT = 5 };
+/* The longest text that hl_run() lexes, in code units. A code unit gives at most 6 units of HTML ("&quot;") and a token of one
+   unit at most 31 more (its span). 16 Mi units keep the size of the HTML far below 2^31: no sum of hl_run() can wrap. A longer
+   text gets -1, as for no memory, and the page uses the JavaScript path. */
+#define HL_MAX_TEXT (16 * 1024 * 1024)
 /* hl_run() answers with this when the text needs the JavaScript path (a quoted name with a non-ASCII letter that
    is followed by a "(": JavaScript lower-cases it with Unicode rules). */
 #define NEEDS_JS (-2)
@@ -57,6 +61,8 @@ EXPORT(hl_set_names) i32 hl_set_names(i32 which, const u16 *data, i32 units, i32
   Set *set = &sets[which];
   set->cap = 0;
   if (count <= 0) return 0;
+  /* Past 2^30 names, the doubling of cap below wraps to 0 and never ends. */
+  if ((u32)count > (1u << 30)) return -1;
   u32 cap = 16;
   while (cap < (u32)count * 2u) cap <<= 1;
   set->slot = NEW(u32, cap);
@@ -707,6 +713,7 @@ EXPORT(hl_run) i32 hl_run(const u16 *text, i32 len) {
   needs_js = 0;
   result_html_len = 0;
   if (len <= 0) return 0;
+  if (len > HL_MAX_TEXT) return -1;
   for (i32 k = 1; k < 8; k++) {
     i32 n = 0;
     while (SPAN_OPEN[k][n]) n++;
@@ -718,13 +725,15 @@ EXPORT(hl_run) i32 hl_run(const u16 *text, i32 len) {
   lex_all();
   if (overflow) return -1;
   if (needs_js) return NEEDS_JS;
-  i32 total = 0;
+  i64 total = 0;
   for (i32 t = 0; t < ntok; t++) {
-    i32 n = 0;
+    i64 n = 0;
     for (i32 i = toks[t].start; i < toks[t].end; i++) n += escaped_len(T[i]);
     if (toks[t].kind != K_PLAIN) n += span_open_len[toks[t].kind] + SPAN_CLOSE_LEN;
     total += n;
   }
+  /* HL_MAX_TEXT keeps the total far below this bound. The check stays: the offsets of the HTML are i32. */
+  if (total >= 0x7fffffff) return -1;
   out_html = NEW(u16, total + 1);
   if (!out_html) return -1;
   out_len = 0;

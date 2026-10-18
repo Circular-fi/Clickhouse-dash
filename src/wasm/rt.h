@@ -47,8 +47,10 @@ static usize wasm_top = 0;
 
 static inline usize wasm_align(usize n) { return (n + 15u) & ~(usize)15u; }
 
-/* n bytes of memory, 16-byte aligned. The memory can contain zeros or other values (the arena is not cleared). The result is 0 when the memory is full. */
+/* n bytes of memory, 16-byte aligned. The memory can contain zeros or other values (the arena is not cleared). The result is 0 when the memory is full.
+ * The result is also 0 when n is so large that its alignment wraps around. */
 static void *wasm_alloc(usize n) {
+  if (n > (usize)-1 - 15u) return 0;
   if (wasm_top == 0) wasm_top = wasm_align((usize)&__heap_base);
   usize start = wasm_top;
   usize end = start + wasm_align(n ? n : 1);
@@ -69,6 +71,13 @@ EXPORT(wasm_mark) usize wasm_mark(void) {
 }
 EXPORT(wasm_release) void wasm_release(usize mark) { wasm_top = mark; }
 
-#define NEW(type, count) ((type *)wasm_alloc(sizeof(type) * (usize)(count)))
+/* count items of size bytes each. The result is 0 when size * count does not fit in usize: the product never wraps to a small
+ * block. The count is 64 bits wide, so a negative count or a count above 2^32 is refused, not cut. */
+static inline void *wasm_alloc_array(usize size, u64 count) {
+  if (size != 0 && count > (u64)((usize)-1 / size)) return 0;
+  return wasm_alloc(size * (usize)count);
+}
+
+#define NEW(type, count) ((type *)wasm_alloc_array(sizeof(type), (u64)(i64)(count)))
 
 #endif

@@ -35,6 +35,7 @@ The kernels are freestanding C. clang 18 compiles them to `wasm32`. lld links th
 | C and not AssemblyScript | It needs Node and npm packages at build time. |
 | No libc | The kernels use no `malloc`, no `printf` and no `libm`, and `rt.h` has an arena allocator. The memory of an instance never shrinks. A kernel therefore releases the arena of each step when the step ends, with `wasm_mark` / `wasm_release`. `layered.c` does this for each column of the row assignment and of the barycenter sort. This keeps a 2,000-object graph near the size of one pass (about 27 MB for a 1,500-object column), instead of hundreds of MB. |
 | Host Math | `sin`, `cos`, `pow` and similar functions are imports from JavaScript `Math`. A kernel then gives the same doubles as the JavaScript code. |
+| No size wrap | In wasm32, a size is 32 bits wide, so `sizeof(type) * count` can wrap to a small number. `NEW(type, count)` of `rt.h` refuses a count whose product does not fit, and a negative count: the result is 0, as for a full memory. `wasm_alloc()` also refuses a size whose alignment wraps. `hl_run()` of `highlight.c` lexes at most 16 Mi code units. A longer text gets `-1`, and the page uses the JavaScript reference. `tests/fuzz/wasm_native_rt.h` has the same bound for the native builds. |
 
 The flags are in `tools/build_wasm.py`. They strip all debug data, producer names and paths. The same sources and the same compiler give the same bytes.
 

@@ -81,6 +81,13 @@ static inline void wasm_release(usize mark) {
   }
 }
 
-#define NEW(type, count) ((type *)wasm_alloc(sizeof(type) * (usize)(count)))
+/* The NEW() of rt.h: the product of the size and the count never wraps. The bound is the address space of wasm32 (2^32 - 1), so a
+ * native build refuses what the browser refuses. */
+static inline void *wasm_alloc_array(usize size, u64 count) {
+  if (size != 0 && count > (u64)(0xffffffffu / size)) return 0;
+  return wasm_alloc(size * (usize)count);
+}
+
+#define NEW(type, count) ((type *)wasm_alloc_array(sizeof(type), (u64)(i64)(count)))
 
 #endif
