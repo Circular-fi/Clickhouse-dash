@@ -647,6 +647,23 @@ void test_access_block() {
   CHECK(contains(spaced, "access.pdp.token (file:" + dir + "/pdp-token-space) must be 1 to 4096 visible ASCII characters"));
   CHECK(!contains(spaced, "two words"));
   CHECK(contains(error_of("access { mode = \"open\" }\naccess { mode = \"open\" }"), "block access must appear exactly once"));
+
+  // The audience and the name of each host are ids for the PDP (docs/access.md, "Hosts"): 1 to 256 bytes of UTF-8.
+  CHECK(contains(error_of(authzen(" issuer = \"i\"\n audience = \"" + std::string(257, 'a') + "\"\n public_keys_file = \"" + dir + "/identity.pem\"", pdp)),
+                 "access.identity.audience is required: the name of this server in the aud of the tokens, 1 to 256 bytes of UTF-8"));
+  const auto with_host = [&](const std::string& name) {
+    return authzen(identity, pdp) + "clickhouse {\n host {\n name = \"" + name +
+           "\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n }\n}\n";
+  };
+  const std::string long_name = error_of(with_host(std::string(300, 'h')), false);
+  CHECK(contains(long_name, "clickhouse.host.name and access.mode = \"authzen\" contradict each other"));
+  CHECK(contains(long_name, "(300 bytes)"));
+  CHECK(contains(error_of(with_host("caf\xFF"), false), "contradict each other"));
+  CHECK_EQ(error_of(with_host("caf\xC3\xA9-" + std::string(250, 'h')), false), std::string(""));
+  // The open mode keeps the rule of 1.0.8: any length.
+  CHECK_EQ(error_of("access { mode = \"open\" }\nclickhouse {\n host {\n name = \"" + std::string(300, 'h') +
+                    "\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n }\n}\n", false),
+           std::string(""));
 }
 
 void test_mcp_key_secrets() {

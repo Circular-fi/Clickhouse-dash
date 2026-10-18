@@ -1,11 +1,13 @@
 #include "config.hpp"
 
+#include "access_resource.hpp"
 #include "access_settings.hpp"
 
 #include "ch_uri.hpp"
 #include "config_schema.hpp"
 #include "config_secret.hpp"
 #include "hcl.hpp"
+#include "json_text.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_scope.hpp"
@@ -1011,8 +1013,9 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   out.issuer = *issuer;
   cfg.value_sources["access.identity.issuer"] = "file";
   const auto audience = string_attr(*identity, "audience", "access.identity");
-  if (!audience || audience->empty() || audience->size() > 256 || !text_without_control(*audience)) {
-    throw std::runtime_error("access.identity.audience is required: the name of this server in the aud of the tokens, 1 to 256 bytes without a control character" +
+  // The audience is also the id of the service resource: 1 to 256 bytes of UTF-8 without a control character (contract 11.4).
+  if (!audience || !access_valid_id(*audience)) {
+    throw std::runtime_error("access.identity.audience is required: the name of this server in the aud of the tokens, 1 to 256 bytes of UTF-8 without a control character" +
                              (audience ? ", not \"" + *audience + "\"" : std::string()));
   }
   out.audience = *audience;
@@ -1054,6 +1057,15 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   cfg.value_sources["access.pdp.token"] = token.source;
   duration(*pdp, "access.pdp", "timeout", 10, 60 * 1000, &out.pdp_timeout_ms);
   duration(*pdp, "access.pdp", "cache_ttl", 0, 3600 * 1000, &out.pdp_cache_ttl_ms);
+
+  // The name of each host is the id of a host resource for the PDP (docs/access.md, "Hosts"): 1 to 256 bytes of UTF-8 without a control
+  // character (contract 11.4). A longer name, or a name that is not UTF-8, contradicts the authzen mode.
+  for (const auto& host : cfg.hosts) {
+    if (access_valid_id(host.id)) continue;
+    throw std::runtime_error("clickhouse.host.name and access.mode = \"authzen\" contradict each other: the name is the id of a host for the PDP and must "
+                             "be 1 to 256 bytes of UTF-8 without a control character, not \"" + utf8_with_replacement(host.id.substr(0, 300)) + "\" (" +
+                             std::to_string(host.id.size()) + " bytes)");
+  }
 }
 
 // A label is the name of an mcp_key block only (mcp_key "name" { }).

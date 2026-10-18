@@ -238,7 +238,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 
 | Key | Type | Default | Range | Use |
 |---|---|---|---|---|
-| `name` | text |  | 1 or more bytes, no control character | The id of the host. It is required and each host has a different one. The pages and the API name the host with it. |
+| `name` | text |  | 1 or more bytes, no control character; 1 to 256 bytes of UTF-8 when access.mode = "authzen" | The id of the host. It is required and each host has a different one. The pages and the API name the host with it. In the authzen mode, it is also the id of the host resource for the PDP (docs/access.md). |
 | `label` | text |  |  | The name that the pages show. Default: the value of name. |
 | `runner_uri` | text |  | clickhouse://user@host[:port][?parameters] | The URI of the account that runs the queries of the people (the runner). It is required. It never holds a password: use runner_password_env, runner_password_file, password_env or password_file. The parameters are compression, secure, verify, ca, ca_dir and sni. |
 | `system_uri` | text |  | clickhouse://user@host[:port][?parameters] | The URI of the system account. The backend uses it for its own reads. It is required. It never holds a password: use system_password_env, system_password_file, password_env or password_file. |
@@ -377,7 +377,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 |---|---|---|---|---|
 | `header` | text | `X-Identity-Token` | an HTTP header name, not Cookie or Authorization | The request header that carries the identity token. The token is never read from a cookie or from a query parameter. |
 | `issuer` | text |  | 1 to 1024 bytes, no control character | Required with authzen: the value that the iss claim of a token must have. |
-| `audience` | text |  | 1 to 256 bytes, no control character | Required with authzen: the name of this server. The aud claim of a token must contain it. It is also the id of the service resource that ChDash sends to the PDP, and the server of GET /.well-known/access-actions. |
+| `audience` | text |  | 1 to 256 bytes of UTF-8, no control character | Required with authzen: the name of this server. The aud claim of a token must contain it. It is also the id of the service resource that ChDash sends to the PDP, and the server of GET /.well-known/access-actions. |
 | `public_keys` | text |  | PEM, 1 to 16 SubjectPublicKeyInfo blocks | The public keys of the issuer: Ed25519 (EdDSA) or P-256 with an uncompressed point (ES256). A token signed by one of them is accepted. Give exactly one of public_keys, public_keys_env and public_keys_file. |
 | `public_keys_env` | environment variable name |  | letters, digits and _ | The variable that holds the value of public_keys. Give exactly one of public_keys, public_keys_env and public_keys_file. |
 | `public_keys_file` | file path |  |  | The file that holds the value of public_keys, without its last line end. Give exactly one of public_keys, public_keys_env and public_keys_file. |
