@@ -87,6 +87,16 @@ void write_action(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_vie
   w.EndObject();
 }
 
+// The context of a question: {"match": "subtree"} for the navigation, else empty (the PDP takes "node").
+void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match) {
+  w.StartObject();
+  if (match == AccessMatch::Subtree) {
+    w.Key("match");
+    w.String("subtree");
+  }
+  w.EndObject();
+}
+
 // The reason of a false decision that tells the server that the PDP does not know the subject (contract 11.5).
 constexpr const char* kUnknownSubject = "unknown_subject";
 
@@ -108,6 +118,8 @@ bool decision_of(const rapidjson::Value& value, PdpAnswer* answer) {
 
 } // namespace
 
+const char* access_match_name(AccessMatch match) { return match == AccessMatch::Subtree ? "subtree" : "node"; }
+
 std::unique_ptr<PdpTransport> make_http_pdp_transport(std::string host, int port, std::string base_path) {
   return std::make_unique<HttpPdpTransport>(std::move(host), port, std::move(base_path));
 }
@@ -127,8 +139,7 @@ std::string PdpClient::request_body(const std::string& subject, const std::vecto
     w.Key("resource");
     write_resource(w, questions.front().resource);
     w.Key("context");
-    w.StartObject();
-    w.EndObject();
+    write_context(w, questions.front().match);
   } else {
     // AuthZEN 1.0, 7.1: the subject at the top is the default of each evaluation.
     w.Key("evaluations");
@@ -139,6 +150,11 @@ std::string PdpClient::request_body(const std::string& subject, const std::vecto
       write_action(w, question.action);
       w.Key("resource");
       write_resource(w, question.resource);
+      // AuthZEN 1.0, 7.1: the context of an item replaces the default. Only a question of the navigation has one.
+      if (question.match == AccessMatch::Subtree) {
+        w.Key("context");
+        write_context(w, question.match);
+      }
       w.EndObject();
     }
     w.EndArray();
@@ -174,10 +190,12 @@ std::string PdpClient::cache_key(const std::string& subject, const AccessQuestio
   // The path holds the whole chain with encoded ids: two resources with the same type and id under two hosts never share an entry.
   const std::string path = access_resource_path(question.resource);
   std::string key;
-  key.reserve(subject.size() + question.action.size() + path.size() + 2);
+  const char* match = access_match_name(question.match);
+  key.reserve(subject.size() + question.action.size() + path.size() + 10);
   key.append(subject).push_back('\x1f');
   key.append(question.action).push_back('\x1f');
-  key.append(path);
+  key.append(path).push_back('\x1f');
+  key.append(match);
   return key;
 }
 
@@ -298,6 +316,7 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
                {"subject", subject},
                {"action", questions[i].action},
                {"resource", resource},
+               {"match", access_match_name(questions[i].match)},
                {"decision", out[i].allowed},
                {"source", out[i].source},
                {"reason", out[i].unknown_subject ? kUnknownSubject : ""}});

@@ -55,11 +55,11 @@ std::vector<AccessQuestion> access_navigation_questions(const std::string& servi
                                                         const std::string& database) {
   std::vector<AccessQuestion> out;
   for (const AccessAction& action : access_actions()) {
-    if (!action.host) out.push_back(AccessQuestion{action.name, access_service_resource(service_id)});
+    if (!action.host) out.push_back(AccessQuestion{action.name, access_service_resource(service_id), AccessMatch::Subtree});
   }
   for (const auto& host : hosts) {
     for (const AccessAction& action : access_actions()) {
-      if (action.host) out.push_back(AccessQuestion{action.name, access_host_resource(service_id, host)});
+      if (action.host) out.push_back(AccessQuestion{action.name, access_host_resource(service_id, host), AccessMatch::Subtree});
     }
   }
   if (!database.empty()) {

@@ -30,17 +30,18 @@ const AccessPage* access_page(std::string_view name);
 // The page of a shell file ("traces.html" is observability), or null for a file that is not a shell of a page.
 const AccessPage* access_page_of_shell(std::string_view shell);
 
-// The questions of one render, in one batch (docs/access.md, "Hosts"): each action that takes no host on the service, each action that
-// takes a host on each host of `hosts`, then explorer.read on the database `database` of each host when `database` is not empty (an
-// address of the Explorer that names a database). GET /api/version and GET /api/hosts ask the same questions without the database, so
-// the cache of the PDP serves them all.
+// The questions of one render, in one batch (docs/access.md, "Hidden hosts"): each action that takes no host on the service, each action
+// that takes a host on each host of `hosts`, then explorer.read on the database `database` of each host when `database` is not empty
+// (an address of the Explorer that names a database). The questions on the service and on the hosts have the match "subtree": a grant
+// below a host shows the host and the page. They only show or hide the navigation; each route asks again with "node". GET /api/version
+// and GET /api/hosts ask the same questions without the database, so the cache of the PDP serves them all.
 std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::vector<std::string>& hosts,
                                                         const std::string& database);
 // The pages that the decisions of access_navigation_questions() allow: a page whose actions are true on the service or on one host. The
 // decision on a database never adds a page: it lets the human open an address of the Explorer in that database only.
 std::set<std::string> access_navigation_pages(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions);
-// The hosts that the decisions of access_navigation_questions() show: a host with one true decision on the host itself. A decision on a
-// database never shows its host, and an action that takes no host shows no host.
+// The hosts that the decisions of access_navigation_questions() show: a host with one true decision on the host itself (with the match
+// "subtree", a grant on a database of the host gives true). An action that takes no host shows no host.
 std::set<std::string> access_visible_hosts(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions);
 // For each action, true when one decision of the action is true on the service or on a host (the "actions" of GET /api/version).
 std::vector<std::pair<std::string, bool>> access_action_summary(const std::vector<AccessQuestion>& questions,

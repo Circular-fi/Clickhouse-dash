@@ -245,7 +245,7 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
 
   if (rule.body && !body_read) {
     // The body is not read yet. A run or an export first needs its actions on one host at least (or on the service): a human without
-    // them gets the 403 before the server reads a body. The questions are those of the hosts (GET /api/hosts), so the cache answers.
+    // them gets the 403 before the server reads a body. These questions have the match "node": a grant below a host lets no run.
     if (rule.kind != AccessRuleKind::Action) {
       std::vector<const char*> actions;
       if (rule.kind == AccessRuleKind::Export) actions.push_back("query.export");

@@ -448,8 +448,8 @@ private:
   std::vector<AccessDecision> access_decide(const std::vector<AccessQuestion>& questions);
   // The batch of the hosts (access_navigation_questions): `questions` receives the questions, the result holds their decisions.
   std::vector<AccessDecision> access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database);
-  // The hosts that the subject of this request can see: the hosts with one action at least (one batch, cached). Return nullopt when
-  // no check applies (the open mode, a call of MCP): every host is visible.
+  // The hosts that the subject of this request can see: the hosts with one action at least, on the host or below it (one batch with
+  // the match "subtree", cached). Return nullopt when no check applies (the open mode, a call of MCP): every host is visible.
   std::optional<std::set<std::string>> access_visible_hosts();
   // Return the decision of `action` on the database `database` of the host `host_id` (access_resource_of). Return false after the
   // function writes the 403. Return true when no check applies, for example in the open mode or for a call of MCP.

@@ -6,10 +6,12 @@
 //   - sends Authorization: Bearer <token>, X-Request-ID and a traceparent;
 //   - fails closed: no answer before the timeout, a status that is not 200 or a body that is not an answer gives false;
 //   - reads the reason "unknown_subject" of a false decision (contract 11.5): the PDP does not know the subject;
-//   - sends the chain of each resource (properties.ancestors, access_resource.hpp) after the type and the id;
-//   - keeps an answer of the PDP for cache_ttl at most (subject, action and the path of the resource are the key), never a failure;
+//   - sends the chain of each resource (properties.ancestors, access_resource.hpp) after the type and the id, and
+//     "context": {"match": "subtree"} for a question of the navigation (AccessMatch);
+//   - keeps an answer of the PDP for cache_ttl at most (subject, action, the path of the resource and the match are the key), never a
+//     failure;
 //   - bounds the cache by a count of entries and by a count of bytes (cache_entries and cache_bytes);
-//   - writes one log line access.decision for each decision (subject, action, the path of the resource, decision, source).
+//   - writes one log line access.decision for each decision (subject, action, the path of the resource, match, decision, source).
 
 #include "access_resource.hpp"
 
@@ -25,10 +27,27 @@
 
 namespace chdash {
 
+// How the PDP matches a grant with the resource of a question (contract 11.5, addendum 1 of the format of 2026-10-18).
+enum class AccessMatch {
+  // The default: a grant on the resource or on a node above it. Every operation asks with this match on its exact resource.
+  Node,
+  // Also a grant on a node below the resource. ChDash uses it only to show or hide an element of the navigation (a host, a page),
+  // never to let an operation run.
+  Subtree,
+};
+
 struct AccessQuestion {
+  AccessQuestion() = default;
+  AccessQuestion(std::string action_name, AccessResource on, AccessMatch how = AccessMatch::Node)
+      : action(std::move(action_name)), resource(std::move(on)), match(how) {}
+
   std::string action;
   AccessResource resource;
+  AccessMatch match = AccessMatch::Node;
 };
+
+// "node" or "subtree".
+const char* access_match_name(AccessMatch match);
 
 struct AccessDecision {
   bool allowed = false;

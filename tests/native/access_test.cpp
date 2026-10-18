@@ -423,6 +423,18 @@ void test_pdp_body_and_answer() {
   CHECK(database["properties"]["ancestors"][0]["id"].GetString() == std::string("db"));
   CHECK(database["properties"]["ancestors"][1]["type"].GetString() == std::string("host"));
   CHECK(database["properties"]["ancestors"][1]["id"].GetString() == std::string("prod"));
+  // A question of the navigation has the match "subtree" in the context of its item; the others have no context (the default "node").
+  const std::string three = PdpClient::request_body(
+      "alice", {AccessQuestion{"explorer.read", access_host_resource("db", "prod"), AccessMatch::Subtree},
+                AccessQuestion{"explorer.read", access_host_resource("db", "prod")}});
+  rapidjson::Document batch;
+  batch.Parse(three.c_str(), three.size());
+  CHECK(batch["evaluations"][0]["context"]["match"].GetString() == std::string("subtree"));
+  CHECK(!batch["evaluations"][1].HasMember("context"));
+  const std::string single = PdpClient::request_body("alice", {AccessQuestion{"explorer.read", access_host_resource("db", "prod"), AccessMatch::Subtree}});
+  rapidjson::Document one_subtree;
+  one_subtree.Parse(single.c_str(), single.size());
+  CHECK(one_subtree["context"]["match"].GetString() == std::string("subtree"));
   // A host names the service.
   const auto& host = doc["evaluations"][1]["resource"];
   CHECK(host["type"].GetString() == std::string("host") && host["id"].GetString() == std::string("prod"));
@@ -646,10 +658,21 @@ struct GrantTransport : PdpTransport {
     return out;
   }
 
-  std::string answer(const std::string& subject, const rapidjson::Value& item) const {
+  // The match of an item: its own context, else the default context of the batch, else "node".
+  static std::string match_of(const rapidjson::Value& item, const rapidjson::Value* defaults) {
+    for (const rapidjson::Value* value : {&item, defaults}) {
+      if (value && value->HasMember("context") && (*value)["context"].HasMember("match")) return (*value)["context"]["match"].GetString();
+    }
+    return "node";
+  }
+
+  std::string answer(const std::string& subject, const rapidjson::Value& item, const rapidjson::Value* defaults) const {
+    const std::string match = match_of(item, defaults);
+    if (match != "node" && match != "subtree") return R"({"decision":false,"context":{"reason":"invalid_request"}})";
     const auto it = grants.find(subject);
     const std::vector<std::string> none;
-    const auto decision = rules.decide(it == grants.end() ? none : it->second, item["action"]["name"].GetString(), resource_of(item["resource"]));
+    const auto decision = rules.decide(it == grants.end() ? none : it->second, item["action"]["name"].GetString(), resource_of(item["resource"]),
+                                       match == "subtree");
     if (decision.invalid_resource) return R"({"decision":false,"context":{"reason":"invalid_resource"}})";
     return decision.decision ? R"({"decision":true})" : R"({"decision":false})";
   }
@@ -660,13 +683,13 @@ struct GrantTransport : PdpTransport {
     rapidjson::Document doc;
     doc.Parse(body.c_str(), body.size());
     const std::string subject = doc["subject"]["id"].GetString();
-    if (path == "/access/v1/evaluation") return ok(answer(subject, doc));
+    if (path == "/access/v1/evaluation") return ok(answer(subject, doc, nullptr));
     std::string out = R"({"evaluations":[)";
     bool first = true;
     for (const auto& item : doc["evaluations"].GetArray()) {
       if (!first) out += ",";
       first = false;
-      out += answer(subject, item);
+      out += answer(subject, item, &doc);
     }
     return ok(out + "]}");
   }
@@ -706,10 +729,12 @@ void test_host_hierarchy() {
     CHECK_EQ(name + (value ? " yes" : " no"), name + (name == "explorer.read" || name == "query.run.read" ? " yes" : " no"));
   }
 
-  // A grant on one database of one host: no host shows, no page shows, and only that database of that host is allowed.
+  // A grant on one database of one host: the batch of the navigation (match "subtree") shows that host and the pages of the actions
+  // (addendum 1). Each operation asks with "node": only that database of that host is allowed, never the host itself.
   std::tie(questions, decisions) = batch("dbonly", "sales");
-  CHECK(access_visible_hosts(questions, decisions).empty());
-  CHECK(access_navigation_pages(questions, decisions).empty());
+  CHECK(access_visible_hosts(questions, decisions) == (std::set<std::string>{"other"}));
+  CHECK(access_navigation_pages(questions, decisions) == (std::set<std::string>{"query", "explorer"}));
+  for (const auto& q : questions) CHECK(q.match == (q.resource.type == "database" ? AccessMatch::Node : AccessMatch::Subtree));
   bool on_other = false;
   bool on_local = false;
   for (size_t i = 0; i < questions.size(); ++i) {
@@ -721,6 +746,17 @@ void test_host_hierarchy() {
   CHECK(allowed("dbonly", "query.run.read", access_database_resource("db", "other", "sales")));
   CHECK(!allowed("dbonly", "query.run.read", access_database_resource("db", "local", "sales")));
   CHECK(!allowed("dbonly", "query.run.read", access_host_resource("db", "other")));
+  CHECK(!allowed("dbonly", "explorer.read", access_database_resource("db", "other", "billing")));
+  const auto subtree = [&](const std::string& subject, const char* action, const AccessResource& resource) {
+    return client.decide(subject, {AccessQuestion{action, resource, AccessMatch::Subtree}}, PdpCallContext{})[0].allowed;
+  };
+  CHECK(subtree("dbonly", "explorer.read", access_host_resource("db", "other")));
+  CHECK(!subtree("dbonly", "explorer.read", access_host_resource("db", "local")));
+  CHECK(subtree("dbonly", "explorer.read", access_service_resource("db")));
+  // The two matches are two entries of the cache: the answer "subtree" never answers a question "node".
+  CHECK(!allowed("dbonly", "explorer.read", access_host_resource("db", "other")));
+  // The match "subtree" does not cross to a sibling: a grant on the host local says nothing of the host other.
+  CHECK(!subtree("hosta", "explorer.read", access_host_resource("db", "other")));
 
   // A grant on the service covers every host and every database.
   std::tie(questions, decisions) = batch("admin", "");

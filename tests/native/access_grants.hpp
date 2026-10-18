@@ -2,7 +2,8 @@
 
 // A PDP of the tests with the rule of the grants (contract 11.4, docs/access.md "Hosts"). A grant is "<action>@<path>", where the path
 // is "service:<id>" and then "/<type>:<encoded id>" for each node below the service (0 to 4 nodes). A grant covers the resource that it
-// names and every resource below it: the path of the grant is a prefix of the path of the question, segment by segment.
+// names and every resource below it: the path of the grant is a prefix of the path of the question, segment by segment. With the match
+// "subtree" (addendum 1), a grant below the resource also gives true: the path of the question is a prefix of the path of the grant.
 //
 // The chain of a question (its ancestors and the resource) must start with the service of the client and follow the declared parents.
 // A question on a type other than the service without ancestors is read as [service] + resource (the one-level form of 1.0.8). It is
@@ -27,7 +28,8 @@ public:
       : service_(std::move(service)), parents_(std::move(parents)) {}
 
   // grants: "<action>@<path>" for one subject.
-  GrantAnswer decide(const std::vector<std::string>& grants, const std::string& action, const chdash::AccessResource& resource) const {
+  GrantAnswer decide(const std::vector<std::string>& grants, const std::string& action, const chdash::AccessResource& resource,
+                     bool subtree = false) const {
     GrantAnswer out;
     std::vector<chdash::AccessNode> chain = resource.ancestors;
     if (resource.type != "service" && chain.empty()) chain.push_back(chdash::AccessNode{"service", service_});
@@ -49,9 +51,11 @@ public:
       const size_t at = grant.find('@');
       if (at == std::string::npos || grant.substr(0, at) != action) continue;
       const std::vector<std::string> granted = split(grant.substr(at + 1));
-      if (granted.size() > segments.size()) continue;
+      // The shorter path must be the start of the longer one. A longer grant counts only with the match "subtree".
+      if (granted.size() > segments.size() && !subtree) continue;
+      const size_t common = granted.size() < segments.size() ? granted.size() : segments.size();
       bool prefix = true;
-      for (size_t i = 0; i < granted.size() && prefix; ++i) prefix = granted[i] == segments[i];
+      for (size_t i = 0; i < common && prefix; ++i) prefix = granted[i] == segments[i];
       if (prefix) out.decision = true;
     }
     return out;
