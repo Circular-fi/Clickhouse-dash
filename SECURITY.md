@@ -13,7 +13,7 @@ Older snapshots may not receive fixes.
 
 ChDash has no login page. The configuration requires an `access` block. The `access` block selects the model ([docs/access.md](docs/access.md)):
 
-- `mode = "authzen"`: An access gateway authenticates each human. It gives ChDash a signed identity token (EdDSA or ES256). ChDash verifies the token on each request to the pages and to the API. Without a valid token, ChDash returns `401`. ChDash asks an AuthZEN PDP for each action. When the answer is `false`, or when the PDP does not answer, ChDash returns `403`. A run has `readonly = 1` if the user does not have `query.run.write`.
+- `mode = "authzen"`: An access gateway authenticates each human. It gives ChDash a signed identity token (EdDSA or ES256). ChDash verifies the token on each request to the pages and to the API. Without a valid token, ChDash returns `401`. ChDash asks an AuthZEN PDP for each action, on the service, on the host or on the database of the request. When the answer is `false`, or when the PDP does not answer, ChDash returns `403`. A run has `readonly = 1` if the user does not have `query.run.write` on its host. The pages show only the hosts on which the user holds an action. A request for another host gets the answer of a host that does not exist.
 - `mode = "open"`: Everyone who can reach the port has the ClickHouse rights of the configured accounts. ChDash writes a warning at each start. Use this mode only for a server that stands alone on a closed network and serves a trusted team.
 
 ### Threat model
@@ -45,7 +45,7 @@ ChDash has no login page. The configuration requires an `access` block. The `acc
 - A request body has a size limit. A JSON body has a depth limit. The SQL formatter has a depth limit and a time limit.
 - The identifiers that act as a capability (`query_id`, `export_id`) are created by the system random source. The signing secret of the tokens and the MCP secrets also come from the system random source.
 - The log never holds row data, a password, a token or a `query_id`. The URIs in the log and in `/metrics` have no password.
-- In the authzen mode, ChDash checks the identity token of each request to the pages and to the API. It checks the signature, `iss`, `aud`, `exp` and the life of the token. ChDash checks the action of each route with the PDP. A PDP error denies the action (fail closed). The log holds each decision (`access.decision`). It also holds the subject of each request (`http.request`).
+- In the authzen mode, ChDash checks the identity token of each request to the pages and to the API. It checks the signature, `iss`, `aud`, `exp` and the life of the token. ChDash checks the action of each route with the PDP. The question names the host and the database of the request, so a grant on one host never covers another host. A PDP error denies the action (fail closed). The log holds each decision (`access.decision`). It also holds the subject of each request (`http.request`).
 
 Refer to [docs/operations.md](docs/operations.md) for the details. The details cover the headers, the guard, the probes, the shutdown, the log and the metrics.
 

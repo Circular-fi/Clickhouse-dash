@@ -42,7 +42,7 @@ access {
 | `mode` | (required) | `authzen`: ChDash obeys all of this document. `open`: ChDash checks no identity and no permission. |
 | `identity.header` | `X-Identity-Token` | The request header that carries the token. `Cookie`, `Authorization`, `Host`, `Content-Type` and `Content-Length` are refused. |
 | `identity.issuer` | (required) | The value that the `iss` claim must have. |
-| `identity.audience` | (required) | The name of this server. The `aud` claim must contain it. It is also the `id` of the `service` resource and the `server` of the list of actions. |
+| `identity.audience` | (required) | The name of this server: 1 to 256 bytes of UTF-8, no control character. The `aud` claim must contain it. It is also the `id` of the `service` resource and the `server` of the list of actions. |
 | `identity.public_keys` | (required) | The public keys of the issuer in PEM: 1 to 16 `-----BEGIN PUBLIC KEY-----` blocks. Each key is Ed25519 (`EdDSA`) or P-256 with an uncompressed point (`ES256`). It has the forms `public_keys`, `public_keys_env` and `public_keys_file`. Give exactly one. |
 | `identity.max_age` | `5m` | The longest life of a token (`exp - iat`). From `1s` to `24h`. |
 | `pdp.url` | (required) | The base URL of the PDP: `http://host[:port][/path]`. It has the forms `url`, `url_env` and `url_file`. Give exactly one. |
@@ -58,6 +58,7 @@ These items stop the start:
 - A PEM text that does not hold only Ed25519 or P-256 public keys, or a P-256 point that is not on the curve.
 - An `https` URL. ChDash has no TLS client (refer to [Deviation from AuthZEN: no TLS](#deviation-from-authzen-no-tls)).
 - A token of the PDP that holds a space, a control character or more than 4096 bytes. The error does not show the token.
+- With `mode = "authzen"`, a `clickhouse.host` name that has more than 256 bytes or is not UTF-8. The name is the id of a host for the PDP (refer to [Resources and hosts](#resources-and-hosts)).
 
 With `mode = "open"`, ChDash writes the warning `config.warning` at each start. Use the open mode only for a server alone on a closed network.
 
@@ -94,25 +95,29 @@ ChDash publishes its actions at `GET /.well-known/access-actions`, without a tok
 ```json
 {
   "server": "db",
+  "resource_types": [
+    { "name": "host",     "parent": "service", "description": "One ClickHouse server of the configuration: the name of its clickhouse.host block." },
+    { "name": "database", "parent": "host",    "description": "One database of a host." }
+  ],
   "actions": [
-    { "name": "query.run.read", "resource_types": ["service", "database"], "description": "..." }
+    { "name": "query.run.read", "resource_types": ["service", "host", "database"], "description": "..." }
   ]
 }
 ```
 
-`server` is `identity.audience` (`chdash` in the open mode). The list does not contain `access`.
+`server` is `identity.audience` (`chdash` in the open mode). The list does not contain `access`. The top-level `resource_types` gives the tree under the service (refer to [Resources and hosts](#resources-and-hosts)). The `resource_types` of an action gives the types on which a grant for this action is valid.
 
 | Action | Resource types | Routes |
 |---|---|---|
-| `query.run.read` | `service`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta` |
-| `query.run.write` | `service`, `database` | The same routes. Without it, the statements of a run run with `readonly = 1`. |
-| `query.export` | `service`, `database` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. |
+| `query.run.read` | `service`, `host`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta` |
+| `query.run.write` | `service`, `host`, `database` | The same routes. Without it, the statements of a run run with `readonly = 1`. |
+| `query.export` | `service`, `host` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. |
 | `library.read` | `service` | `GET /api/query-library...` |
 | `library.write` | `service` | `POST`, `PATCH` and `DELETE /api/query-library...` |
-| `explorer.read` | `service`, `database` | `/api/explorer/...`, except `/api/explorer/ops/...` |
-| `system.read` | `service` | `/api/system/...`, `/api/explorer/ops/...` |
-| `system.kill_query` | `service` | None now. ChDash has no control that stops the queries of other users. The action is reserved for it. |
-| `observability.read` | `service` | `/api/traces/...`, `/api/logs/...`, `/api/metrics/...` |
+| `explorer.read` | `service`, `host`, `database` | `/api/explorer/...`, except `/api/explorer/ops/...` |
+| `system.read` | `service`, `host` | `/api/system/...`, `/api/explorer/ops/...` |
+| `system.kill_query` | `service`, `host` | None now. ChDash has no control that stops the queries of other users. The action is reserved for it. |
+| `observability.read` | `service`, `host` | `/api/traces/...`, `/api/logs/...`, `/api/metrics/...` |
 | `mcp.keys.read` | `service` | `GET /api/mcp/keys`, `GET /api/mcp/keys/<id>/access`, `GET /api/mcp/access` |
 | `mcp.keys.write` | `service` | `POST /api/mcp/keys`, `DELETE /api/mcp/keys/<id>`, `POST /api/mcp/keys/<id>/adopt` |
 | `mcp.usage.read` | `service` | `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET /api/mcp/keys/<id>/usage`, `GET /api/mcp/keys/<id>/cost` |
@@ -121,7 +126,78 @@ The shell of each page needs the action of its page (refer to [Navigation](#navi
 
 A route that is not in this table is refused with `403` and the action `unknown` (fail closed), and the log has the line `access.no_rule`. A path that has no route gets `404`.
 
-When you remove or rename an action, write the change in the release notes.
+When you remove or rename an action, or change its resource types, write the change in the release notes.
+
+## Resources and hosts
+
+ChDash 1.1.0 and later put each resource in a tree under the service (contract 11.4, decision of 2026-10-18):
+
+```text
+service (identity.audience)
+└── host (the name of a clickhouse.host block, for example "local")
+    └── database (one database of that host)
+```
+
+### Questions
+
+A question names the most specific resource. `properties.ancestors` gives the chain from the service to the parent of the resource:
+
+```json
+"resource": {
+  "type": "database",
+  "id": "analytics",
+  "properties": { "ancestors": [ { "type": "service", "id": "db" }, { "type": "host", "id": "prod" } ] }
+}
+```
+
+- A question on the service has no `ancestors`.
+- A question on a host has the ancestors `[service]`.
+- A question on a database has the ancestors `[service, host]`.
+
+### Grants
+
+The PDP keeps the grants (for example the portal). A grant has the form `<action> on service:<id>[/<type>:<id>]...`. Each id is percent-encoded (RFC 3986). A grant covers the resource that it names and every resource below it. Thus a grant on the service covers every host and every database, and a grant on a host covers every database of that host. ChDash does not read the grants. It sends the chain of each question, and the PDP applies the rule.
+
+### The resource of each action
+
+| Action | Resource of the question | Where ChDash finds the host and the database |
+|---|---|---|
+| `query.run.read`, `query.run.write` | The host of the run. The database for `GET /api/meta` with `database`. | `host_id` of the body (`POST`) or of the query (`GET`). The parameter `database` of `GET /api/meta`. |
+| `query.export` | The host of the export. | `host_id` of the body. |
+| `explorer.read` | The host, or the database when the request names one. | The parameters `host_id` and `database`. The fields `host_id` and `database` of the body of `POST /api/explorer/table/data`. |
+| `system.read` | The host. | The parameter `host_id`. |
+| `system.kill_query` | The host (no route yet). | None. |
+| `observability.read` | The host. | The parameter `host_id`. |
+| `library.read`, `library.write` | The service. | None: the query library is global. |
+| `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read` | The service. | None: the MCP keys and their usage are global. |
+
+Rules:
+
+- A request without `host_id` names the only host of a configuration that has one host, as the routes do.
+- A `host_id` that is not a host of the configuration makes a question on the service. Thus the PDP never receives a host name that the client chose.
+- A `database` that no grant can name makes a question on its host. Such a name is empty, has more than 256 bytes, is not UTF-8 or has a control character. Only a grant on the host or on the service can cover it.
+- `query.export` does not take `database` since 1.1.0. ChDash 1.0.8 never asked it for a database.
+- For a route that has the host in its JSON body, ChDash reads the body first. Before it reads the body, a run needs `query.run.read` or `query.run.write` on one host at least. An export also needs `query.export` on one host at least. Without them, the answer is `403` before the body is read.
+
+### Hidden hosts
+
+ChDash shows only the hosts on which the human holds one action at least:
+
+- One batch asks each action that takes a host on each host of the configuration. The same batch asks each other action on the service. `GET /api/version`, `GET /api/hosts` and each page render ask the same questions, so the cache of the decisions serves them all.
+- A host is visible when one decision on the host itself is `true`. A grant on the service makes every host visible.
+- `GET /api/hosts`, `GET /api/hosts/stream` and the hosts of `GET /api/mcp/meta` list only the visible hosts. The stream keeps the hosts of its start.
+- The host picker of a page shows only the visible hosts on which the human holds one action of that page. For example, the System page needs `system.read` on the host.
+- A request for a hidden host gets the same answer as a request for a host that does not exist: `403` with the action of the route. The answer does not tell that the host exists.
+- `GET /api/health`, `/readyz` and `/metrics` still count all the hosts, as in 1.0.8. `/metrics` names the hosts: keep it on the internal network.
+- The global features still name the host of each item, as in 1.0.8: the folders and the queries of the query library, and the keys of the MCP pages.
+
+Limit: a grant on one database alone does not make its host visible. The batch asks the host, and the PDP answers `false` for the host. The routes of that database still work, for example an address of the Explorer in that database. To show the host in the picker, give one action on the host.
+
+### Upgrade from 1.0.8
+
+- A grant of one level on a database (`<action> on service:<id>/database:<name>`) covered that database on every host. Its chain does not follow the tree any more, so it covers nothing. Give the grant again on the database of one host: `<action> on service:<id>/host:<host>/database:<name>`.
+- A grant on the service does not change.
+- The PDP must read `properties.ancestors` and the top-level `resource_types` of the list of actions (contract 11.4). Update the PDP before you update ChDash. A PDP of the 1.0.8 format does not know the hosts: with it, only the grants on the service give the same decisions.
 
 ## Decisions
 
@@ -132,7 +208,7 @@ POST {pdp.url}/access/v1/evaluation
 {
   "subject":  { "type": "user", "id": "<sub of the identity token>" },
   "action":   { "name": "system.read" },
-  "resource": { "type": "service", "id": "<identity.audience>" },
+  "resource": { "type": "host", "id": "<host>", "properties": { "ancestors": [ { "type": "service", "id": "<identity.audience>" } ] } },
   "context":  { }
 }
 ```
@@ -141,26 +217,27 @@ For more than one question, ChDash sends one batch to `POST {pdp.url}/access/v1/
 
 Rules:
 
-- The resource is the service (`{"type": "service", "id": <audience>}`). For an action that also takes `database`, ChDash asks for the database when the request names one database: the parameter `database` of `GET /api/meta` and of the `/api/explorer/...` routes, and the field `database` of the body of `POST /api/explorer/table/data`. The Query page and the export name no database: for them ChDash asks for the service.
+- The resource of each question follows the table of [Resources and hosts](#resources-and-hosts). The Query page and the export name no database: for them ChDash asks for the host.
 - Each call has `Authorization: Bearer <pdp token>`, `X-Request-ID` (the request id of the request that asks) and a `traceparent`.
 - **Fail closed.** No answer before `pdp.timeout`, a connection error, a status that is not `200`, a body that is larger than 256 KiB, and a body that is not a valid answer give the decision `false` for each question of the call. ChDash writes the line `access.pdp_failed` and never keeps a failure.
 - A decision can have a `context` object. A `context` that is not an object makes the answer not valid. A `false` decision with `"context": {"reason": "unknown_subject"}` tells that the PDP does not know the subject (contract 11.5). ChDash uses this reason, and only this reason, to make an MCP key of that subject an orphan ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). Every other `false` decision means "no permission". ChDash ignores the other members of `context`.
-- ChDash keeps an answer of the PDP for `pdp.cache_ttl` at most, with its reason `unknown_subject`. The key is the subject, the action and the resource. A change of the policy applies after `cache_ttl` at most.
+- ChDash keeps an answer of the PDP for `pdp.cache_ttl` at most, with its reason `unknown_subject`. The key is the subject, the action and the path of the resource (the service, the host and the database). Thus the same database name on two hosts has two answers. A change of the policy applies after `cache_ttl` at most.
 - The cache holds 16384 answers and 8 MiB at most (the bytes of the keys, and a fixed part for each answer). The client chooses the `database` parameter, so a bound of bytes is necessary. When the cache is full, ChDash removes the expired answers. If the cache is still full, ChDash empties it. An answer that is larger than the whole budget is not kept. These bounds are not settings.
-- ChDash sends one batch for a page: `GET /api/version` holds the decisions of the subject for all the actions on the service (`features.access`). The questions that are in the cache do not go to the PDP.
+- ChDash sends one batch for a page: the batch of the hosts (refer to [Hidden hosts](#hidden-hosts)). `GET /api/version` gives the result in `features.access`. `actions` holds each action: `true` when the human may use it on the service or on one host. `hosts` holds the decisions of each visible host for the actions that take a host. The questions that are in the cache do not go to the PDP.
 
 ## Enforcement
 
 - ChDash checks the decision of each route before the route runs, also when the page does not show the action.
 - If the decision is `false`, ChDash sends status `403` with `{"error_code": "forbidden", "action": "<action>", "message": "The action <action> is not allowed."}`. The answer does not give the reason of the PDP.
-- A run without `query.run.write` runs each statement with `readonly = 1`. ClickHouse then refuses a statement that changes data or settings, also a `SETTINGS` clause and `SET`. ChDash sends `readonly = 1` also when it cannot read the settings profile of the runner (fail closed). A run needs `query.run.read` or `query.run.write`: without the two, the answer is `403` with the action `query.run.read`. The same rule applies to Deep Analyze and to the statements of an export. An export also needs `query.export`: without it, the answer is `403` with the action `query.export`.
-- The pages hide what the subject cannot do. `GET /api/version` gives the decisions in `features.access`, and the pages read them. The query library needs `library.read` (and `library.write` to change it). `GET /api/mcp/meta` says `can_manage = false` without `mcp.keys.write`, so the MCP page shows no New key and no Delete. The pages and their links follow the rules of [Navigation](#navigation).
+- A run without `query.run.write` on its host runs each statement with `readonly = 1`. For `GET /api/meta` with `database`, the decisions apply to that database of the host. ClickHouse then refuses a statement that changes data or settings, also a `SETTINGS` clause and `SET`. ChDash sends `readonly = 1` also when it cannot read the settings profile of the runner (fail closed). A run needs `query.run.read` or `query.run.write`: without the two, the answer is `403` with the action `query.run.read`. The same rule applies to Deep Analyze and to the statements of an export. An export also needs `query.export`: without it, the answer is `403` with the action `query.export`.
+- The pages hide what the subject cannot do. `GET /api/version` gives the decisions in `features.access`, and the pages read them. The host picker of a page shows only the hosts on which the subject holds an action of that page. The query library needs `library.read` (and `library.write` to change it). `GET /api/mcp/meta` says `can_manage = false` without `mcp.keys.write`, so the MCP page shows no New key and no Delete. The pages and their links follow the rules of [Navigation](#navigation).
 
 ### Limits of a grant on one database
 
-- A grant on a database applies to the Explorer route that names this database. The catalog of all the databases (`GET /api/explorer/catalog` without `database`) needs `explorer.read` on the service.
-- Some answers name other databases than the one of the request: the storage map (`GET /api/explorer/storage`), the graph (`GET /api/explorer/graph`, a lineage crosses databases) and the names of the editor (`GET /api/meta` with `databases`, `tables` or `columns`). ChDash asks the PDP, in one batch, for the service and for each database of the answer: `explorer.read` for the storage map and the graph, `query.run.read` and `query.run.write` for the names. The answer keeps only the databases with a `true` decision on the database or on the service. A node of the graph that names no database (a shard or a replica of a cluster) stays when it links to a node that stays.
-- The card of a table (`GET /api/explorer/table`) and the definition of a graph object (`GET /api/explorer/graph/definition`) can name other databases. These are the related objects (`dependencies`) and the target of a materialized view, a Buffer or a Distributed table. ChDash asks the PDP, in one batch, for `explorer.read` on the service and on each of these databases. A related object in a database without a `true` decision is removed. A target in such a database is not visible: the card gives an empty `database` and `table` in `distributed`, and the definition gives `target_visible: false` and `target: null`.
+- A grant on a database applies to that database of one host only. The same database name on another host is another resource.
+- A grant on a database applies to the Explorer route that names this database. The catalog of all the databases (`GET /api/explorer/catalog` without `database`) needs `explorer.read` on the host.
+- Some answers name other databases than the one of the request: the storage map (`GET /api/explorer/storage`), the graph (`GET /api/explorer/graph`, a lineage crosses databases) and the names of the editor (`GET /api/meta` with `databases`, `tables` or `columns`). ChDash asks the PDP, in one batch, for the host and for each database of the answer on that host: `explorer.read` for the storage map and the graph, `query.run.read` and `query.run.write` for the names. The answer keeps only the databases with a `true` decision on the database or on the host. A grant on the service covers the host. A node of the graph that names no database (a shard or a replica of a cluster) stays when it links to a node that stays.
+- The card of a table (`GET /api/explorer/table`) and the definition of a graph object (`GET /api/explorer/graph/definition`) can name other databases. These are the related objects (`dependencies`) and the target of a materialized view, a Buffer or a Distributed table. ChDash asks the PDP, in one batch, for `explorer.read` on the host and on each of these databases of the host. A related object in a database without a `true` decision is removed. A target in such a database is not visible: the card gives an empty `database` and `table` in `distributed`, and the definition gives `target_visible: false` and `target: null`.
 - Some texts of these answers also name databases. These texts are the DDL text (`ddl`), `engine_full`, the TTL and the expressions of the columns of the card, and the `select_sql` of the definition. The catalog of a database (`GET /api/explorer/catalog`) gives no DDL text and no `engine_full`. ChDash finds the databases that these texts name. It asks the PDP for them in the same batch. In a text, ChDash replaces a database without a `true` decision, and the name of its object, with `[HIDDEN]`. A name becomes `` `[HIDDEN]` ``, and a text becomes `'[HIDDEN]'`. The database of the object of the request is always readable.
 - ChDash finds the name of a database in these places of a text:
   - `db.table` after `FROM`, `JOIN`, `IN`, the `TO` of a materialized view and the `AS` of `CREATE TABLE`.
@@ -170,14 +247,14 @@ Rules:
   - `DB` and `TABLE` in `SOURCE(CLICKHOUSE(...))` of a dictionary.
   - Every other `db.name` of a database that ChDash hides.
 - ChDash does not read a SQL text inside a text, for example the `QUERY` of a dictionary source.
-- The focus of the graph (`focus_database`) names its own database. Without a `true` decision on the service or on that database, the answer is `403` with the action `explorer.read`.
-- The Query page names no database. Thus a grant of `query.run.read` on one database does not let the user run a query: ChDash asks for the service. The SQL of a query can name any table, so a decision for one database cannot limit what the SQL reads. The grants of the ClickHouse runner user of each host stay the limit of the data.
+- The focus of the graph (`focus_database`) names its own database. Without a `true` decision on the host or on that database, the answer is `403` with the action `explorer.read`.
+- The Query page names no database. Thus a grant of `query.run.read` on one database does not let the user run a query: ChDash asks for the host. The SQL of a query can name any table, so a decision for one database cannot limit what the SQL reads. The grants of the ClickHouse runner user of each host stay the limit of the data.
 
 ## Navigation
 
 The navigation shows only the pages that the human may use (decision of 2026-10-18). This applies to the header menu, the page tabs, the start page and each link from one page to another page. In the `open` mode, every page and every link stays.
 
-| Page | Addresses | Action on the service (one of them) |
+| Page | Addresses | Action on the service or on one host (one of them) |
 |---|---|---|
 | Query | `/`, `/query` | `query.run.read`, `query.run.write` |
 | Explorer | `/explorer/catalog...`, `/explorer/functions...` | `explorer.read` |
@@ -188,9 +265,9 @@ The navigation shows only the pages that the human may use (decision of 2026-10-
 
 Rules:
 
-- For each page that it serves, ChDash sends one batch to the PDP: every action on the service, as for `GET /api/version`. The cache of the decisions applies, so the two batches of one page normally make one call to the PDP. An address of the Explorer that names a database (`/explorer/catalog/<database>...`) also asks for `explorer.read` on that database.
+- For each page that it serves, ChDash sends one batch to the PDP: the batch of the hosts, as for `GET /api/version`. The cache of the decisions applies, so the two batches of one page normally make one call to the PDP. An address of the Explorer that names a database (`/explorer/catalog/<database>...`) also asks for `explorer.read` on that database of each host.
 - A human without the action of the page gets status `403` and a page with the name of the action and a link to each page that the human may use. This page has no script and no data of the page. The log has the line `access.page_denied`.
-- An address of the Explorer in one database opens with `explorer.read` on that database. The Explorer link of the header needs `explorer.read` on the service.
+- An address of the Explorer in one database opens with `explorer.read` on that database of one host. The Explorer link of the header needs `explorer.read` on the service or on one host.
 - The root (`/`) is the Query page. A human without a query action goes to the first page of the table that the human may use. A human with no page gets the `403` page.
 - In the shell that it serves, ChDash hides each link to a page that the human cannot use (`hidden` and `data-denied` on each element with `data-nav-page`). The links are hidden from the first paint. The meta element `chdash-pages` lists the pages of the human for the scripts of the page. The answer has `Cache-Control: no-store`, because it is for one human.
 - A human with `mcp.usage.read` and without `mcp.keys.read` keeps the MCP entry of the header. It opens the usage.
@@ -199,7 +276,7 @@ Rules:
 
 ## Logs and traces
 
-- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource` (`<type>:<id>`), `decision`, `source` (`pdp`, `cache` or `error`) and `reason` (`unknown_subject`, or empty).
+- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `decision`, `source` (`pdp`, `cache` or `error`) and `reason` (`unknown_subject`, or empty). `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
 - The access log (`http.request`) has the field `subject` (`-` when there is none).
 - When the `telemetry` block is on, each call to the PDP is a CLIENT span `POST /access/v1/evaluation` or `POST /access/v1/evaluations`. Its parent is the span of the `traceparent` of the request; without one, the span starts a trace. The call sends the context of this span to the PDP (`traceparent`). Refer to [server-telemetry.md](server-telemetry.md#the-client-span-of-the-pdp).
 
@@ -207,7 +284,7 @@ Rules:
 
 `POST /mcp` needs no identity token. It keeps its keys (contract section 3, [mcp.md](mcp.md)). The API tools of MCP call the routes of the API in the process (the context of an MCP call): these calls need no identity token and ask no PDP for each route. The keys, their tools, their scope and the MCP ClickHouse user limit them.
 
-A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use. The key keeps its creator. `tools/list` shows only the tools whose actions the creator holds (one batch for each key and each `pdp.cache_ttl`). `tools/call` asks the PDP for the actions of the called tool only. A key with no creator, or whose creator the PDP does not know (the reason `unknown_subject`), gets the `401` of a key that does not exist until a person adopts it ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). A creator who gets `false` without this reason still exists: the key keeps this creator, and each tool of a refused action is refused. A key of the configuration is not checked.
+A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use, on the host of the key (and on its databases for the tools of the data). The key keeps its creator. `tools/list` shows only the tools whose actions the creator holds (one batch for each key and each `pdp.cache_ttl`). `tools/call` asks the PDP for the actions of the called tool only. A key with no creator, or whose creator the PDP does not know (the reason `unknown_subject`), gets the `401` of a key that does not exist until a person adopts it ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). A creator who gets `false` without this reason still exists: the key keeps this creator, and each tool of a refused action is refused. A key of the configuration is not checked.
 
 ## Deviation from AuthZEN: no TLS
 
@@ -225,5 +302,7 @@ The build has no OpenSSL: the release binary is a static musl executable. ChDash
 | U02 to U09 | `tests/backend-functional/test_access.py`, against the compose services `chdash_access` (`tests/config/access.authzen.hcl`) and `access_pdp` (the fake PDP, `tests/otel-fixture/fake_pdp.py`) |
 | U10 (the log) | `test_u10_...` of `test_access.py` when `ACCESS_LOGS_CMD` prints the log of `chdash_access` |
 | U11 (the reason `unknown_subject`) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
+
+The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).
 
 `tests/native/access_test.cpp` (CMake option `CHDASH_BUILD_ACCESS_TESTS`, target `chdash_access_test`) checks the signatures against the vectors of RFC 8032, RFC 8037, RFC 6979 and RFC 7515, the PEM keys, each rule of the identity token, the rule of each route, and the client of the PDP on a fake transport (the body, the headers, the cache, fail closed, the reason `unknown_subject`). `tests/backend-functional/identity_tokens.py` signs the test tokens in pure Python, with the test keys of `tests/config/secrets/access-identity-keys.pem`.
