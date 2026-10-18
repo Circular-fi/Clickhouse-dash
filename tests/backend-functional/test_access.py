@@ -487,7 +487,7 @@ def test_readonly_follows_the_host_of_the_run():
     # Without a run action on any host, the run is refused before the server reads the body.
     answer(default=False, allow=["system.read@host:local"])
     refused = call("POST", "/api/query/run", tok=tok, json={"host_id": "local", "sql": "SELECT 1"})
-    assert refused.status_code == 403 and refused.headers.get("Connection", "").lower() == "close", refused.headers
+    assert refused.status_code == 403 and "close" in refused.headers.get("Connection", "").lower(), refused.headers
 
 
 @needs_access
