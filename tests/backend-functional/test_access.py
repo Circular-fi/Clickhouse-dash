@@ -1,9 +1,10 @@
 """The access of humans (docs/access.md; MCP server contract section 11, conformance cases U02 to U10).
 
 Instances (the tests skip without them; in the official run, CHDASH_REQUIRE_FIXTURES=1 makes a missing one a failure):
-- ACCESS_BASE_URL: tests/config/access.authzen.hcl (the compose service chdash_access), in the authzen mode.
+- ACCESS_BASE_URL: tests/config/access.authzen.hcl (the compose service chdash_access), in the authzen mode, with two hosts on the
+  same ClickHouse (local and other).
 - ACCESS_PDP_URL: the fake PDP (tests/otel-fixture/fake_pdp.py, the compose service access_pdp). The tests set its answers and read
-  what it received.
+  what it received. It applies the prefix rule of the grants: "action@host:local" covers the host local and its databases.
 - ACCESS_OTLP_URL: the fake OTLP receiver of that server (the compose service access_otlp_receiver), for the CLIENT spans.
 - ACCESS_LOGS_CMD (optional): a command that prints the log of that server, for the decision records (U10).
 
@@ -113,6 +114,16 @@ def fresh_pdp():
 
 
 SYSTEM = "/api/system/overview?host_id=local"
+# The resources that the server sends (docs/access.md, "Hosts").
+SERVICE = {"type": "service", "id": AUDIENCE}
+
+
+def host_resource(host: str) -> dict:
+    return {"type": "host", "id": host, "properties": {"ancestors": [SERVICE]}}
+
+
+def database_resource(host: str, database: str) -> dict:
+    return {"type": "database", "id": database, "properties": {"ancestors": [SERVICE, {"type": "host", "id": host}]}}
 
 
 # ---- U02, U03, U04: the identity token ----------------------------------------------------------------------------------
@@ -190,9 +201,17 @@ def test_u05_the_actions_are_published_without_a_token():
         "query.run.read", "query.run.write", "query.export", "library.read", "library.write", "explorer.read", "system.read",
         "system.kill_query", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read",
     }
-    for name in ("query.run.read", "query.run.write", "query.export", "explorer.read"):
-        assert actions[name]["resource_types"] == ["service", "database"], name
-    assert actions["system.read"]["resource_types"] == ["service"]
+    # The tree under the service: host, then database (contract 11.4).
+    assert doc["resource_types"] == [
+        {"name": "host", "parent": "service", "description": doc["resource_types"][0]["description"]},
+        {"name": "database", "parent": "host", "description": doc["resource_types"][1]["description"]},
+    ]
+    for name in ("query.run.read", "query.run.write", "explorer.read"):
+        assert actions[name]["resource_types"] == ["service", "host", "database"], name
+    for name in ("query.export", "system.read", "system.kill_query", "observability.read"):
+        assert actions[name]["resource_types"] == ["service", "host"], name
+    for name in ("library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
+        assert actions[name]["resource_types"] == ["service"], name
     assert all(a["description"] for a in actions.values())
     # The probes need no token either.
     assert call("GET", "/livez", tok=None).status_code == 200
@@ -202,7 +221,7 @@ def test_u05_the_actions_are_published_without_a_token():
 
 
 @needs_access
-def test_u06_the_pdp_receives_the_subject_the_action_and_the_service():
+def test_u06_the_pdp_receives_the_subject_the_action_and_the_host():
     response = call("GET", SYSTEM, tok=token("bob"))
     assert response.status_code == 200, response.text
     requests_ = received()
@@ -213,7 +232,8 @@ def test_u06_the_pdp_receives_the_subject_the_action_and_the_service():
     assert last["traceparent"].startswith("00-")
     [evaluation] = [e for e in evaluations(last) if e["action"]["name"] == "system.read"]
     assert evaluation["subject"] == {"type": "user", "id": "bob"}
-    assert evaluation["resource"] == {"type": "service", "id": AUDIENCE}
+    # System reads one host: the question names the host, with the service as its ancestor.
+    assert evaluation["resource"] == host_resource("local")
 
 
 @needs_access
@@ -271,7 +291,7 @@ def test_u10_the_log_has_each_decision():
     decisions = [r for r in records if r.get("event") == "access.decision" and r.get("request_id") == request_id]
     assert decisions, "no access.decision record"
     assert decisions[0]["subject"] == "dora" and decisions[0]["action"] == "system.read"
-    assert decisions[0]["resource"] == f"service:{AUDIENCE}" and decisions[0]["decision"] is False
+    assert decisions[0]["resource"] == f"service:{AUDIENCE}/host:local" and decisions[0]["decision"] is False
     access = [r for r in records if r.get("event") == "http.request" and r.get("request_id") == request_id]
     assert access and access[0]["subject"] == "dora" and access[0]["status"] == 403
 
@@ -335,10 +355,145 @@ def test_a_run_needs_query_run_read_or_query_run_write():
     assert response.status_code == 403 and response.json()["action"] == "query.export"
 
 
+# ---- the hosts (docs/access.md, "Hosts") ---------------------------------------------------------------------------------
+
+
+def run_sql_on(host: str, sql: str, tok: str) -> list[dict]:
+    response = call("POST", "/api/query/run", tok=tok, json={"host_id": host, "sql": sql})
+    assert response.status_code == 200, response.text
+    stream = urljoin(BASE_URL + "/", response.json()["stream_url"])
+    events = []
+    with SESSION.get(stream, headers={HEADER: tok, "Accept": "text/event-stream"}, stream=True, timeout=(10, 60)) as reply:
+        assert reply.status_code == 200, reply.text
+        name, data = "message", []
+        for raw in reply.iter_lines(decode_unicode=True):
+            line = raw or ""
+            if not line:
+                if data:
+                    events.append({"event": name, "data": json.loads("\n".join(data))})
+                    if name in ("done", "error"):
+                        break
+                name, data = "message", []
+                continue
+            if line.startswith("event:"):
+                name = line[6:].strip()
+            elif line.startswith("data:"):
+                data.append(line[5:].lstrip())
+    return events
+
+
+def first_hosts_event(tok: str) -> dict:
+    with SESSION.get(f"{BASE_URL}/api/hosts/stream", headers={HEADER: tok, "Accept": "text/event-stream"}, stream=True,
+                     timeout=(10, 30)) as reply:
+        assert reply.status_code == 200, reply.text
+        name, data = "message", []
+        for raw in reply.iter_lines(decode_unicode=True):
+            line = raw or ""
+            if not line and data:
+                if name == "hosts":
+                    return json.loads("\n".join(data))
+                name, data = "message", []
+            elif line.startswith("event:"):
+                name = line[6:].strip()
+            elif line.startswith("data:"):
+                data.append(line[5:].lstrip())
+    raise AssertionError("no hosts event")
+
+
+@needs_access
+def test_a_grant_on_one_host_shows_and_allows_that_host_only():
+    answer(default=False, allow=["system.read@host:local", "explorer.read@host:local", "mcp.keys.read", "mcp.keys.write"])
+    tok = token("host-tenant")
+    # The host list, its stream and the MCP page name only the host of the grant.
+    hosts = call("GET", "/api/hosts", tok=tok)
+    assert hosts.status_code == 200 and [h["id"] for h in hosts.json()["hosts"]] == ["local"], hosts.text[:300]
+    assert [h["id"] for h in first_hosts_event(tok)["hosts"]] == ["local"]
+    meta = call("GET", "/api/mcp/meta", tok=tok).json()
+    assert [h["name"] for h in meta["hosts"]] == ["local"], meta["hosts"]
+    # The page of the actions: one batch with the hosts, and the decisions of the visible host only.
+    access = call("GET", "/api/version", tok=tok).json()["features"]["access"]
+    assert set(access["hosts"]) == {"local"} and access["hosts"]["local"]["system.read"] is True, access
+    assert access["actions"]["system.read"] is True and access["actions"]["query.run.read"] is False
+    # The routes of the host of the grant work; the other host is refused like a host that does not exist.
+    assert call("GET", SYSTEM, tok=tok).status_code == 200
+    hidden = call("GET", "/api/system/overview?host_id=other", tok=tok)
+    unknown = call("GET", "/api/system/overview?host_id=nosuch", tok=tok)
+    assert hidden.status_code == unknown.status_code == 403, (hidden.text, unknown.text)
+    assert hidden.json() == unknown.json() and hidden.json()["action"] == "system.read"
+    assert call("GET", "/api/explorer/catalog?host_id=local", tok=tok).status_code == 200
+    assert call("GET", "/api/explorer/catalog?host_id=other", tok=tok).status_code == 403
+    # The pages: System and Explorer, not Query.
+    assert call("GET", "/system", tok=tok).status_code == 200
+    assert call("GET", "/query", tok=tok).status_code == 403
+    # An MCP key on the hidden host is refused, as on a host that does not exist.
+    for host in ("other", "nosuch"):
+        refused = make_mcp_key(tok, f"hidden-{uuid.uuid4().hex[:8]}", ["system_overview"], ["*"], host=host)
+        assert refused.status_code == 403 and refused.json()["action"] == "system.read", (host, refused.text)
+
+
+@needs_access
+def test_a_grant_on_one_database_of_one_host_allows_that_database_only():
+    answer(default=False, allow=["explorer.read@host:other/database:chdash_ui"])
+    tok = token("db-tenant")
+    assert call("GET", "/api/explorer/table?host_id=other&database=chdash_ui&table=weather_buffer", tok=tok).status_code == 200
+    preview = call("POST", "/api/explorer/table/data", tok=tok,
+                   json={"host_id": "other", "database": "chdash_ui", "table": "weather_buffer", "limit": 1})
+    assert preview.status_code == 200, preview.text[:300]
+    # The same database of the other host, another database of the same host, and the whole host are refused.
+    assert call("GET", "/api/explorer/table?host_id=local&database=chdash_ui&table=weather_buffer", tok=tok).status_code == 403
+    preview = call("POST", "/api/explorer/table/data", tok=tok,
+                   json={"host_id": "local", "database": "chdash_ui", "table": "weather_buffer", "limit": 1})
+    assert preview.status_code == 403
+    assert call("GET", "/api/explorer/table?host_id=other&database=system&table=one", tok=tok).status_code == 403
+    assert call("GET", "/api/explorer/catalog?host_id=other", tok=tok).status_code == 403
+    # A grant below a host does not show the host: the PDP answers no question on the host itself.
+    assert call("GET", "/api/hosts", tok=tok).json()["hosts"] == []
+    # The question named the database under its host.
+    resources = [e["resource"] for e in asked("explorer.read")]
+    assert database_resource("other", "chdash_ui") in resources and database_resource("local", "chdash_ui") in resources
+
+
+@needs_access
+def test_the_one_level_grant_of_1_0_8_covers_no_host():
+    # Before 1.1.0, a grant on database:chdash_ui covered that database on every host. The path service/database now names no
+    # resource of the tree (the parent of a database is its host): it covers nothing.
+    answer(default=False, allow=["explorer.read@database:chdash_ui"])
+    tok = token("legacy-tenant")
+    for host in ("local", "other"):
+        response = call("GET", f"/api/explorer/table?host_id={host}&database=chdash_ui&table=weather_buffer", tok=tok)
+        assert response.status_code == 403, (host, response.text)
+    assert call("GET", "/api/hosts", tok=tok).json()["hosts"] == []
+
+
+@needs_access
+def test_readonly_follows_the_host_of_the_run():
+    # query.run.read on local, query.run.write on other: a run on local has readonly = 1, a run on other has not.
+    answer(default=False, allow=["query.run.read@host:local", "query.run.write@host:other"])
+    tok = token("split-runner")
+    events = run_sql_on("local", "SELECT toString(getSetting('readonly')) AS ro", tok)
+    assert any(str(c) == "1" for c in cells(events)), events
+    events = run_sql_on("other", "SELECT toString(getSetting('readonly')) AS ro", tok)
+    assert any(str(c) == "0" for c in cells(events)), events
+    # The names of the editor follow the same rule for one database: write on one database of local lifts readonly there only.
+    answer(default=False, allow=["query.run.read@host:local", "query.run.write@host:local/database:chdash_ui"])
+    meta = call("GET", "/api/meta?host_id=local&database=chdash_ui&types=databases", tok=tok)
+    assert meta.status_code == 200, meta.text[:300]
+    # A run on a host without a run action is refused, and so is an export there.
+    answer(default=False, allow=["query.run.read@host:local", "query.export@host:local"])
+    refused = call("POST", "/api/query/run", tok=tok, json={"host_id": "other", "sql": "SELECT 1"})
+    assert refused.status_code == 403 and refused.json()["action"] == "query.run.read", refused.text
+    export = call("POST", "/api/export/run", tok=tok, json={"host_id": "other", "queries": ["SELECT 1"], "format": "csv"})
+    assert export.status_code == 403 and export.json()["action"] == "query.export", export.text
+    # Without a run action on any host, the run is refused before the server reads the body.
+    answer(default=False, allow=["system.read@host:local"])
+    refused = call("POST", "/api/query/run", tok=tok, json={"host_id": "local", "sql": "SELECT 1"})
+    assert refused.status_code == 403 and refused.headers.get("Connection", "").lower() == "close", refused.headers
+
+
 @needs_access
 def test_explorer_read_on_one_database():
     # A grant on the database chdash_ui only: its table opens, the database system does not, and the whole catalog neither.
-    answer(default=False, allow=["explorer.read@database:chdash_ui"])
+    answer(default=False, allow=["explorer.read@host:local/database:chdash_ui"])
     ok = call("GET", "/api/explorer/table?host_id=local&database=chdash_ui&table=weather_buffer")
     assert ok.status_code != 403, ok.text
     denied = call("GET", "/api/explorer/table?host_id=local&database=system&table=one")
@@ -349,14 +504,16 @@ def test_explorer_read_on_one_database():
     assert preview.status_code == 403
     preview = call("POST", "/api/explorer/table/data", json={"host_id": "local", "database": "chdash_ui", "table": "weather_buffer", "limit": 1})
     assert preview.status_code != 403, preview.text
-    resources = {(e["action"]["name"], e["resource"]["type"], e["resource"]["id"]) for r in received() for e in evaluations(r)}
-    assert ("explorer.read", "database", "chdash_ui") in resources
+    resources = [(e["action"]["name"], e["resource"]) for r in received() for e in evaluations(r)]
+    assert ("explorer.read", database_resource("local", "chdash_ui")) in resources
+    # The same database of the other host is another resource.
+    assert call("GET", "/api/explorer/table?host_id=other&database=chdash_ui&table=weather_buffer").status_code == 403
 
 
 @needs_access
 def test_a_grant_on_one_database_keeps_only_that_database_in_each_answer():
     # storage, graph and the names of the editor read every database: their answers keep only the databases that the PDP allows.
-    answer(default=False, allow=["explorer.read@database:chdash_ui", "query.run.read@database:chdash_ui"])
+    answer(default=False, allow=["explorer.read@host:local/database:chdash_ui", "query.run.read@host:local/database:chdash_ui"])
     tok = token("tenant")
     storage = call("GET", "/api/explorer/storage?host_id=local&database=chdash_ui", tok=tok)
     assert storage.status_code == 200, storage.text
@@ -400,7 +557,7 @@ def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
     clickhouse("CREATE TABLE IF NOT EXISTS chdash_access_cross.to_ui AS chdash_ui.weather_observations "
                "ENGINE = Distributed(chdash_cluster, chdash_ui, weather_observations)")
     try:
-        answer(default=False, allow=["explorer.read@database:chdash_access_cross"])
+        answer(default=False, allow=["explorer.read@host:local/database:chdash_access_cross"])
         tok = token("cross-tenant")
         card = call("GET", "/api/explorer/table?host_id=local&database=chdash_access_cross&table=to_ui&refresh=1", tok=tok)
         assert card.status_code == 200, card.text[:300]
@@ -424,7 +581,7 @@ def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
         asked_databases = {e["resource"]["id"] for e in asked("explorer.read") if e["resource"]["type"] == "database"}
         assert "chdash_ui" in asked_databases, asked_databases
         # With a grant on the two databases, the targets are there.
-        answer(default=False, allow=["explorer.read@database:chdash_access_cross", "explorer.read@database:chdash_ui"])
+        answer(default=False, allow=["explorer.read@host:local/database:chdash_access_cross", "explorer.read@host:local/database:chdash_ui"])
         card = call("GET", "/api/explorer/table?host_id=local&database=chdash_access_cross&table=to_ui", tok=tok).json()
         assert card["distributed"]["database"] == "chdash_ui" and card["distributed"]["table"] == "weather_observations", card["distributed"]
         assert "chdash_ui" in card["ddl"] and "[HIDDEN]" not in card["ddl"], card["ddl"]
@@ -435,8 +592,8 @@ def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
         clickhouse("DROP DATABASE IF EXISTS chdash_access_cross SYNC")
 
 
-def make_mcp_key(tok: str, name: str, tools: list[str], databases: list[str]) -> requests.Response:
-    body = {"name": name, "hosts": ["local"], "tools": tools, "databases": databases}
+def make_mcp_key(tok: str, name: str, tools: list[str], databases: list[str], host: str = "local") -> requests.Response:
+    body = {"name": name, "hosts": [host], "tools": tools, "databases": databases}
     return call("POST", "/api/mcp/keys", tok=tok, headers={"Sec-Fetch-Site": "same-origin"}, json=body)
 
 
@@ -457,8 +614,10 @@ def test_an_mcp_key_never_has_more_than_its_creator():
         refused = make_mcp_key(tok, f"refused-{uuid.uuid4().hex[:8]}", tools, ["*"])
         assert refused.status_code == 403 and refused.json()["action"] == action, (tools, refused.text)
     # With explorer.read on one database, a key on that database is made, and it names its creator.
-    answer(default=False, allow=["mcp.keys.read", "mcp.keys.write", "explorer.read@database:chdash_ui"])
+    answer(default=False, allow=["mcp.keys.read", "mcp.keys.write", "explorer.read@host:local/database:chdash_ui"])
     assert make_mcp_key(tok, f"wide-{uuid.uuid4().hex[:8]}", ["list_databases"], ["*"]).status_code == 403
+    # The same database on the other host: the creator holds nothing there.
+    assert make_mcp_key(tok, f"elsewhere-{uuid.uuid4().hex[:8]}", ["list_databases"], ["chdash_ui"], host="other").status_code == 403
     made = make_mcp_key(tok, f"bound-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases", "list_tables"], ["chdash_ui"])
     assert made.status_code == 201, made.text
     key, secret = made.json()["key"], made.json()["secret"]
@@ -474,7 +633,7 @@ def test_an_mcp_key_never_has_more_than_its_creator():
         # The use asks the PDP for the creator.
         uses = [e for r in received()[before:] for e in evaluations(r)]
         assert any(e["subject"]["id"] == "integrator" and e["action"]["name"] == "explorer.read"
-                   and e["resource"] == {"type": "database", "id": "chdash_ui"} for e in uses), uses
+                   and e["resource"] == database_resource("local", "chdash_ui") for e in uses), uses
         # The creator loses the grant but still exists (a false decision without a reason): the key keeps its creator and is not an
         # orphan. Its tool of the lost action is refused, and the tool that uses no action still works (user decision 2026-10-18).
         answer(default=False, allow=["mcp.keys.read", "mcp.keys.write"])
@@ -620,9 +779,16 @@ def test_one_batch_for_the_page_hides_what_is_denied():
     assert access["mode"] == "authzen" and access["subject"] == "erin"
     assert access["actions"]["system.read"] is False and access["actions"]["mcp.keys.write"] is False
     assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 12
+    # The decisions of each visible host: the actions that take a host (seven), on local and on other.
+    assert set(access["hosts"]) == {"local", "other"}, access
+    assert access["hosts"]["local"]["system.read"] is False and access["hosts"]["other"]["explorer.read"] is True
+    assert len(access["hosts"]["local"]) == 7
     batches = received()[before:]
     assert len(batches) == 1 and batches[0]["path"] == "/access/v1/evaluations", batches
-    assert len(evaluations(batches[0])) == 12
+    # One batch: the five actions without a host on the service, the seven others on each of the two hosts.
+    asked_ = evaluations(batches[0])
+    assert len(asked_) == 5 + 7 * 2
+    assert {e["resource"]["type"] for e in asked_} == {"service", "host"}
 
 
 @needs_access

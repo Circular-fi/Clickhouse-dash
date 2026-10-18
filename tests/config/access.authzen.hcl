@@ -2,7 +2,8 @@
 # API needs an identity token signed by one of the two test keys (secrets/access-identity-keys.pem: Ed25519 and P-256), and the
 # fake PDP of the compose service access_pdp (tests/otel-fixture/fake_pdp.py) decides each action. The cache of the decisions is
 # short, so that a change of the answers of the PDP applies soon. The CLIENT spans of the calls to the PDP go to a fake OTLP
-# receiver of their own (access_otlp_receiver). The MCP endpoint keeps its key: no identity token.
+# receiver of their own (access_otlp_receiver). The MCP endpoint keeps its key: no identity token. Two hosts on the same ClickHouse
+# (local and other) let the tests prove the grants of one host and of one database of one host (docs/access.md, "Hosts").
 # Used by tests/backend-functional/test_access.py (ACCESS_BASE_URL, ACCESS_PDP_URL, ACCESS_OTLP_URL).
 server {
   listen_host = "0.0.0.0"
@@ -59,6 +60,15 @@ telemetry {
 clickhouse {
   host {
     name       = "local"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp"
+  }
+  host {
+    name       = "other"
     runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
     runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
     system_uri = "clickhouse://chdash_system@clickhouse:9000"

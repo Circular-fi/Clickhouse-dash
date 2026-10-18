@@ -8,13 +8,21 @@ the headers that matter and the body). The tests set its answers and read what i
     POST /control/answer     {"default": true, "deny": ["query.export", ...], "allow": [...], "deny_subjects": ["stayer"],
                               "unknown_subjects": ["leaver"], "subjects": {"querier": ["query.run.read", ...]}, "status": 500,
                               "delay_ms": 2000}
-                             deny and allow are lists of action names, or of "action@type:id" for one resource. deny_subjects
+                             deny and allow are lists of action names (every resource), or of "action@<path>" for one resource
+                             and every resource below it (the prefix rule of the grants, docs/access.md "Hosts"). The path is
+                             "service:<id>/host:<id>/database:<id>" with the ids percent-encoded; a path that does not start with
+                             "service:" starts below the service of the PDP ("host:local" is "service:db/host:local"). deny_subjects
                              lists the subjects that exist and hold no action: false for every action, with no reason.
                              unknown_subjects lists the subjects that the PDP does not know: false for every action, with
                              "context": {"reason": "unknown_subject"} (contract 11.5). subjects gives the whole grant of a
-                             subject: true for the actions of its list only. status and delay_ms apply to every evaluation
-                             request until the next /control/answer or /control/reset.
+                             subject: true for the entries of its list only (the same forms as allow). parents gives the tree of
+                             the types under the service (default {"host": "service", "database": "host"}). status and delay_ms
+                             apply to every evaluation request until the next /control/answer or /control/reset.
     GET  /healthz            200
+
+Each evaluation follows the rules of contract 11.4: the chain of the resource (properties.ancestors and the resource) must start with
+the service of the PDP (FAKE_PDP_SERVICE, default "db") and follow the parents; a resource without ancestors is read as
+[service] + resource. A chain that is not valid gives false with "context": {"reason": "invalid_resource"}.
 
 A request with a wrong token (Authorization: Bearer <FAKE_PDP_TOKEN>) gets 401. It uses the standard library only. The port is
 FAKE_PDP_PORT (default 8181).
@@ -26,40 +34,80 @@ import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote
 
 MAX_REQUESTS = 2000
 MAX_BODY_BYTES = 1024 * 1024
 TOKEN = os.environ.get("FAKE_PDP_TOKEN", "pdp-test-token")
+SERVICE = os.environ.get("FAKE_PDP_SERVICE", "db")
 
 LOCK = threading.Lock()
 RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
 DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
-                  "delay_ms": 0}
+                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
+INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 ANSWER = dict(DEFAULT_ANSWER)
 
 
+def encode(value: str) -> str:
+    """The id of a segment, percent-encoded (RFC 3986): every byte outside A-Z a-z 0-9 - . _ ~ is %XX."""
+    return quote(value, safe="-._~")
+
+
+def chain_of(resource: dict, parents: dict) -> list[str] | None:
+    """The segments "type:<encoded id>" from the service to the resource, or None when the chain is not valid (contract 11.4)."""
+    resource = resource or {}
+    kind, ident = str(resource.get("type", "")), str(resource.get("id", ""))
+    ancestors = ((resource.get("properties") or {}).get("ancestors")) or []
+    nodes = [(str(n.get("type", "")), str(n.get("id", ""))) for n in ancestors if isinstance(n, dict)]
+    if kind != "service" and not nodes:
+        nodes = [("service", SERVICE)]
+    nodes.append((kind, ident))
+    if nodes[0] != ("service", SERVICE):
+        return None
+    for (parent, _), (child, _) in zip(nodes, nodes[1:]):
+        if parents.get(child) != parent:
+            return None
+    return [f"{k}:{encode(i)}" for k, i in nodes]
+
+
+def matches(entry: str, name: str, chain: list[str]) -> bool:
+    """True when the entry ("action" or "action@<path>") covers the action on the chain: the path is a prefix of the chain."""
+    action, _, path = str(entry).partition("@")
+    if action != name:
+        return False
+    if not path:
+        return True
+    if not path.startswith("service:"):
+        path = f"service:{encode(SERVICE)}/{path}"
+    granted = path.split("/")
+    return len(granted) <= len(chain) and chain[: len(granted)] == granted
+
+
 def decide(subject: dict, action: dict, resource: dict) -> dict:
-    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject."""
+    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject or resource."""
     with LOCK:
         answer = dict(ANSWER)
     if str((subject or {}).get("id", "")) in answer["unknown_subjects"]:
         return dict(UNKNOWN_SUBJECT)
-    return {"decision": allowed(answer, subject, action, resource)}
+    chain = chain_of(resource, answer["parents"] or {})
+    if chain is None:
+        return dict(INVALID_RESOURCE)
+    return {"decision": allowed(answer, subject, action, chain)}
 
 
-def allowed(answer: dict, subject: dict, action: dict, resource: dict) -> bool:
+def allowed(answer: dict, subject: dict, action: dict, chain: list[str]) -> bool:
     name = str((action or {}).get("name", ""))
-    target = f"{name}@{(resource or {}).get('type', '')}:{(resource or {}).get('id', '')}"
     subject_id = str((subject or {}).get("id", ""))
     if subject_id in answer["deny_subjects"]:
         return False
     grant = (answer["subjects"] or {}).get(subject_id)
     if isinstance(grant, list):
-        return target in grant or name in grant
-    if target in answer["deny"] or name in answer["deny"]:
+        return any(matches(entry, name, chain) for entry in grant)
+    if any(matches(entry, name, chain) for entry in answer["deny"]):
         return False
-    if target in answer["allow"] or name in answer["allow"]:
+    if any(matches(entry, name, chain) for entry in answer["allow"]):
         return True
     return bool(answer["default"])
 
