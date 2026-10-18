@@ -12,6 +12,8 @@
 // The Python harness (test_native_unit_tests.py) runs it when MCP_TEST_BINARY names it.
 
 #include "access_actions.hpp"
+#include "access_grants.hpp"
+#include "access_resource.hpp"
 #include "config.hpp"
 #include "health_runner.hpp"
 #include "http_guard.hpp"
@@ -723,26 +725,35 @@ void test_key_access_questions() {
 
   const auto text = [](const std::vector<AccessQuestion>& questions) {
     std::set<std::string> out;
-    for (const auto& q : questions) out.insert(q.action + "@" + q.resource.type + ":" + q.resource.id);
+    for (const auto& q : questions) out.insert(q.action + "@" + access_resource_path(q.resource));
     return out;
   };
-  // The tools of System, of the query library and of the usage of all the keys: each action is asked on the service, once.
-  CHECK(text(mcp_key_access_questions({"system_overview", "system_disks", "query_library", "mcp_analysis_all_usage", "list_hosts"}, {"*"}, "db")) ==
-        (std::set<std::string>{"system.read@service:db", "library.read@service:db", "mcp.usage.read@service:db"}));
-  // The tools that read only the tables of the scope ask for each database of the scope. explorer_storage reads every database: the service.
-  CHECK(text(mcp_key_access_questions({"list_databases", "query_table", "explorer_table", "explorer_storage"}, {"chdash_ui.weather_*", "otel", "otel.x"}, "db")) ==
-        (std::set<std::string>{"explorer.read@database:chdash_ui", "explorer.read@database:otel", "explorer.read@service:db"}));
-  // A wildcard in a database part names databases that nobody can list: the service.
-  CHECK(text(mcp_key_access_questions({"query_table"}, {"chdash_*"}, "db")) == (std::set<std::string>{"explorer.read@service:db"}));
+  const std::vector<std::string> prod = {"prod"};
+  // The tools of System ask on the host of the key. The query library and the usage of all the keys take no host: the service.
+  CHECK(text(mcp_key_access_questions({"system_overview", "system_disks", "query_library", "mcp_analysis_all_usage", "list_hosts"}, prod, {"*"}, "db")) ==
+        (std::set<std::string>{"system.read@service:db/host:prod", "library.read@service:db", "mcp.usage.read@service:db"}));
+  // The tools that read only the tables of the scope ask for each database of the scope, under the host of the key. explorer_storage
+  // reads every database: the host.
+  CHECK(text(mcp_key_access_questions({"list_databases", "query_table", "explorer_table", "explorer_storage"}, prod, {"chdash_ui.weather_*", "otel", "otel.x"}, "db")) ==
+        (std::set<std::string>{"explorer.read@service:db/host:prod/database:chdash_ui", "explorer.read@service:db/host:prod/database:otel",
+                               "explorer.read@service:db/host:prod"}));
+  // A wildcard in a database part names databases that nobody can list: the host.
+  CHECK(text(mcp_key_access_questions({"query_table"}, prod, {"chdash_*"}, "db")) == (std::set<std::string>{"explorer.read@service:db/host:prod"}));
   // "*" gives every tool that "*" gives: free SQL with the data scope "*".
-  const auto all = text(mcp_key_access_questions({"*"}, {"*"}, "db"));
-  for (const char* q : {"query.run.read@service:db", "explorer.read@service:db", "system.read@service:db", "observability.read@service:db",
-                        "library.read@service:db"}) {
+  const auto all = text(mcp_key_access_questions({"*"}, prod, {"*"}, "db"));
+  for (const char* q : {"query.run.read@service:db/host:prod", "explorer.read@service:db/host:prod", "system.read@service:db/host:prod",
+                        "observability.read@service:db/host:prod", "library.read@service:db"}) {
     CHECK(all.count(q) == 1);
   }
   CHECK(all.count("mcp.usage.read@service:db") == 0);  // "*" does not give mcp_analysis_all_usage
+  // A key without a plain host (no host, or the "*" of a key of the configuration) asks on the service.
+  CHECK(text(mcp_key_access_questions({"system_overview"}, {"*"}, {"*"}, "db")) == (std::set<std::string>{"system.read@service:db"}));
+  CHECK(text(mcp_key_access_questions({"list_databases"}, {}, {"chdash_ui"}, "db")) == (std::set<std::string>{"explorer.read@service:db"}));
+  // Two hosts: each question once for each host.
+  CHECK(text(mcp_key_access_questions({"list_databases"}, {"prod", "test"}, {"chdash_ui"}, "db")) ==
+        (std::set<std::string>{"explorer.read@service:db/host:prod/database:chdash_ui", "explorer.read@service:db/host:test/database:chdash_ui"}));
   // A key that reads nothing asks nothing.
-  CHECK(mcp_key_access_questions({"list_hosts"}, {}, "db").empty());
+  CHECK(mcp_key_access_questions({"list_hosts"}, prod, {}, "db").empty());
 }
 
 // A key of the page keeps its creator: in the key file, in the key list, and after a restart.
@@ -5438,26 +5449,31 @@ std::string modern_rpc(const std::string& method, const std::string& params_with
 
 // The state of a key of the page in the authzen mode (mcp_creator_access.hpp, user decision 2026-10-18).
 void test_creator_access() {
+  // The PDP of the tests with the prefix rule of the grants (access_grants.hpp): a grant on the service covers the host of the key.
   struct FakePdp {
-    std::set<std::string> allowed;  // "subject|action@type:id"
+    std::set<std::string> allowed;  // "subject|action@path"
     std::set<std::string> unknown;  // the subjects that the PDP does not know: false with the reason "unknown_subject"
     bool fails = false;
     int batches = 0;
     std::vector<std::vector<std::string>> asked;
   };
   FakePdp pdp;
+  const chdash_test::GrantRules rules("db");
   int64_t clock = 1000;
   McpCreatorAccess gate("db", std::chrono::milliseconds(30000),
                         [&](const std::string& subject, const std::vector<AccessQuestion>& questions) {
                           pdp.batches += 1;
+                          std::vector<std::string> grants;
+                          for (const auto& entry : pdp.allowed) {
+                            if (entry.rfind(subject + "|", 0) == 0) grants.push_back(entry.substr(subject.size() + 1));
+                          }
                           std::vector<std::string> names;
                           std::vector<AccessDecision> out;
                           for (const auto& q : questions) {
-                            const std::string text = q.action + "@" + q.resource.type + ":" + q.resource.id;
-                            names.push_back(text);
+                            names.push_back(q.action + "@" + access_resource_path(q.resource));
                             AccessDecision d;
                             d.source = pdp.fails ? "error" : "pdp";
-                            d.allowed = !pdp.fails && pdp.allowed.count(subject + "|" + text) != 0;
+                            d.allowed = !pdp.fails && rules.decide(grants, q.action, q.resource).decision;
                             d.unknown_subject = !pdp.fails && !d.allowed && pdp.unknown.count(subject) != 0;
                             out.push_back(d);
                           }
@@ -5493,9 +5509,9 @@ void test_creator_access() {
   CHECK_EQ(gate.kept(), size_t(1));
   // tools/call asks for the called tool only.
   CHECK(gate.tool_refused_action(key, *mcp_find_tool("list_databases")).empty());
-  CHECK(pdp.asked.back() == (std::vector<std::string>{"explorer.read@service:db"}));
+  CHECK(pdp.asked.back() == (std::vector<std::string>{"explorer.read@service:db/host:prod"}));
   CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("system_overview")), std::string("system.read"));
-  CHECK(pdp.asked.back() == (std::vector<std::string>{"system.read@service:db"}));
+  CHECK(pdp.asked.back() == (std::vector<std::string>{"system.read@service:db/host:prod"}));
   // A tool that uses no action asks nothing.
   const int before = pdp.batches;
   CHECK(gate.tool_refused_action(key, *mcp_find_tool("list_hosts")).empty());
@@ -5563,9 +5579,23 @@ void test_creator_access() {
   CHECK(has("list_databases") && !has("system_overview"));
 
   // The questions of one tool follow the rules of the key: explorer.read of a scoped tool is asked for each database.
-  const auto questions = mcp_tool_access_questions(*mcp_find_tool("query_table"), {"otel", "chdash_ui.x"}, "db");
+  const auto questions = mcp_tool_access_questions(*mcp_find_tool("query_table"), {"prod"}, {"otel", "chdash_ui.x"}, "db");
   CHECK_EQ(questions.size(), size_t(2));
-  CHECK(mcp_tool_access_questions(*mcp_find_tool("list_hosts"), {"*"}, "db").empty());
+  CHECK_EQ(access_resource_path(questions.front().resource), std::string("service:db/host:prod/database:otel"));
+  CHECK(mcp_tool_access_questions(*mcp_find_tool("list_hosts"), {"prod"}, {"*"}, "db").empty());
+
+  // A creator with the action on another host only: the key of the host prod does not get the tool.
+  McpKey other_host = a_key({"list_databases"}, {"*"});
+  other_host.id = "k4";
+  other_host.source = "ui";
+  other_host.creator = "erin";
+  pdp.allowed.insert("erin|explorer.read@service:db/host:test");
+  state = gate.state(other_host);
+  CHECK(state.status == McpCreatorStatus::Active && !has("list_databases"));
+  pdp.allowed.insert("erin|explorer.read@service:db/host:prod");
+  gate.forget(other_host.id);
+  state = gate.state(other_host);
+  CHECK(has("list_databases"));
 }
 
 // The access of humans can take tools from a key (McpToolBackend::permitted_tools and tool_permitted): tools/list does not show them,

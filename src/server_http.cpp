@@ -73,6 +73,8 @@ void Server::install_http_hooks() {
   http_.set_default_headers(security_headers());
   http_.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) { return before_routing(req, res); });
   http_.set_post_routing_handler([this](const httplib::Request& req, httplib::Response& res) { after_routing(req, res); });
+  // The rule of a route whose host is in the body (docs/access.md, "Hosts") applies after the body is read, before the handler.
+  http_.set_before_handler([this](const httplib::Request& req, httplib::Response& res) { return check_access_body(req, res); });
 
   // A handler that throws gets a JSON 500 and one log line.
   // The text of the exception can quote SQL or a host. The client never gets this text.

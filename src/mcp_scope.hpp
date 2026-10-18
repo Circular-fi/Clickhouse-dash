@@ -159,15 +159,16 @@ bool mcp_scope_tool_allowed(const std::vector<std::string>& tools, const std::ve
 const char* mcp_tool_access_action(const McpToolInfo& tool);
 
 // The questions that the creator of a key must pass for that key (docs/mcp.md, "Keys and the access of humans"). Each tool of the
-// key (mcp_effective_tools, with all the tools that the key is entitled to) gives its action once.
-// An action that can also take a database (explorer.read for the tools that read only the tables of the scope) is asked on each
-// database that the scope names. It is asked on the service when an entry has a wildcard in its database part.
-// Every other action is asked on the service `service_id`. The questions have no duplicates.
-std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
-                                                     const std::string& service_id);
+// key (mcp_effective_tools, with all the tools that the key is entitled to) gives its action once for each host of the key.
+// An action that takes a host (access_actions.hpp) is asked on each host of `hosts`. explorer.read for the tools that read only the
+// tables of the scope is asked on each database that the scope names, under each host; it is asked on the host when an entry has a
+// wildcard in its database part. An action that takes no host is asked on the service `service_id`, and so is every action of a key
+// whose hosts are empty or hold "*". The questions have no duplicates.
+std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& hosts,
+                                                     const std::vector<std::string>& databases, const std::string& service_id);
 // The questions of one tool, with the same rules: the questions that the creator of a key must pass to call this tool.
 // The list is empty for a tool that uses no action.
-std::vector<AccessQuestion> mcp_tool_access_questions(const McpToolInfo& tool, const std::vector<std::string>& databases,
-                                                      const std::string& service_id);
+std::vector<AccessQuestion> mcp_tool_access_questions(const McpToolInfo& tool, const std::vector<std::string>& hosts,
+                                                      const std::vector<std::string>& databases, const std::string& service_id);
 
 } // namespace chdash

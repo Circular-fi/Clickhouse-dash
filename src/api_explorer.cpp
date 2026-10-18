@@ -92,7 +92,7 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
   std::vector<std::string> databases;
   databases.reserve(map.databases.size());
   for (const auto& database : map.databases) databases.push_back(database.name);
-  if (const auto readable = access_readable_databases({"explorer.read"}, databases)) {
+  if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, databases)) {
     return send_json(res, explorer::storage_json(route.host_id, explorer::keep_storage_databases(map, *readable), answer.value->stale));
   }
   send_json(res, explorer::storage_json(route.host_id, map, answer.value->stale));
@@ -113,7 +113,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   // databases keeps only those and masks the names of the others (docs/access.md): one batch asks each database of the card.
   const ExplorerTableDetail& detail = *answer.value->value;
   if (cfg_.access.enforced()) {
-    if (const auto readable = access_readable_databases({"explorer.read"}, explorer::table_detail_databases(detail))) {
+    if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::table_detail_databases(detail))) {
       return send_json(res, explorer::table_json(route.host_id, explorer::keep_table_detail_databases(detail, *readable), answer.value->stale,
                                                  explorer::kTableDetailCacheTtlMs));
     }
@@ -140,8 +140,9 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
   const std::string host_id = doc["host_id"].GetString();
   const std::string database = doc["database"].GetString();
   const std::string table = doc["table"].GetString();
-  // The database is in the body. This code asks for the decision of explorer.read for it (docs/access.md).
-  if (!access_allows(res, "explorer.read", database)) return;
+  // The host and the database are in the body. The rule of the route applies to them before this handler (check_access_body); this
+  // check asks again for the same question, so the cache of the PDP answers it (docs/access.md).
+  if (!access_allows(res, "explorer.read", host_id, database)) return;
   size_t limit = 100;
   if (doc.HasMember("limit") && doc["limit"].IsUint64()) limit = static_cast<size_t>(doc["limit"].GetUint64());
   limit = std::max<size_t>(1, std::min<size_t>(limit, 500));
@@ -161,7 +162,7 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   const explorer::GraphScopeRequest scope = explorer::read_graph_scope(req);
   // The focus names its own database: the subject must be able to read it (docs/access.md).
   if (!scope.focus_database.empty()) {
-    const auto readable = access_readable_databases({"explorer.read"}, {scope.focus_database});
+    const auto readable = access_readable_databases({"explorer.read"}, route.host_id, {scope.focus_database});
     if (readable && readable->count(scope.focus_database) == 0) {
       return access_forbidden(res, "explorer.read");
     }
@@ -172,7 +173,7 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   const explorer::GraphScopeAnswer& graph = *answer.value;
   // A lineage or a cluster topology crosses databases. A grant on some databases keeps only their nodes: one batch asks each
   // database of the answer.
-  if (const auto readable = access_readable_databases({"explorer.read"}, explorer::graph_databases(graph.scoped))) {
+  if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::graph_databases(graph.scoped))) {
     return send_json(res, explorer::graph_json(route.host_id, *graph.graph, explorer::keep_graph_databases(graph.scoped, *readable), scope,
                                                graph.scope_has_more, graph.storage_available, graph.stale, cfg_.explorer.live_refresh_ms));
   }
@@ -196,7 +197,7 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   if (cfg_.access.enforced()) {
     const std::vector<std::string> named = explorer::definition_databases(definition);
     if (!named.empty()) {
-      if (const auto readable = access_readable_databases({"explorer.read"}, named)) {
+      if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, named)) {
         return send_json(res, explorer::definition_json(route.host_id, *answer.value->node,
                                                         explorer::keep_definition_databases(definition, *readable, answer.value->node->database),
                                                         answer.value->stale));

@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <optional>
+#include <set>
 #include <string>
 
 #include <rapidjson/stringbuffer.h>
@@ -14,6 +16,14 @@
 namespace chdash {
 
 namespace {
+
+// The snapshot without the hosts that the human cannot see (docs/access.md, "Hosts"). nullopt keeps every host.
+HostsSnapshot visible_snapshot(HostsSnapshot snap, const std::optional<std::set<std::string>>& visible) {
+  if (!visible) return snap;
+  snap.hosts.erase(std::remove_if(snap.hosts.begin(), snap.hosts.end(), [&](const auto& host) { return visible->count(host.id) == 0; }),
+                   snap.hosts.end());
+  return snap;
+}
 
 static std::string build_hosts_json(const HostsSnapshot& snap) {
   rapidjson::StringBuffer sb;
@@ -94,7 +104,8 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
 
 void Server::handle_api_hosts(const httplib::Request&, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
-  HostsSnapshot snap = health_->snapshot();
+  // In the authzen mode, the list holds only the hosts on which the human holds one action at least (one batch of the PDP, cached).
+  const HostsSnapshot snap = visible_snapshot(health_->snapshot(), access_visible_hosts());
   const std::string json = build_hosts_json(snap);
   res.status = 200;
   res.set_content(json, "application/json");
@@ -124,7 +135,9 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
     active_host_streams_.fetch_sub(1);
     return json_error(res, 503, "too_many_streams", "too many host status streams are open: poll /api/hosts");
   }
-  const HostsSnapshot initial_snapshot = health_->snapshot();
+  // The hosts that the human can see when the stream starts. The stream keeps them: the identity of a stream is checked once, at its start.
+  const std::optional<std::set<std::string>> visible = access_visible_hosts();
+  const HostsSnapshot initial_snapshot = visible_snapshot(health_->snapshot(), visible);
   auto st = std::make_shared<HostsStreamState>();
   st->last_version = health_->version();
   st->emit_every_ms = std::min(15000, std::max(1000, initial_snapshot.interval_ms));
@@ -136,7 +149,7 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
 
   res.set_chunked_content_provider(
       "text/event-stream; charset=utf-8",
-      [st, runner, this](size_t, httplib::DataSink& sink) {
+      [st, runner, visible, this](size_t, httplib::DataSink& sink) {
         // The server stops (Server::stop). The stream ends. The page reconnects to another replica or polls.
         if (stopping()) {
           sink.done();
@@ -162,7 +175,7 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
         if (changed) {
           st->last_version = new_version;
           st->last_hosts_emit = std::chrono::steady_clock::now();
-          const auto event = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
+          const auto event = sse_json_event("hosts", build_hosts_json(visible_snapshot(runner->snapshot(), visible)));
           sink.write(event.data(), event.size());
           return true;
         }
@@ -170,7 +183,7 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
         const auto after_wait = std::chrono::steady_clock::now();
         if (after_wait >= st->last_hosts_emit + std::chrono::milliseconds(st->emit_every_ms)) {
           st->last_hosts_emit = after_wait;
-          const auto event = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
+          const auto event = sse_json_event("hosts", build_hosts_json(visible_snapshot(runner->snapshot(), visible)));
           sink.write(event.data(), event.size());
           return true;
         }

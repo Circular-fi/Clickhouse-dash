@@ -51,24 +51,61 @@ const AccessPage* access_page_of_shell(std::string_view shell) {
   return nullptr;
 }
 
-std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::string& database) {
+std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::vector<std::string>& hosts,
+                                                        const std::string& database) {
   std::vector<AccessQuestion> out;
-  for (const AccessAction& action : access_actions()) out.push_back(AccessQuestion{action.name, AccessResource{"service", service_id}});
-  if (!database.empty()) out.push_back(AccessQuestion{"explorer.read", AccessResource{"database", database}});
+  for (const AccessAction& action : access_actions()) {
+    if (!action.host) out.push_back(AccessQuestion{action.name, access_service_resource(service_id)});
+  }
+  for (const auto& host : hosts) {
+    for (const AccessAction& action : access_actions()) {
+      if (action.host) out.push_back(AccessQuestion{action.name, access_host_resource(service_id, host)});
+    }
+  }
+  if (!database.empty()) {
+    for (const auto& host : hosts) out.push_back(AccessQuestion{"explorer.read", access_database_resource(service_id, host, database)});
+  }
   return out;
 }
+
+namespace {
+
+bool page_level(const AccessQuestion& question) { return question.resource.type == "service" || question.resource.type == "host"; }
+
+} // namespace
 
 std::set<std::string> access_navigation_pages(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions) {
   std::set<std::string> out;
   for (const auto& page : access_pages()) {
     bool allowed = false;
     for (size_t i = 0; i < questions.size() && i < decisions.size() && !allowed; ++i) {
-      if (questions[i].resource.type != "service" || !decisions[i].allowed) continue;
+      if (!page_level(questions[i]) || !decisions[i].allowed) continue;
       for (const char* action : page.actions) {
         if (questions[i].action == action) allowed = true;
       }
     }
     if (allowed) out.insert(page.name);
+  }
+  return out;
+}
+
+std::set<std::string> access_visible_hosts(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions) {
+  std::set<std::string> out;
+  for (size_t i = 0; i < questions.size() && i < decisions.size(); ++i) {
+    if (questions[i].resource.type == "host" && decisions[i].allowed) out.insert(questions[i].resource.id);
+  }
+  return out;
+}
+
+std::vector<std::pair<std::string, bool>> access_action_summary(const std::vector<AccessQuestion>& questions,
+                                                               const std::vector<AccessDecision>& decisions) {
+  std::vector<std::pair<std::string, bool>> out;
+  for (const AccessAction& action : access_actions()) {
+    bool allowed = false;
+    for (size_t i = 0; i < questions.size() && i < decisions.size() && !allowed; ++i) {
+      if (page_level(questions[i]) && decisions[i].allowed && questions[i].action == action.name) allowed = true;
+    }
+    out.emplace_back(action.name, allowed);
   }
   return out;
 }

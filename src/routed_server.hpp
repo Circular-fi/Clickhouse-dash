@@ -29,6 +29,12 @@ public:
     });
   }
 
+  // A check that runs before the handler of each route that this class registers, after the server has read the body. The handlers
+  // of the socket and the handlers that dispatch() runs both pass through it. It returns true when it answered: the handler then
+  // does not run. The access of humans uses it for a rule whose host is in the body (server_access.cpp, check_access_body).
+  using BeforeHandler = std::function<bool(const httplib::Request&, httplib::Response&)>;
+  void set_before_handler(BeforeHandler check) { before_handler_ = std::move(check); }
+
   using httplib::Server::Delete;
   using httplib::Server::Get;
   using httplib::Server::Patch;
@@ -109,12 +115,18 @@ private:
   using Register = httplib::Server& (httplib::Server::*)(const std::string&, Handler);
 
   RoutedServer& keep(const char* method, const std::string& pattern, Handler handler, Register registrar) {
-    routes_.push_back({method, std::regex(pattern), handler});
-    (this->*registrar)(pattern, std::move(handler));
+    // The check reads before_handler_ when the request comes, so a check that is set after the routes still applies to them.
+    Handler checked = [this, handler = std::move(handler)](const httplib::Request& req, httplib::Response& res) {
+      if (before_handler_ && before_handler_(req, res)) return;
+      handler(req, res);
+    };
+    routes_.push_back({method, std::regex(pattern), checked});
+    (this->*registrar)(pattern, std::move(checked));
     return *this;
   }
 
   std::vector<Route> routes_;
+  BeforeHandler before_handler_;
 };
 
 } // namespace chdash

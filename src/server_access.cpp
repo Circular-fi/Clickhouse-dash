@@ -7,12 +7,15 @@
 #include "access_actions.hpp"
 #include "access_pages.hpp"
 #include "api_error.hpp"
+#include "host_util.hpp"
+#include "json_parse.hpp"
 #include "json_text.hpp"
 #include "log.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_trace.hpp"
 #include "request_context.hpp"
 
+#include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -34,6 +37,9 @@ struct AccessRequestState {
   std::string subject;
   bool read_only = false;
   PdpCallContext call;
+  // The rule of a route whose host is in the JSON body: check_access_body applies it once the body is read.
+  bool pending = false;
+  AccessRule pending_rule;
 };
 
 AccessRequestState& access_state() {
@@ -64,6 +70,20 @@ void refuse_forbidden(httplib::Response& res, const std::string& action) {
 }
 
 bool is_write_method(const std::string& method) { return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE"; }
+
+// The members host_id and database of a JSON body, when they are text. Other members and a body that is not JSON give nothing.
+void body_names(const std::string& body, std::string* host_id, std::string* database) {
+  rapidjson::Document doc;
+  if (body.empty() || !parse_json_bounded(doc, body) || !doc.IsObject()) return;
+  const auto text = [&](const char* name, std::string* out) {
+    const auto it = doc.FindMember(name);
+    if (it != doc.MemberEnd() && it->value.IsString()) out->assign(it->value.GetString(), it->value.GetStringLength());
+  };
+  text("host_id", host_id);
+  text("database", database);
+}
+
+std::string param_value(const httplib::Request& req, const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string(); }
 
 int64_t unix_now_s() {
   return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -174,62 +194,139 @@ bool Server::check_access(const httplib::Request& req, httplib::Response& res, c
   }
   state.subject = identity.subject;
 
-  const AccessResource service{"service", cfg_.access.audience};
-  const auto resource_of = [&](bool database_param) -> AccessResource {
-    if (database_param && req.has_param("database")) {
-      std::string database = req.get_param_value("database");
-      if (!database.empty()) return AccessResource{"database", std::move(database)};
-    }
-    return AccessResource{service.type, service.id};
-  };
-  const auto deny = [&](const std::string& action) {
-    if (is_write_method(req.method)) res.set_header("Connection", "close");
-    refuse_forbidden(res, action);
-    return true;
-  };
-
   switch (rule.kind) {
     case AccessRuleKind::Exempt:
     case AccessRuleKind::Identity:
-    case AccessRuleKind::Deferred:
       return false;
     case AccessRuleKind::Unknown: {
       // No route: the router answers 404. A route that the table of rules does not know: refused (fail closed).
       if (!http_.has_route(req.method == "HEAD" ? std::string("GET") : req.method, req.path)) return false;
       log_event(LogLevel::Error, "access.no_rule", {{"request_id", request_id}, {"method", req.method}, {"path", req.path.substr(0, 512)}});
-      return deny("unknown");
+      if (is_write_method(req.method)) res.set_header("Connection", "close");
+      refuse_forbidden(res, "unknown");
+      return true;
     }
+    case AccessRuleKind::Action:
+    case AccessRuleKind::Run:
+    case AccessRuleKind::Export:
+      return check_rule(rule, req, res, false);
+  }
+  refuse_forbidden(res, "unknown");
+  return true;
+}
+
+std::vector<std::string> Server::access_host_ids() const {
+  std::vector<std::string> out;
+  out.reserve(cfg_.hosts.size());
+  for (const auto& host : cfg_.hosts) out.push_back(host.id);
+  return out;
+}
+
+AccessResource Server::access_resource_of(const std::string& host_id, const std::string& database) const {
+  // A request that names no host reaches the only host of a configuration that has one, as the routes do.
+  const std::string host = host_id.empty() && cfg_.hosts.size() == 1 ? cfg_.hosts.front().id : host_id;
+  // A host that the configuration does not have: the question goes to the service. Thus a host that the human cannot see and a host
+  // that does not exist get the same answer, and the PDP never receives an id that the client chose for a host.
+  if (host.empty() || !find_host(cfg_.hosts, host)) return access_service_resource(cfg_.access.audience);
+  // A database id that no grant can name (contract 11.4: 1 to 256 bytes of UTF-8, no control character): only a grant on its host or
+  // on the service covers it, so the question goes to the host.
+  if (database.empty() || !access_valid_id(database)) return access_host_resource(cfg_.access.audience, host);
+  return access_database_resource(cfg_.access.audience, host, database);
+}
+
+bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, httplib::Response& res, bool body_read) {
+  AccessRequestState& state = access_state();
+  const auto deny = [&](const std::string& action) {
+    if (!body_read && is_write_method(req.method)) res.set_header("Connection", "close");
+    refuse_forbidden(res, action);
+    return true;
+  };
+  if (rule.kind != AccessRuleKind::Action && rule.kind != AccessRuleKind::Run && rule.kind != AccessRuleKind::Export) return false;
+
+  if (rule.body && !body_read) {
+    // The body is not read yet. A run or an export first needs its actions on one host at least (or on the service): a human without
+    // them gets the 403 before the server reads a body. The questions are those of the hosts (GET /api/hosts), so the cache answers.
+    if (rule.kind != AccessRuleKind::Action) {
+      std::vector<const char*> actions;
+      if (rule.kind == AccessRuleKind::Export) actions.push_back("query.export");
+      actions.push_back("query.run.read");
+      actions.push_back("query.run.write");
+      std::vector<AccessQuestion> questions;
+      for (const auto& host : access_host_ids()) {
+        for (const char* action : actions) questions.push_back(AccessQuestion{action, access_host_resource(cfg_.access.audience, host)});
+      }
+      const auto decisions = access_decide(questions);
+      bool export_somewhere = rule.kind != AccessRuleKind::Export;
+      bool run_somewhere = false;
+      for (size_t i = 0; i < questions.size(); ++i) {
+        if (!decisions[i].allowed) continue;
+        if (questions[i].action == "query.export") export_somewhere = true;
+        else run_somewhere = true;
+      }
+      if (!export_somewhere) return deny("query.export");
+      if (!run_somewhere) return deny("query.run.read");
+    }
+    state.pending = true;
+    state.pending_rule = rule;
+    // Fail closed until the body check: the statements of the request run with readonly = 1.
+    state.read_only = true;
+    return false;
+  }
+
+  AccessResource resource = access_service_resource(cfg_.access.audience);
+  if (rule.host) {
+    std::string host_id;
+    std::string database;
+    if (rule.body) {
+      body_names(req.body, &host_id, &database);
+    } else {
+      host_id = param_value(req, "host_id");
+      database = param_value(req, "database");
+    }
+    resource = access_resource_of(host_id, rule.database_param ? database : std::string());
+  }
+
+  switch (rule.kind) {
     case AccessRuleKind::Action: {
-      const auto decisions = access_decide({AccessQuestion{rule.action, resource_of(rule.database_param)}});
+      const auto decisions = access_decide({AccessQuestion{rule.action, resource}});
       return decisions.front().allowed ? false : deny(rule.action);
     }
     case AccessRuleKind::Run: {
-      const AccessResource resource = resource_of(rule.database_param);
       const auto decisions = access_decide({AccessQuestion{"query.run.read", resource}, AccessQuestion{"query.run.write", resource}});
       const bool read = decisions[0].allowed;
       const bool write = decisions[1].allowed;
       if (!read && !write) return deny("query.run.read");
+      // readonly = 1 without query.run.write on this host (or on this database of the host).
       state.read_only = !write;
       return false;
     }
     case AccessRuleKind::Export: {
-      // An export runs SQL: it needs query.export and, as a run, query.run.read or query.run.write.
-      const auto decisions = access_decide({AccessQuestion{"query.export", service}, AccessQuestion{"query.run.read", service},
-                                            AccessQuestion{"query.run.write", service}});
+      // An export runs SQL: it needs query.export and, as a run, query.run.read or query.run.write, all on the host of the export.
+      const auto decisions = access_decide({AccessQuestion{"query.export", resource}, AccessQuestion{"query.run.read", resource},
+                                            AccessQuestion{"query.run.write", resource}});
       if (!decisions[0].allowed) return deny("query.export");
       if (!decisions[1].allowed && !decisions[2].allowed) return deny("query.run.read");
       state.read_only = !decisions[2].allowed;
       return false;
     }
+    default:
+      return false;
   }
-  return deny("unknown");
 }
 
-bool Server::access_allows(httplib::Response& res, const char* action, const std::string& database) {
+bool Server::check_access_body(const httplib::Request& req, httplib::Response& res) {
+  AccessRequestState& state = access_state();
+  // A call of an API tool of MCP runs the routes in the process: its key and its scope limit it (docs/mcp.md).
+  if (!state.pending || current_request_context().is_mcp()) return false;
+  state.pending = false;
+  const AccessRule rule = state.pending_rule;
+  return check_rule(rule, req, res, true);
+}
+
+bool Server::access_allows(httplib::Response& res, const char* action, const std::string& host_id, const std::string& database) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return true;
-  const AccessResource resource = database.empty() ? AccessResource{"service", cfg_.access.audience} : AccessResource{"database", database};
-  if (access_decide({AccessQuestion{action, resource}}).front().allowed) return true;
+  if (access_decide({AccessQuestion{action, access_resource_of(host_id, database)}}).front().allowed) return true;
   refuse_forbidden(res, action);
   return false;
 }
@@ -249,6 +346,7 @@ bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQ
 }
 
 std::optional<std::unordered_set<std::string>> Server::access_readable_databases(const std::vector<const char*>& actions,
+                                                                                const std::string& host_id,
                                                                                 const std::vector<std::string>& databases) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return std::nullopt;
@@ -257,12 +355,13 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
   for (const auto& database : databases) {
     if (seen.insert(database).second) names.push_back(database);
   }
-  // One batch: each action on the service, then each action on each database.
+  // One batch: each action on the host (a grant on the service covers it), then each action on each database of the host.
+  const AccessResource host = access_resource_of(host_id, std::string());
   std::vector<AccessQuestion> questions;
   questions.reserve(actions.size() * (names.size() + 1));
-  for (const char* action : actions) questions.push_back(AccessQuestion{action, {"service", cfg_.access.audience}});
+  for (const char* action : actions) questions.push_back(AccessQuestion{action, host});
   for (const auto& name : names) {
-    for (const char* action : actions) questions.push_back(AccessQuestion{action, {"database", name}});
+    for (const char* action : actions) questions.push_back(AccessQuestion{action, access_resource_of(host_id, name)});
   }
   const auto decisions = access_decide(questions);
   for (size_t i = 0; i < actions.size(); ++i) {
@@ -280,6 +379,19 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
   return out;
 }
 
+std::vector<AccessDecision> Server::access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database) {
+  *questions = access_navigation_questions(cfg_.access.audience, access_host_ids(), database);
+  return access_decide(*questions);
+}
+
+std::optional<std::set<std::string>> Server::access_visible_hosts() {
+  const AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return std::nullopt;
+  std::vector<AccessQuestion> questions;
+  const auto decisions = access_host_decisions(&questions, std::string());
+  return chdash::access_visible_hosts(questions, decisions);
+}
+
 std::set<std::string> Server::navigation_pages(const std::string& database, bool* database_allowed) {
   if (database_allowed) *database_allowed = true;
   const AccessRequestState& state = access_state();
@@ -288,10 +400,16 @@ std::set<std::string> Server::navigation_pages(const std::string& database, bool
     for (const auto& page : access_pages()) all.insert(page.name);
     return all;
   }
-  // One batch: the questions of GET /api/version, so the cache of the PDP answers both, and the database of the address.
-  const auto questions = access_navigation_questions(cfg_.access.audience, database);
-  const auto decisions = access_decide(questions);
-  if (database_allowed) *database_allowed = !database.empty() && decisions.back().allowed;
+  // One batch: the questions of GET /api/version and GET /api/hosts, so the cache of the PDP answers them all, and the database of the
+  // address on each host.
+  std::vector<AccessQuestion> questions;
+  const auto decisions = access_host_decisions(&questions, database);
+  if (database_allowed) {
+    *database_allowed = false;
+    for (size_t i = 0; i < questions.size() && !database.empty(); ++i) {
+      if (questions[i].resource.type == "database" && decisions[i].allowed) *database_allowed = true;
+    }
+  }
   std::set<std::string> pages = access_navigation_pages(questions, decisions);
   // A page that the configuration turns off is not a page of the navigation. The MCP pages are always served: they say how to turn MCP on.
   if (!cfg_.explorer.enabled()) pages.erase("explorer");
@@ -303,7 +421,7 @@ std::set<std::string> Server::navigation_pages(const std::string& database, bool
 bool Server::access_permits(const char* action) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return true;
-  return access_decide({AccessQuestion{action, AccessResource{"service", cfg_.access.audience}}}).front().allowed;
+  return access_decide({AccessQuestion{action, access_service_resource(cfg_.access.audience)}}).front().allowed;
 }
 
 bool Server::access_read_only() const {
@@ -321,16 +439,32 @@ std::string Server::access_json() {
   if (cfg_.access.enforced() && state.enforced && !state.subject.empty()) {
     w.Key("subject");
     write_json_text(w, state.subject);
-    // One batch for the page (contract 11.5): every action on the service. The pages hide what is false; the server still checks
-    // each action on its routes.
+    // One batch for the page (contract 11.5): each action that takes no host on the service, each other action on each host. The
+    // pages hide what is false; the server still checks each action on its routes.
     std::vector<AccessQuestion> questions;
-    for (const AccessAction& action : access_actions()) questions.push_back(AccessQuestion{action.name, {"service", cfg_.access.audience}});
-    const auto decisions = access_decide(questions);
+    const auto decisions = access_host_decisions(&questions, std::string());
+    // An action is true when the human may use it somewhere: on the service or on one host.
     w.Key("actions");
     w.StartObject();
-    for (size_t i = 0; i < questions.size(); ++i) {
-      w.Key(questions[i].action.c_str());
-      w.Bool(decisions[i].allowed);
+    for (const auto& [name, allowed] : access_action_summary(questions, decisions)) {
+      w.Key(name.c_str());
+      w.Bool(allowed);
+    }
+    w.EndObject();
+    // The decisions of each host that the human can see (GET /api/hosts lists the same hosts). A host picker reads them.
+    const std::set<std::string> visible = chdash::access_visible_hosts(questions, decisions);
+    w.Key("hosts");
+    w.StartObject();
+    for (const auto& host : access_host_ids()) {
+      if (visible.count(host) == 0) continue;
+      write_json_key(w, host);
+      w.StartObject();
+      for (size_t i = 0; i < questions.size(); ++i) {
+        if (questions[i].resource.type != "host" || questions[i].resource.id != host) continue;
+        w.Key(questions[i].action.c_str());
+        w.Bool(decisions[i].allowed);
+      }
+      w.EndObject();
     }
     w.EndObject();
   }

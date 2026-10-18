@@ -929,10 +929,13 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       for (const auto& version : mcp_protocol_versions()) put(w, version);
       w.EndArray();
       const HostsSnapshot health = health_ ? health_->snapshot() : HostsSnapshot{};
+      // In the authzen mode, only the hosts that the human can see (docs/access.md, "Hosts").
+      const std::optional<std::set<std::string>> visible = access_visible_hosts();
       w.Key("hosts");
       w.StartArray();
       for (const auto& host : cfg_.hosts) {
         if (host.mcp_uri.empty()) continue;
+        if (visible && visible->count(host.id) == 0) continue;
         w.StartObject();
         w.Key("name"); put(w, host.id);
         w.Key("label"); put(w, host.label);
@@ -1384,7 +1387,14 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       // In the authzen mode, a key never has more than its creator: the PDP must give the creator each action that the tools of the
       // key use, on the databases of its scope (docs/mcp.md, "Keys and the access of humans"). The key keeps its creator.
       if (cfg_.access.enforced()) {
-        const auto questions = mcp_key_access_questions(input.tools.value_or(std::vector<std::string>{}),
+        // The questions name the hosts of the key. A host that the configuration does not have sends the questions to the service, so the
+        // PDP never receives a name that the client chose, and a hidden host and an unknown host get the same answer.
+        std::vector<std::string> hosts = input.hosts.value_or(std::vector<std::string>{});
+        for (const auto& host : hosts) {
+          if (!find_host(cfg_.hosts, host)) hosts.clear();
+          if (hosts.empty()) break;
+        }
+        const auto questions = mcp_key_access_questions(input.tools.value_or(std::vector<std::string>{}), hosts,
                                                         input.databases.value_or(std::vector<std::string>{}), cfg_.access.audience);
         if (!access_allows_all(res, questions)) return;
       }
@@ -1424,8 +1434,10 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         return;
       }
       // The person needs mcp.keys.write and each action that the tools of the key use, in one batch: a key never has more than its creator.
-      std::vector<AccessQuestion> questions{AccessQuestion{"mcp.keys.write", AccessResource{"service", cfg_.access.audience}}};
-      for (auto& question : mcp_key_access_questions(found->tools, found->databases, cfg_.access.audience)) questions.push_back(std::move(question));
+      std::vector<AccessQuestion> questions{AccessQuestion{"mcp.keys.write", access_service_resource(cfg_.access.audience)}};
+      for (auto& question : mcp_key_access_questions(found->tools, found->hosts, found->databases, cfg_.access.audience)) {
+        questions.push_back(std::move(question));
+      }
       if (!access_allows_all(res, questions)) return;
       const std::string subject = access_subject();
       const auto result = store.adopt(id, found->creator, subject, now);

@@ -61,6 +61,25 @@ void write_entity(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_vie
   w.EndObject();
 }
 
+// The resource of a question: the type, the id and, below the service, "properties": {"ancestors": [...]} (contract 11.4).
+void write_resource(rapidjson::Writer<rapidjson::StringBuffer>& w, const AccessResource& resource) {
+  w.StartObject();
+  w.Key("type");
+  write_json_text(w, resource.type);
+  w.Key("id");
+  write_json_text(w, resource.id);
+  if (!resource.ancestors.empty()) {
+    w.Key("properties");
+    w.StartObject();
+    w.Key("ancestors");
+    w.StartArray();
+    for (const AccessNode& node : resource.ancestors) write_entity(w, node.type, node.id);
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndObject();
+}
+
 void write_action(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view name) {
   w.StartObject();
   w.Key("name");
@@ -106,7 +125,7 @@ std::string PdpClient::request_body(const std::string& subject, const std::vecto
     w.Key("action");
     write_action(w, questions.front().action);
     w.Key("resource");
-    write_entity(w, questions.front().resource.type, questions.front().resource.id);
+    write_resource(w, questions.front().resource);
     w.Key("context");
     w.StartObject();
     w.EndObject();
@@ -119,7 +138,7 @@ std::string PdpClient::request_body(const std::string& subject, const std::vecto
       w.Key("action");
       write_action(w, question.action);
       w.Key("resource");
-      write_entity(w, question.resource.type, question.resource.id);
+      write_resource(w, question.resource);
       w.EndObject();
     }
     w.EndArray();
@@ -152,12 +171,13 @@ bool PdpClient::parse_answer(const std::string& body, size_t count, std::vector<
 }
 
 std::string PdpClient::cache_key(const std::string& subject, const AccessQuestion& question) const {
+  // The path holds the whole chain with encoded ids: two resources with the same type and id under two hosts never share an entry.
+  const std::string path = access_resource_path(question.resource);
   std::string key;
-  key.reserve(subject.size() + question.action.size() + question.resource.type.size() + question.resource.id.size() + 3);
+  key.reserve(subject.size() + question.action.size() + path.size() + 2);
   key.append(subject).push_back('\x1f');
   key.append(question.action).push_back('\x1f');
-  key.append(question.resource.type).push_back('\x1f');
-  key.append(question.resource.id);
+  key.append(path);
   return key;
 }
 
@@ -272,7 +292,7 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
   }
 
   for (size_t i = 0; i < questions.size(); ++i) {
-    const std::string resource = questions[i].resource.type + ":" + questions[i].resource.id;
+    const std::string resource = access_resource_path(questions[i].resource);
     log_event(LogLevel::Info, "access.decision",
               {{"request_id", context.request_id},
                {"subject", subject},

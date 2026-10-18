@@ -10,7 +10,7 @@ namespace {
 constexpr size_t kMaxKept = 2 * kMcpMaxUiKeys;
 
 bool same_question(const AccessQuestion& a, const AccessQuestion& b) {
-  return a.action == b.action && a.resource.type == b.resource.type && a.resource.id == b.resource.id;
+  return a.action == b.action && access_resource_path(a.resource) == access_resource_path(b.resource);
 }
 
 } // namespace
@@ -49,7 +49,7 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
   }
 
   const std::vector<std::string> tools = mcp_effective_tools(key.tools, key.databases);
-  const std::vector<AccessQuestion> questions = mcp_key_access_questions(key.tools, key.databases, service_id_);
+  const std::vector<AccessQuestion> questions = mcp_key_access_questions(key.tools, key.hosts, key.databases, service_id_);
   std::vector<AccessDecision> decisions;
   if (!questions.empty()) decisions = decide_(key.creator, questions);
   decisions.resize(questions.size());
@@ -77,7 +77,7 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
       const McpToolInfo* tool = mcp_find_tool(name);
       if (!tool) continue;
       bool pass = true;
-      for (const auto& question : mcp_tool_access_questions(*tool, key.databases, service_id_)) {
+      for (const auto& question : mcp_tool_access_questions(*tool, key.hosts, key.databases, service_id_)) {
         if (!allowed(question)) {
           pass = false;
           break;
@@ -99,7 +99,7 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
 
 std::string McpCreatorAccess::tool_refused_action(const McpKey& key, const McpToolInfo& tool) {
   if (key.creator.empty()) return "creator";
-  const std::vector<AccessQuestion> questions = mcp_tool_access_questions(tool, key.databases, service_id_);
+  const std::vector<AccessQuestion> questions = mcp_tool_access_questions(tool, key.hosts, key.databases, service_id_);
   if (questions.empty()) return {};
   std::vector<AccessDecision> decisions = decide_(key.creator, questions);
   decisions.resize(questions.size());

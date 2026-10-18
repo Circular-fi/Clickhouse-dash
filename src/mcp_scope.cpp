@@ -343,7 +343,6 @@ const char* mcp_tool_access_action(const McpToolInfo& tool) {
     const AccessRule rule = access_rule(tool.api->method, tool.api->path);
     switch (rule.kind) {
       case AccessRuleKind::Action:
-      case AccessRuleKind::Deferred:
         return rule.action;
       case AccessRuleKind::Run:
         return "query.run.read";
@@ -386,40 +385,63 @@ ScopeDatabases scope_databases(const std::vector<std::string>& databases) {
   return out;
 }
 
-void add_tool_questions(const McpToolInfo& tool, const ScopeDatabases& scope, const std::string& service_id, std::vector<AccessQuestion>* out) {
+// The hosts of the questions of a key: its hosts when each one is a plain name. A key with no host or with "*" (only a key of the
+// configuration can have it) gives no host: its questions then go to the service.
+std::vector<std::string> question_hosts(const std::vector<std::string>& hosts) {
+  for (const auto& host : hosts) {
+    if (host.empty() || host == "*") return {};
+  }
+  return hosts;
+}
+
+void add_tool_questions(const McpToolInfo& tool, const std::vector<std::string>& hosts, const ScopeDatabases& scope,
+                        const std::string& service_id, std::vector<AccessQuestion>* out) {
   const char* action = mcp_tool_access_action(tool);
   if (!action) return;
-  const auto add = [&](const char* type, const std::string& id) {
+  const auto add = [&](AccessResource resource) {
+    const std::string path = access_resource_path(resource);
     const bool known = std::any_of(out->begin(), out->end(), [&](const AccessQuestion& q) {
-      return q.action == action && q.resource.type == type && q.resource.id == id;
+      return q.action == action && access_resource_path(q.resource) == path;
     });
-    if (!known) out->push_back(AccessQuestion{action, AccessResource{type, id}});
+    if (!known) out->push_back(AccessQuestion{action, std::move(resource)});
   };
-  // The tools that read only the tables of the scope: the data tools and the Explorer tools of a table or of the catalog.
-  const bool scoped = !tool.needs_all_data && std::string_view(action) == "explorer.read" &&
-                      (!tool.api || tool.api->scope != McpApiScope::Free);
-  if (!scoped || scope.any) {
-    add("service", service_id);
+  // An action that takes no host (the library, the MCP usage), an unknown action and a key without plain hosts: the service.
+  const AccessAction* info = access_action(action);
+  if (!info || !info->host || hosts.empty()) {
+    add(access_service_resource(service_id));
     return;
   }
-  for (const auto& database : scope.named) add("database", database);
+  // The tools that read only the tables of the scope: the data tools and the Explorer tools of a table or of the catalog.
+  const bool scoped = info->database && !tool.needs_all_data && std::string_view(action) == "explorer.read" &&
+                      (!tool.api || tool.api->scope != McpApiScope::Free);
+  for (const auto& host : hosts) {
+    if (!scoped || scope.any) {
+      add(access_host_resource(service_id, host));
+      continue;
+    }
+    for (const auto& database : scope.named) {
+      // A name that no grant can name: only a grant on the host covers it.
+      add(access_valid_id(database) ? access_database_resource(service_id, host, database) : access_host_resource(service_id, host));
+    }
+  }
 }
 
 } // namespace
 
-std::vector<AccessQuestion> mcp_tool_access_questions(const McpToolInfo& tool, const std::vector<std::string>& databases,
-                                                      const std::string& service_id) {
+std::vector<AccessQuestion> mcp_tool_access_questions(const McpToolInfo& tool, const std::vector<std::string>& hosts,
+                                                      const std::vector<std::string>& databases, const std::string& service_id) {
   std::vector<AccessQuestion> out;
-  add_tool_questions(tool, scope_databases(databases), service_id, &out);
+  add_tool_questions(tool, question_hosts(hosts), scope_databases(databases), service_id, &out);
   return out;
 }
 
-std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
-                                                     const std::string& service_id) {
+std::vector<AccessQuestion> mcp_key_access_questions(const std::vector<std::string>& tools, const std::vector<std::string>& hosts,
+                                                     const std::vector<std::string>& databases, const std::string& service_id) {
   const ScopeDatabases scope = scope_databases(databases);
+  const std::vector<std::string> plain = question_hosts(hosts);
   std::vector<AccessQuestion> out;
   for (const auto& name : mcp_effective_tools(tools, databases)) {
-    if (const McpToolInfo* tool = mcp_find_tool(name)) add_tool_questions(*tool, scope, service_id, &out);
+    if (const McpToolInfo* tool = mcp_find_tool(name)) add_tool_questions(*tool, plain, scope, service_id, &out);
   }
   return out;
 }

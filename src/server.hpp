@@ -1,5 +1,6 @@
 #pragma once
 
+#include "access_actions.hpp"
 #include "access_pdp.hpp"
 #include "access_settings.hpp"
 #include "acl_service.hpp"
@@ -429,28 +430,46 @@ private:
   // check_access checks the identity token (401). Then it asks the PDP for the decision on the action of the route (403).
   // It returns true when it answered.
   bool check_access(const httplib::Request& req, httplib::Response& res, const std::string& request_id);
+  // Apply the rule of a route that takes the action check (Action, Run, Export). A rule whose host is in the body waits for the body:
+  // before the body (`body_read` false), a run or an export needs its actions on one host at least, and the rule is kept for
+  // check_access_body. Return true after the 403.
+  bool check_rule(const AccessRule& rule, const httplib::Request& req, httplib::Response& res, bool body_read);
+  // The routes call this function after the server reads the body and before the handler (RoutedServer::set_before_handler). It
+  // applies the rule that check_access kept for the host and the database of the body. It returns true after the 403.
+  bool check_access_body(const httplib::Request& req, httplib::Response& res);
+  // The resource of a question (docs/access.md, "Hosts"): the database `database` of the host `host_id`, the host when `database` is
+  // empty or is not a valid id, or the service when the host is not a host of the configuration. An empty `host_id` names the only
+  // host of a configuration that has one.
+  AccessResource access_resource_of(const std::string& host_id, const std::string& database) const;
+  // The ids of the hosts of the configuration, in its order.
+  std::vector<std::string> access_host_ids() const;
   // Return the decisions of the subject of this request for `questions`.
   // This makes one call to the PDP for the questions that its cache does not answer.
   std::vector<AccessDecision> access_decide(const std::vector<AccessQuestion>& questions);
-  // Use this function for a route whose rule is Deferred (the database is in the body).
-  // Return the decision of `action` on `database`. Return false after the function writes the 403.
-  // Return true when no check applies, for example in the open mode or for a call of MCP.
-  bool access_allows(httplib::Response& res, const char* action, const std::string& database);
+  // The batch of the hosts (access_navigation_questions): `questions` receives the questions, the result holds their decisions.
+  std::vector<AccessDecision> access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database);
+  // The hosts that the subject of this request can see: the hosts with one action at least (one batch, cached). Return nullopt when
+  // no check applies (the open mode, a call of MCP): every host is visible.
+  std::optional<std::set<std::string>> access_visible_hosts();
+  // Return the decision of `action` on the database `database` of the host `host_id` (access_resource_of). Return false after the
+  // function writes the 403. Return true when no check applies, for example in the open mode or for a call of MCP.
+  bool access_allows(httplib::Response& res, const char* action, const std::string& host_id, const std::string& database);
   // Return true when the subject of this request passes every question. Else write the 403 of the first refused action, and
   // return false. Return true when no check applies.
   bool access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions);
   // Write the 403 of a refused action (docs/access.md, "Enforcement").
   static void access_forbidden(httplib::Response& res, const std::string& action);
-  // The databases of `databases` that the subject of this request may read: one batch asks each action of `actions` on the
-  // service and on each database. A database passes when one action is true on it or on the service.
-  // Return nullopt when every database passes: no check applies, or an action is true on the service.
-  std::optional<std::unordered_set<std::string>> access_readable_databases(const std::vector<const char*>& actions,
+  // The databases of `databases` on the host `host_id` that the subject of this request may read: one batch asks each action of
+  // `actions` on the host and on each database of the host. A database passes when one action is true on it or on the host (a grant
+  // on the service covers the host). Return nullopt when every database passes: no check applies, or an action is true on the host.
+  std::optional<std::unordered_set<std::string>> access_readable_databases(const std::vector<const char*>& actions, const std::string& host_id,
                                                                           const std::vector<std::string>& databases);
   // Return the decision of `action` on the service for the subject of this request.
   // The page uses it to show or hide a control. Return true when no check applies.
   bool access_permits(const char* action);
   // The pages of one render for the subject of this request (docs/access.md, "Navigation"), from one batch of the PDP. A `database`
-  // that is not empty adds explorer.read on it; *database_allowed receives that decision. In the open mode, every page.
+  // that is not empty adds explorer.read on it on each host; *database_allowed receives true when one of them is true. In the open
+  // mode, every page.
   std::set<std::string> navigation_pages(const std::string& database, bool* database_allowed = nullptr);
   // Serve the shell `file` of a page. In the authzen mode, a human who cannot use the page gets the 403 page (no script, no data), and
   // the other humans get the shell with the links to the pages that they cannot use hidden (access_pages.hpp).
@@ -458,11 +477,11 @@ private:
   // GET /: the Query page, or in the authzen mode the first page that the human can use.
   void serve_root(const httplib::Request& req, httplib::Response& res);
   // Return true when the statements of this request must run with readonly = 1.
-  // This is the case when the subject has query.run.read and not query.run.write.
+  // This is the case when the subject has query.run.read and not query.run.write on the host (or the database) of the request.
   // It is also the case for an export (query.export and query.run.read) without query.run.write.
   bool access_read_only() const;
   // Return the access part of /api/version, as a JSON object.
-  // The object has the mode, the subject and the decisions for every action on the service.
+  // The object has the mode, the subject, each action that the subject may use somewhere, and the decisions on each visible host.
   // The server makes one batch for each page.
   std::string access_json();
   // Return the name of this server for the PDP (access.identity.audience).

@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace chdash {
@@ -18,7 +19,7 @@ struct AccessPage {
   const char* name;   // query, explorer, observability, system, mcp-keys, mcp-usage
   const char* label;  // the name that a link shows
   const char* path;   // the address of the page under the root of ChDash, with no leading slash
-  // The page is allowed when one of these actions is true on the service. The first one names the page in a 403.
+  // The page is allowed when one of these actions is true on the service or on one host. The first one names the page in a 403.
   std::vector<const char*> actions;
 };
 
@@ -29,13 +30,21 @@ const AccessPage* access_page(std::string_view name);
 // The page of a shell file ("traces.html" is observability), or null for a file that is not a shell of a page.
 const AccessPage* access_page_of_shell(std::string_view shell);
 
-// The questions of one render, in one batch: each action of access_actions() on the service (the questions of GET /api/version, so
-// the cache of the PDP serves both), then explorer.read on `database` when it is not empty (an address of the Explorer that names a
-// database).
-std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::string& database);
-// The pages that the decisions of access_navigation_questions() allow: a page whose actions are true on the service. The decision on
-// a database never adds a page: it lets the human open an address of the Explorer in that database only.
+// The questions of one render, in one batch (docs/access.md, "Hosts"): each action that takes no host on the service, each action that
+// takes a host on each host of `hosts`, then explorer.read on the database `database` of each host when `database` is not empty (an
+// address of the Explorer that names a database). GET /api/version and GET /api/hosts ask the same questions without the database, so
+// the cache of the PDP serves them all.
+std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::vector<std::string>& hosts,
+                                                        const std::string& database);
+// The pages that the decisions of access_navigation_questions() allow: a page whose actions are true on the service or on one host. The
+// decision on a database never adds a page: it lets the human open an address of the Explorer in that database only.
 std::set<std::string> access_navigation_pages(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions);
+// The hosts that the decisions of access_navigation_questions() show: a host with one true decision on the host itself. A decision on a
+// database never shows its host, and an action that takes no host shows no host.
+std::set<std::string> access_visible_hosts(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions);
+// For each action, true when one decision of the action is true on the service or on a host (the "actions" of GET /api/version).
+std::vector<std::pair<std::string, bool>> access_action_summary(const std::vector<AccessQuestion>& questions,
+                                                               const std::vector<AccessDecision>& decisions);
 
 // The shell of a page for one human. Each element with data-nav-page="<name>" of a page that the human cannot use gets the attributes
 // hidden and data-denied (data-nav-page="mcp" is the MCP entry of the header: it stays while the keys or the usage are allowed, and it

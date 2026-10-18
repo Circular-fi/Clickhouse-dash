@@ -815,14 +815,14 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     return true;
   };
 
-  // The catalogs of the databases, the tables and the columns name databases. A grant on some databases keeps only their items
-  // (docs/access.md): one batch asks each database of the catalog, for query.run.read and query.run.write.
+  // The catalogs of the databases, the tables and the columns name databases. A grant on some databases of the host keeps only their
+  // items (docs/access.md): one batch asks the host and each database of the catalog, for query.run.read and query.run.write.
   auto readable_items = [&](const std::string& type, const MetaCatalog& cat) -> std::optional<std::unordered_set<std::string>> {
     if (type != "databases" && type != "tables" && type != "columns") return std::nullopt;
     std::vector<std::string> databases;
     databases.reserve(cat.items.size());
     for (const auto& item : cat.items) databases.push_back(type == "databases" ? item.name : item.database);
-    return access_readable_databases({"query.run.read", "query.run.write"}, databases);
+    return access_readable_databases({"query.run.read", "query.run.write"}, host_id, databases);
   };
 
   auto write_catalog = [&](const std::string& type, const MetaCatalog& cat, bool stale) {
