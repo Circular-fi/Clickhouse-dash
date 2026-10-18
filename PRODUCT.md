@@ -28,7 +28,7 @@ ClickHouse Dash is a lightweight, real-time dashboard for ClickHouse. One self-c
 
 It keeps a shared query library. It explores databases and tables: sizes, parts, DDL and lineage. It reads OpenTelemetry traces, logs and metrics that ClickHouse stores. It watches the server itself. It gives AI assistants scoped access through MCP keys.
 
-The page succeeds when a visitor understands what the product is from the video, believes it is light and complete, and downloads `v1.0.8`.
+The page succeeds when a visitor understands what the product is from the video, believes it is light and complete, and downloads `v1.1.0`.
 
 ## Positioning
 
