@@ -22,7 +22,9 @@ the headers that matter and the body). The tests set its answers and read what i
 
 Each evaluation follows the rules of contract 11.4: the chain of the resource (properties.ancestors and the resource) must start with
 the service of the PDP (FAKE_PDP_SERVICE, default "db") and follow the parents; a resource without ancestors is read as
-[service] + resource. A chain that is not valid gives false with "context": {"reason": "invalid_resource"}.
+[service] + resource. A chain that is not valid gives false with "context": {"reason": "invalid_resource"}. The context of an
+evaluation (the item, else the default of the batch) can have "match": "node" (the default: the prefix rule) or "subtree" (a grant
+below the resource also gives true; addendum 1). Any other match gives false with "context": {"reason": "invalid_request"}.
 
 A request with a wrong token (Authorization: Bearer <FAKE_PDP_TOKEN>) gets 401. It uses the standard library only. The port is
 FAKE_PDP_PORT (default 8181).
@@ -47,6 +49,7 @@ DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [],
                   "delay_ms": 0, "parents": {"host": "service", "database": "host"}}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
+INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
 ANSWER = dict(DEFAULT_ANSWER)
 
 
@@ -72,8 +75,9 @@ def chain_of(resource: dict, parents: dict) -> list[str] | None:
     return [f"{k}:{encode(i)}" for k, i in nodes]
 
 
-def matches(entry: str, name: str, chain: list[str]) -> bool:
-    """True when the entry ("action" or "action@<path>") covers the action on the chain: the path is a prefix of the chain."""
+def matches(entry: str, name: str, chain: list[str], subtree: bool = False) -> bool:
+    """True when the entry ("action" or "action@<path>") covers the action on the chain: the path is a prefix of the chain, or
+    with the match "subtree" the chain is a prefix of the path (a grant below the resource)."""
     action, _, path = str(entry).partition("@")
     if action != name:
         return False
@@ -82,32 +86,40 @@ def matches(entry: str, name: str, chain: list[str]) -> bool:
     if not path.startswith("service:"):
         path = f"service:{encode(SERVICE)}/{path}"
     granted = path.split("/")
-    return len(granted) <= len(chain) and chain[: len(granted)] == granted
+    if len(granted) <= len(chain):
+        return chain[: len(granted)] == granted
+    return subtree and granted[: len(chain)] == chain
 
 
-def decide(subject: dict, action: dict, resource: dict) -> dict:
-    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject or resource."""
+def decide(subject: dict, action: dict, resource: dict, context: dict | None = None) -> dict:
+    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject, resource or match."""
     with LOCK:
         answer = dict(ANSWER)
+    if context is None:
+        context = {}
+    match = context.get("match", "node") if isinstance(context, dict) else None
+    if match not in ("node", "subtree"):
+        return dict(INVALID_REQUEST)
     if str((subject or {}).get("id", "")) in answer["unknown_subjects"]:
         return dict(UNKNOWN_SUBJECT)
     chain = chain_of(resource, answer["parents"] or {})
     if chain is None:
         return dict(INVALID_RESOURCE)
-    return {"decision": allowed(answer, subject, action, chain)}
+    return {"decision": allowed(answer, subject, action, chain, match == "subtree")}
 
 
-def allowed(answer: dict, subject: dict, action: dict, chain: list[str]) -> bool:
+def allowed(answer: dict, subject: dict, action: dict, chain: list[str], subtree: bool = False) -> bool:
     name = str((action or {}).get("name", ""))
     subject_id = str((subject or {}).get("id", ""))
     if subject_id in answer["deny_subjects"]:
         return False
     grant = (answer["subjects"] or {}).get(subject_id)
     if isinstance(grant, list):
-        return any(matches(entry, name, chain) for entry in grant)
+        return any(matches(entry, name, chain, subtree) for entry in grant)
+    # A deny entry applies by the prefix rule only: a deny below the resource does not hide the resource.
     if any(matches(entry, name, chain) for entry in answer["deny"]):
         return False
-    if any(matches(entry, name, chain) for entry in answer["allow"]):
+    if any(matches(entry, name, chain, subtree) for entry in answer["allow"]):
         return True
     return bool(answer["default"])
 
@@ -178,13 +190,15 @@ class Handler(BaseHTTPRequestHandler):
         if answer["status"] != 200:
             return self.reply(int(answer["status"]), {"error": "test status"})
         if self.path == "/access/v1/evaluation":
-            return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource")))
+            return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource"), body.get("context")))
         out = []
         for item in body.get("evaluations") or []:
             subject = item.get("subject") or body.get("subject")
             action = item.get("action") or body.get("action")
             resource = item.get("resource") or body.get("resource")
-            out.append(decide(subject, action, resource))
+            # AuthZEN 1.0, 7.1: the context of an item replaces the default context of the batch.
+            context = item["context"] if "context" in item else body.get("context")
+            out.append(decide(subject, action, resource, context))
         return self.reply(200, {"evaluations": out})
 
 

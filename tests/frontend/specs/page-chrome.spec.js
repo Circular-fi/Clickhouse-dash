@@ -503,6 +503,8 @@ const GRANTS = {
   'nav-admin': ALL_ACTIONS,
   // The prefix rule of the grants (docs/access.md, "Hosts"): system.read on the host local, explorer.read on the host other.
   'nav-hosts': ['system.read@host:local', 'explorer.read@host:other'],
+  // A grant on one database only: the navigation asks with the match "subtree", so the host local shows (addendum 1).
+  'nav-dbonly': ['explorer.read@host:local/database:chdash_ui'],
 };
 const NAV_LINKS = { query: '#navQueryLink', explorer: '#navExplorerLink', observability: '#navObservabilityLink', system: '#navSystemLink', mcp: '#navMcpLink' };
 const DENIED_PATHS = { explorer: '/explorer/catalog', system: '/system', 'mcp-keys': '/mcp-integration', 'mcp-usage': '/mcp-integration/usage', query: '/query' };
@@ -639,6 +641,18 @@ test.describe('the navigation follows the access of the human', () => {
     await expect(page.locator('#hostPickerText')).toHaveText('other', { timeout: 15_000 });
     await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveCount(1);
     await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveAttribute('data-id', 'other');
+  });
+
+  test('a grant on one database shows its host in the picker of the Explorer, and that database opens', async ({ page }) => {
+    await asHuman(page, 'nav-dbonly');
+    const response = await page.goto(`${ACCESS}/explorer/catalog/chdash_ui`);
+    expect(response.status()).toBe(200);
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect(page.locator('#hostPickerText')).toHaveText('local', { timeout: 15_000 });
+    await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveCount(1);
+    await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveAttribute('data-id', 'local');
+    // Query is not a page of this human: no run action, on the host or below it.
+    await expectDenied(page, DENIED_PATHS.query, 'Query', 'query.run.read', ['Explorer']);
   });
 });
 

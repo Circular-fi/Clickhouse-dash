@@ -94,9 +94,10 @@ def evaluations(request: dict) -> list[dict]:
     """The evaluations of one request to the PDP, with the defaults of the batch filled in."""
     body = request["body"]
     if request["path"] == "/access/v1/evaluation":
-        return [{"subject": body["subject"], "action": body["action"], "resource": body["resource"]}]
+        return [{"subject": body["subject"], "action": body["action"], "resource": body["resource"], "context": body.get("context") or {}}]
     return [{"subject": item.get("subject", body.get("subject")), "action": item.get("action", body.get("action")),
-             "resource": item.get("resource", body.get("resource"))} for item in body["evaluations"]]
+             "resource": item.get("resource", body.get("resource")), "context": item.get("context", body.get("context")) or {}}
+            for item in body["evaluations"]]
 
 
 def asked(action: str, since: int = 0) -> list[dict]:
@@ -446,11 +447,41 @@ def test_a_grant_on_one_database_of_one_host_allows_that_database_only():
     assert preview.status_code == 403
     assert call("GET", "/api/explorer/table?host_id=other&database=system&table=one", tok=tok).status_code == 403
     assert call("GET", "/api/explorer/catalog?host_id=other", tok=tok).status_code == 403
-    # A grant below a host does not show the host: the PDP answers no question on the host itself.
-    assert call("GET", "/api/hosts", tok=tok).json()["hosts"] == []
+    # A grant below a host shows that host (the match "subtree", addendum 1), and only that host.
+    assert [h["id"] for h in call("GET", "/api/hosts", tok=tok).json()["hosts"]] == ["other"]
     # The question named the database under its host.
     resources = [e["resource"] for e in asked("explorer.read")]
     assert database_resource("other", "chdash_ui") in resources and database_resource("local", "chdash_ui") in resources
+
+
+@needs_access
+def test_a_grant_on_one_database_shows_its_host_and_allows_only_that_database():
+    # Addendum 1: the navigation asks with the match "subtree", so a grant on one database of local shows local in the host list, in the
+    # picker of the Explorer and in the page. Each operation still asks with "node" on its exact resource.
+    answer(default=False, allow=["explorer.read@host:local/database:chdash_ui"])
+    tok = token("subtree-tenant")
+    before = len(received())
+    assert [h["id"] for h in call("GET", "/api/hosts", tok=tok).json()["hosts"]] == ["local"]
+    access = call("GET", "/api/version", tok=tok).json()["features"]["access"]
+    assert set(access["hosts"]) == {"local"} and access["hosts"]["local"]["explorer.read"] is True, access
+    assert access["hosts"]["local"]["query.run.read"] is False and access["actions"]["query.run.read"] is False
+    # The Explorer page and the address of the database open.
+    assert call("GET", "/explorer/catalog", tok=tok).status_code == 200
+    assert call("GET", "/explorer/catalog/chdash_ui", tok=tok).status_code == 200
+    assert call("GET", "/api/explorer/catalog?host_id=local&database=chdash_ui", tok=tok).status_code == 200
+    assert call("GET", "/api/explorer/table?host_id=local&database=chdash_ui&table=weather_buffer", tok=tok).status_code == 200
+    # Another database of local, the whole host and a run on local are refused.
+    denied = call("GET", "/api/explorer/table?host_id=local&database=system&table=one", tok=tok)
+    assert denied.status_code == 403 and denied.json()["action"] == "explorer.read"
+    assert call("GET", "/api/explorer/catalog?host_id=local", tok=tok).status_code == 403
+    run = call("POST", "/api/query/run", tok=tok, json={"host_id": "local", "sql": "SELECT 1"})
+    assert run.status_code == 403 and run.json()["action"] == "query.run.read", run.text
+    # The questions of the operations had no match "subtree": the explorer.read questions on the exact resource are "node".
+    asked_ = [e for r in received()[before:] for e in evaluations(r) if e["subject"]["id"] == "subtree-tenant"]
+    operations = [e for e in asked_ if e["resource"]["type"] == "database"]
+    assert operations and all(e["context"].get("match", "node") == "node" for e in operations), operations
+    assert any(e["resource"] == host_resource("local") and e["context"].get("match") == "subtree" for e in asked_)
+    assert any(e["resource"] == host_resource("local") and e["context"].get("match", "node") == "node" for e in asked_)
 
 
 @needs_access
@@ -789,6 +820,8 @@ def test_one_batch_for_the_page_hides_what_is_denied():
     asked_ = evaluations(batches[0])
     assert len(asked_) == 5 + 7 * 2
     assert {e["resource"]["type"] for e in asked_} == {"service", "host"}
+    # The batch of the page only shows or hides the navigation: each item has the match "subtree".
+    assert {e["context"].get("match") for e in asked_} == {"subtree"}
 
 
 @needs_access
