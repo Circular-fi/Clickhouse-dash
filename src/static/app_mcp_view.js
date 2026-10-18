@@ -318,11 +318,11 @@ function deleteButton(key, onClick) {
   return button;
 }
 
-// An orphan key (no creator, or a creator that the PDP does not know any more) is refused until a person adopts it. Adopt makes the
-// person the creator. The secret does not change.
+// An orphan key (no creator, or a creator that the PDP does not know: the reason "unknown_subject") is refused until a person adopts
+// it. Adopt makes the person the creator. The secret does not change. A creator who exists but lost actions is not an orphan.
 const ORPHAN_TEXT = {
   no_creator: "This key has no creator. Every request of the key is refused until a person adopts it.",
-  creator_gone: "The creator of this key holds none of its actions any more. Every request of the key is refused until a person adopts it.",
+  creator_gone: "The access service does not know the creator of this key: the account was deleted. Every request of the key is refused until a person adopts it.",
 };
 
 function orphanBadge(key) {

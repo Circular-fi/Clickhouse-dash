@@ -463,11 +463,14 @@ def test_an_mcp_key_never_has_more_than_its_creator():
         uses = [e for r in received()[before:] for e in evaluations(r)]
         assert any(e["subject"]["id"] == "integrator" and e["action"]["name"] == "explorer.read"
                    and e["resource"] == {"type": "database", "id": "chdash_ui"} for e in uses), uses
-        # The creator loses the grant: the key stops working, with the answer of a key that does not exist.
+        # The creator loses the grant but still exists (a false decision without a reason): the key keeps its creator and is not an
+        # orphan. Its tool of the lost action is refused, and the tool that uses no action still works (user decision 2026-10-18).
         answer(default=False, allow=["mcp.keys.read", "mcp.keys.write"])
         stopped = mcp_call(secret, "list_databases")
-        assert stopped.status_code == 401, stopped.text
-        assert mcp_call(secret, "list_hosts").status_code == 401
+        assert stopped.status_code == 200 and stopped.json()["error"]["code"] == -32602, stopped.text
+        assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
+        listed = [k for k in call("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
+        assert listed[0]["orphan"] is None and listed[0]["creator"] == "integrator", listed
         # The key of the configuration has no creator and keeps working.
         assert mcp_call(MCP_TOKEN, "list_hosts").status_code == 200
     finally:
@@ -518,9 +521,34 @@ def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
 
 
 @needs_access
+def test_a_creator_without_permissions_keeps_the_key():
+    # User decision 2026-10-18 (contract 11.5, case U11): a false decision with no reason means "no permission". The creator still
+    # exists: the key is not an orphan, nobody can adopt it, and each tool of a refused action is refused one by one.
+    answer(default=True)
+    made = make_mcp_key(token("stayer"), f"kept-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases"], ["chdash_ui"])
+    assert made.status_code == 201, made.text
+    key, secret = made.json()["key"], made.json()["secret"]
+    heir = token("heir")
+    try:
+        answer(deny_subjects=["stayer"])
+        assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
+        refused = mcp_call(secret, "list_databases")
+        assert refused.status_code == 200 and refused.json()["error"]["code"] == -32602, refused.text
+        assert "list_databases" not in listed_tools(secret)
+        listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
+        assert listed[0]["orphan"] is None and listed[0]["creator"] == "stayer", listed
+        adopt = call("POST", f"/api/mcp/keys/{key['id']}/adopt", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
+        assert adopt.status_code == 409 and adopt.json()["error_code"] == "not_adoptable", adopt.text
+    finally:
+        answer(default=True)
+        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
+
+
+@needs_access
 def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
-    # User decision 2026-10-18: a key whose creator the PDP does not know any more is refused (401) and listed as an orphan. A person
-    # with mcp.keys.write and every action of its tools adopts it: the person becomes the creator, and the secret does not change.
+    # User decision 2026-10-18: a key whose creator the PDP does not know (false with "context": {"reason": "unknown_subject"}) is
+    # refused (401) and listed as an orphan. A person with mcp.keys.write and every action of its tools adopts it: the person becomes
+    # the creator, and the secret does not change.
     answer(default=True)
     made = make_mcp_key(token("leaver"), f"orphan-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases"], ["chdash_ui"])
     assert made.status_code == 201, made.text
@@ -532,19 +560,19 @@ def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
         # The creator still holds the actions: nobody can adopt the key.
         refused = adopt(heir)
         assert refused.status_code == 409 and refused.json()["error_code"] == "not_adoptable", refused.text
-        answer(deny_subjects=["leaver"])
+        answer(unknown_subjects=["leaver"])
         stopped = mcp_call(secret, "list_hosts")
         assert stopped.status_code == 401, stopped.text
         listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
         assert listed[0]["orphan"] == "creator_gone" and listed[0]["creator"] == "leaver", listed
         # A person without an action of the key cannot adopt it: the key would have more than its creator.
-        answer(deny_subjects=["leaver"], deny=["explorer.read"])
+        answer(unknown_subjects=["leaver"], deny=["explorer.read"])
         lacking = adopt(heir)
         assert lacking.status_code == 403 and lacking.json()["action"] == "explorer.read", lacking.text
         # Nor without mcp.keys.write.
-        answer(deny_subjects=["leaver"], deny=["mcp.keys.write"])
+        answer(unknown_subjects=["leaver"], deny=["mcp.keys.write"])
         assert adopt(heir).status_code == 403
-        answer(deny_subjects=["leaver"])
+        answer(unknown_subjects=["leaver"])
         before = len(received())
         adopted = adopt(heir)
         assert adopted.status_code == 200, adopted.text
@@ -563,6 +591,7 @@ def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
         if LOGS_CMD:
             logs = subprocess.run(shlex.split(LOGS_CMD), capture_output=True, text=True, timeout=30).stdout
             assert '"event":"mcp.key_refused"' in logs and '"reason":"creator_gone"' in logs
+            assert '"reason":"unknown_subject"' in logs
             assert '"event":"mcp.key_adopted"' in logs
     finally:
         answer(default=True)

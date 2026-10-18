@@ -5,12 +5,15 @@ the headers that matter and the body). The tests set its answers and read what i
 
     GET  /control/received   {"requests": [{"path", "authorization", "request_id", "traceparent", "body"}, ...]}
     POST /control/reset      forgets the requests and sets the default answers again
-    POST /control/answer     {"default": true, "deny": ["query.export", ...], "allow": [...], "deny_subjects": ["leaver"],
-                              "subjects": {"querier": ["query.run.read", ...]}, "status": 500, "delay_ms": 2000}
+    POST /control/answer     {"default": true, "deny": ["query.export", ...], "allow": [...], "deny_subjects": ["stayer"],
+                              "unknown_subjects": ["leaver"], "subjects": {"querier": ["query.run.read", ...]}, "status": 500,
+                              "delay_ms": 2000}
                              deny and allow are lists of action names, or of "action@type:id" for one resource. deny_subjects
-                             lists the subjects that the PDP does not know: false for every action. subjects gives the whole
-                             grant of a subject: true for the actions of its list only. status and delay_ms apply to every
-                             evaluation request until the next /control/answer or /control/reset.
+                             lists the subjects that exist and hold no action: false for every action, with no reason.
+                             unknown_subjects lists the subjects that the PDP does not know: false for every action, with
+                             "context": {"reason": "unknown_subject"} (contract 11.5). subjects gives the whole grant of a
+                             subject: true for the actions of its list only. status and delay_ms apply to every evaluation
+                             request until the next /control/answer or /control/reset.
     GET  /healthz            200
 
 A request with a wrong token (Authorization: Bearer <FAKE_PDP_TOKEN>) gets 401. It uses the standard library only. The port is
@@ -30,15 +33,24 @@ TOKEN = os.environ.get("FAKE_PDP_TOKEN", "pdp-test-token")
 
 LOCK = threading.Lock()
 RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
-DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "subjects": {}, "status": 200, "delay_ms": 0}
+DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
+                  "delay_ms": 0}
+UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 ANSWER = dict(DEFAULT_ANSWER)
 
 
-def decide(subject: dict, action: dict, resource: dict) -> bool:
-    name = str((action or {}).get("name", ""))
-    target = f"{name}@{(resource or {}).get('type', '')}:{(resource or {}).get('id', '')}"
+def decide(subject: dict, action: dict, resource: dict) -> dict:
+    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject."""
     with LOCK:
         answer = dict(ANSWER)
+    if str((subject or {}).get("id", "")) in answer["unknown_subjects"]:
+        return dict(UNKNOWN_SUBJECT)
+    return {"decision": allowed(answer, subject, action, resource)}
+
+
+def allowed(answer: dict, subject: dict, action: dict, resource: dict) -> bool:
+    name = str((action or {}).get("name", ""))
+    target = f"{name}@{(resource or {}).get('type', '')}:{(resource or {}).get('id', '')}"
     subject_id = str((subject or {}).get("id", ""))
     if subject_id in answer["deny_subjects"]:
         return False
@@ -118,13 +130,13 @@ class Handler(BaseHTTPRequestHandler):
         if answer["status"] != 200:
             return self.reply(int(answer["status"]), {"error": "test status"})
         if self.path == "/access/v1/evaluation":
-            return self.reply(200, {"decision": decide(body.get("subject"), body.get("action"), body.get("resource"))})
+            return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource")))
         out = []
         for item in body.get("evaluations") or []:
             subject = item.get("subject") or body.get("subject")
             action = item.get("action") or body.get("action")
             resource = item.get("resource") or body.get("resource")
-            out.append({"decision": decide(subject, action, resource)})
+            out.append(decide(subject, action, resource))
         return self.reply(200, {"evaluations": out})
 
 

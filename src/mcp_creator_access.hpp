@@ -4,8 +4,10 @@
 // A key of the page never has more than its creator:
 //   - the state of a key comes from one batch of the PDP for its creator, with every action that the tools of the key use. The
 //     state is kept for one period (pdp.cache_ttl). An answer with a failure of the PDP is never kept;
-//   - a key with no creator, or whose creator gets false for every action of the key (the PDP does not know this person any
-//     more), is an orphan: every request of the key gets the 401 of a key that does not exist, until a person adopts the key;
+//   - a key with no creator, or whose creator the PDP does not know (a false decision with the reason "unknown_subject", contract
+//     11.5), is an orphan: every request of the key gets the 401 of a key that does not exist, until a person adopts the key;
+//   - a creator who exists keeps the key, also without an action of the key: each tool of a refused action is refused, and nobody
+//     can adopt the key. A failure of the PDP never makes an orphan;
 //   - tools/list shows only the tools whose actions the creator holds (the batch of the state);
 //   - tools/call asks the PDP for the actions of the called tool only. The cache of the PDP client applies. A failure refuses
 //     the tool (fail closed).
@@ -26,13 +28,13 @@
 namespace chdash {
 
 enum class McpCreatorStatus {
-  // The creator holds at least one action of the key, or the key uses no action.
+  // The creator exists for the PDP: the key keeps the tools whose actions the creator holds (it can be none), or the key uses no action.
   Active,
   // The PDP did not answer for every question: the tools of a failed question are refused, and nothing is concluded.
   Unknown,
   // The key has no creator (a key of an older ChDash, or of the open mode).
   NoCreator,
-  // The PDP gives the creator false for every action of the key.
+  // The PDP does not know the creator: a false decision with the reason "unknown_subject", no true decision and no failure.
   CreatorGone,
 };
 

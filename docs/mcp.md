@@ -374,18 +374,24 @@ In the `authzen` mode ([access.md](access.md)), a key of the page never has more
 A key of the page is an orphan in the `authzen` mode in two cases:
 
 - `no_creator`: the key has no creator. This is a key of an older ChDash, or a key made in the `open` mode.
-- `creator_gone`: the PDP refuses to the creator every action of the key, in an answer without a failure. ChDash has no list of persons, so the PDP is the source: for ChDash, the creator does not exist any more. A key whose tools use no action is never `creator_gone`.
+- `creator_gone`: the PDP does not know the creator. The batch of the state of the key has a `false` decision with `"context": {"reason": "unknown_subject"}` (contract 11.5). It has no `true` decision and no failure. ChDash has no list of persons, so the PDP is the source. This is the case of a deleted user. A key whose tools use no action is never `creator_gone`, because ChDash asks the PDP nothing for it.
+
+A creator who exists keeps the key. A `false` decision without the reason `unknown_subject` means "no permission", also for every action of the key:
+
+- The key is not an orphan, and nobody can adopt it.
+- `tools/list` does not show a tool of a refused action. `tools/call` refuses such a tool with `-32602` and the line `mcp.tool_refused`. A tool that uses no action still works.
+- When the PDP gives the actions back to the creator, the tools work again after `pdp.cache_ttl` at most.
 
 An orphan key is refused:
 
 - Each request of the key gets the `401` of a key that does not exist (contract 3.3). The log has the line `mcp.key_refused` with the key, the creator (`-` when there is none) and the reason (`no_creator` or `creator_gone`).
 - `GET /api/mcp/keys` gives the reason in the member `orphan` of the key. The MCP page shows the warning "Refused" on the key, and the action Adopt.
-- A failure of the PDP does not make a key an orphan. During the failure, each tool that uses an action is refused (fail closed), and nobody can adopt the key.
+- A failure of the PDP never makes a key an orphan. During the failure, each tool that uses an action is refused (fail closed), and nobody can adopt the key.
 
 To adopt a key, a person uses Adopt on the page, or `POST /api/mcp/keys/<id>/adopt`:
 
 - The person needs `mcp.keys.write` and each action that the tools of the key use, with the rules above. ChDash asks the PDP for all of them in one batch. A `false` decision gives `403` with that action, and the key does not change. Thus a key never has more than its new creator.
-- Only an orphan key can be adopted. For a key whose creator holds an action of the key, the answer is `409` `not_adoptable`. When the PDP does not answer, the answer is `503` `pdp_unavailable`.
+- Only an orphan key can be adopted. For a key whose creator exists, the answer is `409` `not_adoptable`. This is also true when the creator holds no action of the key. When the PDP does not answer, the answer is `503` `pdp_unavailable`.
 - The person becomes the creator. The key file keeps the new creator. The secret does not change: the clients that hold the token get access again, with the permissions of the new creator.
 - When two persons adopt one key at the same time, the second gets `409` `creator_changed`.
 - The log has the line `mcp.key_adopted` with the key, the former creator, the new creator and the reason.

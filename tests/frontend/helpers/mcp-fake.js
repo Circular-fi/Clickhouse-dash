@@ -602,7 +602,7 @@ export async function install(page, server) {
     if (adopt) {
       const owner = server.keys.find((k) => k.id === decodeURIComponent(adopt[1]));
       if (!owner) return json(route, 404, { error_code: 'not_found', message: 'No such key.', retryable: false });
-      if (!owner.orphan) return json(route, 409, { error_code: 'not_adoptable', message: 'the creator of the key still holds its actions', retryable: false });
+      if (!owner.orphan) return json(route, 409, { error_code: 'not_adoptable', message: 'the creator of the key exists', retryable: false });
       Object.assign(owner, { creator: server.adopter || 'heir', orphan: null });
       return json(route, 200, { key: owner });
     }

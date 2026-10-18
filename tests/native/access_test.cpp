@@ -403,13 +403,33 @@ void test_pdp_body_and_answer() {
   CHECK(doc["evaluations"][0]["resource"]["type"].GetString() == std::string("database"));
   CHECK(doc["evaluations"][0]["resource"]["id"].GetString() == std::string("analytics"));
 
-  std::vector<bool> decisions;
-  CHECK(PdpClient::parse_answer(R"({"decision":true})", 1, &decisions) && decisions == std::vector<bool>({true}));
-  CHECK(PdpClient::parse_answer(R"({"evaluations":[{"decision":false},{"decision":true}]})", 2, &decisions) && decisions == std::vector<bool>({false, true}));
+  std::vector<PdpAnswer> decisions;
+  const auto values = [&] {
+    std::vector<bool> out;
+    for (const auto& d : decisions) out.push_back(d.decision);
+    return out;
+  };
+  CHECK(PdpClient::parse_answer(R"({"decision":true})", 1, &decisions) && values() == std::vector<bool>({true}));
+  CHECK(PdpClient::parse_answer(R"({"evaluations":[{"decision":false},{"decision":true}]})", 2, &decisions) && values() == std::vector<bool>({false, true}));
   CHECK(!PdpClient::parse_answer(R"({"evaluations":[{"decision":true}]})", 2, &decisions));
   CHECK(!PdpClient::parse_answer(R"({"decision":"true"})", 1, &decisions));
   CHECK(!PdpClient::parse_answer(R"({"evaluations":[{"decision":true},{}]})", 2, &decisions));
   CHECK(!PdpClient::parse_answer("not json", 1, &decisions));
+
+  // Contract 11.5: the reason "unknown_subject" of a false decision tells that the PDP does not know the subject. Only that reason
+  // and only on a false decision. A context that is not an object makes the answer not valid.
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"unknown_subject"}})", 1, &decisions));
+  CHECK(!decisions[0].decision && decisions[0].unknown_subject);
+  CHECK(PdpClient::parse_answer(R"({"decision":false})", 1, &decisions) && !decisions[0].unknown_subject);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"no grant"}})", 1, &decisions) && !decisions[0].unknown_subject);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":7}})", 1, &decisions) && !decisions[0].unknown_subject);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{}})", 1, &decisions) && !decisions[0].unknown_subject);
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"reason":"unknown_subject"}})", 1, &decisions));
+  CHECK(decisions[0].decision && !decisions[0].unknown_subject);
+  CHECK(!PdpClient::parse_answer(R"({"decision":false,"context":"unknown_subject"})", 1, &decisions));
+  CHECK(PdpClient::parse_answer(
+      R"({"evaluations":[{"decision":false,"context":{"reason":"unknown_subject"}},{"decision":false}]})", 2, &decisions));
+  CHECK(decisions[0].unknown_subject && !decisions[1].unknown_subject);
 }
 
 void test_pdp_client() {
@@ -459,6 +479,19 @@ void test_pdp_client() {
   out = client.decide("alice", {questions[0]}, context);
   CHECK(!out[0].allowed && std::string(out[0].source) == "pdp");
 
+  // The reason "unknown_subject" reaches the decision, and the cache keeps it with the decision.
+  fake->answer = ok(R"({"evaluations":[{"decision":false,"context":{"reason":"unknown_subject"}},{"decision":false,"context":{"reason":"unknown_subject"}}]})");
+  out = client.decide("leaver", questions, context);
+  CHECK(!out[0].allowed && out[0].unknown_subject && out[1].unknown_subject && std::string(out[0].source) == "pdp");
+  const size_t asked_leaver = calls.size();
+  out = client.decide("leaver", questions, context);
+  CHECK(!out[0].allowed && out[0].unknown_subject && std::string(out[0].source) == "cache");
+  CHECK_EQ(calls.size(), asked_leaver);
+  // A false decision with no reason is "no permission".
+  fake->answer = ok(R"({"decision":false})");
+  out = client.decide("stayer", {questions[0]}, context);
+  CHECK(!out[0].allowed && !out[0].unknown_subject);
+
   // Fail closed: a status that is not 200, no answer, a late answer, a body that is not an answer. Never kept.
   const auto failing = [&](PdpHttpResult answer, std::chrono::milliseconds delay) {
     fake->answer = std::move(answer);
@@ -467,7 +500,7 @@ void test_pdp_client() {
     const auto first = client.decide("carol", {questions[0]}, context);
     const auto second = client.decide("carol", {questions[0]}, context);
     fake->delay = std::chrono::milliseconds(0);
-    CHECK(!first[0].allowed && std::string(first[0].source) == "error");
+    CHECK(!first[0].allowed && std::string(first[0].source) == "error" && !first[0].unknown_subject);
     CHECK(!second[0].allowed && calls.size() == before + 2);
     CHECK(!spans.back().error.empty());
   };

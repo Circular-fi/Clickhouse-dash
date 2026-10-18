@@ -298,7 +298,7 @@ test('an orphan key says that it is refused, and Adopt makes the person its crea
   await open(page, server);
   const target = row(page, 'second-ui-key');
   await expect(target.locator('.mcpCell--name .badge')).toHaveText('Refused');
-  await expect(target.locator('.mcpCell--name .badge')).toHaveAttribute('title', /holds none of its actions any more.*until a person adopts it/);
+  await expect(target.locator('.mcpCell--name .badge')).toHaveAttribute('title', /does not know the creator of this key: the account was deleted.*until a person adopts it/);
   // Only the orphan key has Adopt. The other keys keep Delete alone.
   await expect(page.locator('#mcpKeysBody [data-action="adopt"]')).toHaveCount(1);
   await expect(target.locator('[data-action="adopt"]')).toHaveAttribute('aria-label', 'Adopt second-ui-key');

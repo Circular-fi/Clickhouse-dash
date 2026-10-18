@@ -5,6 +5,7 @@
 //   - asks POST <url>/access/v1/evaluation for one question and POST <url>/access/v1/evaluations for more (one batch);
 //   - sends Authorization: Bearer <token>, X-Request-ID and a traceparent;
 //   - fails closed: no answer before the timeout, a status that is not 200 or a body that is not an answer gives false;
+//   - reads the reason "unknown_subject" of a false decision (contract 11.5): the PDP does not know the subject;
 //   - keeps an answer of the PDP for cache_ttl at most (subject, action and resource are the key), never a failure;
 //   - bounds the cache by a count of entries and by a count of bytes (cache_entries and cache_bytes);
 //   - writes one log line access.decision for each decision (subject, action, resource, decision, source).
@@ -35,6 +36,16 @@ struct AccessDecision {
   bool allowed = false;
   // "pdp" (the PDP answered now), "cache" (an answer of the PDP that is kept), "error" (no valid answer: false).
   const char* source = "error";
+  // True when the PDP answered false with "context": {"reason": "unknown_subject"} (contract 11.5): the subject does not exist.
+  // Only this reason lets the server treat a resource of the subject as an orphan. It is never true for an error or a true decision.
+  bool unknown_subject = false;
+};
+
+// One decision of an answer of the PDP.
+struct PdpAnswer {
+  bool decision = false;
+  // The false decision has the reason "unknown_subject".
+  bool unknown_subject = false;
 };
 
 // What the server knows of the request that asks.
@@ -102,7 +113,9 @@ public:
   // The body of a request (evaluation for one question, evaluations for more). For the tests.
   static std::string request_body(const std::string& subject, const std::vector<AccessQuestion>& questions);
   // The decisions of an answer, in the order of the questions; false when the body is not a valid answer for `count` questions.
-  static bool parse_answer(const std::string& body, size_t count, std::vector<bool>* decisions);
+  // A decision can have a "context" object. Its member "reason" with the value "unknown_subject" on a false decision sets
+  // unknown_subject. A "context" that is not an object makes the answer not valid.
+  static bool parse_answer(const std::string& body, size_t count, std::vector<PdpAnswer>* decisions);
   // The bytes that one entry of the cache counts: its key and a fixed part for the node of the map.
   static size_t cache_entry_bytes(const std::string& key);
 
@@ -117,7 +130,7 @@ private:
   std::unique_ptr<PdpTransport> transport_;
   std::function<void(const PdpCall&)> on_call_;
   std::mutex mu_;
-  std::unordered_map<std::string, std::pair<bool, std::chrono::steady_clock::time_point>> cache_;
+  std::unordered_map<std::string, std::pair<PdpAnswer, std::chrono::steady_clock::time_point>> cache_;
   size_t cache_used_bytes_ = 0;  // the sum of cache_entry_bytes of the keys of cache_
 };
 

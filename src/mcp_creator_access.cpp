@@ -56,9 +56,11 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
 
   bool failed = false;
   bool any_allowed = false;
+  bool unknown_subject = false;
   for (const auto& decision : decisions) {
     if (std::strcmp(decision.source, "error") == 0) failed = true;
     if (decision.allowed) any_allowed = true;
+    if (decision.unknown_subject) unknown_subject = true;
   }
   const auto allowed = [&](const AccessQuestion& question) {
     for (size_t i = 0; i < questions.size(); ++i) {
@@ -66,7 +68,8 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
     }
     return false;
   };
-  if (!questions.empty() && !failed && !any_allowed) {
+  // Only the reason "unknown_subject" makes an orphan (contract 11.5). A plain false is "no permission": the creator keeps the key.
+  if (!failed && !any_allowed && unknown_subject) {
     out.status = McpCreatorStatus::CreatorGone;
   } else {
     out.status = failed ? McpCreatorStatus::Unknown : McpCreatorStatus::Active;

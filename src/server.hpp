@@ -368,7 +368,7 @@ enum class McpApiRoute {
   KeysList,
   KeyCreate,
   KeyDelete,
-  // A person adopts a key of the page that has no creator, or whose creator the PDP does not know any more.
+  // A person adopts a key of the page that has no creator, or whose creator the PDP does not know (the reason "unknown_subject").
   KeyAdopt,
   KeyAccess,
   // The number of databases and tables that each key reaches. The page shows them in a table.

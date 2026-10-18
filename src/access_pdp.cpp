@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <string_view>
 
 namespace chdash {
 namespace {
@@ -67,11 +68,22 @@ void write_action(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_vie
   w.EndObject();
 }
 
-bool decision_of(const rapidjson::Value& value, bool* decision) {
+// The reason of a false decision that tells the server that the PDP does not know the subject (contract 11.5).
+constexpr const char* kUnknownSubject = "unknown_subject";
+
+bool decision_of(const rapidjson::Value& value, PdpAnswer* answer) {
   if (!value.IsObject()) return false;
   const auto it = value.FindMember("decision");
   if (it == value.MemberEnd() || !it->value.IsBool()) return false;
-  *decision = it->value.GetBool();
+  answer->decision = it->value.GetBool();
+  answer->unknown_subject = false;
+  const auto context = value.FindMember("context");
+  if (context == value.MemberEnd()) return true;
+  if (!context->value.IsObject()) return false;
+  const auto reason = context->value.FindMember("reason");
+  // Only a false decision can name an unknown subject. A reason of another value or type means nothing to the server.
+  answer->unknown_subject = !answer->decision && reason != context->value.MemberEnd() && reason->value.IsString() &&
+                            std::string_view(reason->value.GetString(), reason->value.GetStringLength()) == kUnknownSubject;
   return true;
 }
 
@@ -116,25 +128,25 @@ std::string PdpClient::request_body(const std::string& subject, const std::vecto
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-bool PdpClient::parse_answer(const std::string& body, size_t count, std::vector<bool>* decisions) {
+bool PdpClient::parse_answer(const std::string& body, size_t count, std::vector<PdpAnswer>* decisions) {
   decisions->clear();
   rapidjson::Document doc;
   if (!parse_json_bounded(doc, body) || !doc.IsObject()) return false;
   if (count == 1) {
-    bool decision = false;
-    if (!decision_of(doc, &decision)) return false;
-    decisions->push_back(decision);
+    PdpAnswer answer;
+    if (!decision_of(doc, &answer)) return false;
+    decisions->push_back(answer);
     return true;
   }
   const auto it = doc.FindMember("evaluations");
   if (it == doc.MemberEnd() || !it->value.IsArray() || it->value.Size() != count) return false;
   for (const auto& item : it->value.GetArray()) {
-    bool decision = false;
-    if (!decision_of(item, &decision)) {
+    PdpAnswer answer;
+    if (!decision_of(item, &answer)) {
       decisions->clear();
       return false;
     }
-    decisions->push_back(decision);
+    decisions->push_back(answer);
   }
   return true;
 }
@@ -176,7 +188,7 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
       if (options_.cache_ttl.count() > 0) {
         const auto it = cache_.find(cache_key(subject, questions[i]));
         if (it != cache_.end() && it->second.second > now) {
-          out[i] = AccessDecision{it->second.first, "cache"};
+          out[i] = AccessDecision{it->second.first.decision, "cache", it->second.first.unknown_subject};
           continue;
         }
       }
@@ -210,7 +222,7 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
     call.end_unix_nano = otlp_now_unix_nano();
     call.status = result.status;
 
-    std::vector<bool> decisions;
+    std::vector<PdpAnswer> decisions;
     if (!result.error.empty()) call.error = "no answer: " + result.error;
     else if (elapsed > options_.timeout) call.error = "the answer came after the timeout";
     else if (result.status != 200) call.error = "status " + std::to_string(result.status);
@@ -221,7 +233,7 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
       const auto expires = std::chrono::steady_clock::now() + options_.cache_ttl;
       std::lock_guard<std::mutex> lock(mu_);
       for (size_t k = 0; k < ask.size(); ++k) {
-        out[ask[k]] = AccessDecision{decisions[k], "pdp"};
+        out[ask[k]] = AccessDecision{decisions[k].decision, "pdp", decisions[k].unknown_subject};
         if (options_.cache_ttl.count() <= 0) continue;
         std::string key = cache_key(subject, questions[ask[k]]);
         const size_t entry_bytes = cache_entry_bytes(key);
@@ -267,7 +279,8 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
                {"action", questions[i].action},
                {"resource", resource},
                {"decision", out[i].allowed},
-               {"source", out[i].source}});
+               {"source", out[i].source},
+               {"reason", out[i].unknown_subject ? kUnknownSubject : ""}});
   }
   return out;
 }

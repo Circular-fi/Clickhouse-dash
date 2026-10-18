@@ -5440,6 +5440,7 @@ std::string modern_rpc(const std::string& method, const std::string& params_with
 void test_creator_access() {
   struct FakePdp {
     std::set<std::string> allowed;  // "subject|action@type:id"
+    std::set<std::string> unknown;  // the subjects that the PDP does not know: false with the reason "unknown_subject"
     bool fails = false;
     int batches = 0;
     std::vector<std::vector<std::string>> asked;
@@ -5457,6 +5458,7 @@ void test_creator_access() {
                             AccessDecision d;
                             d.source = pdp.fails ? "error" : "pdp";
                             d.allowed = !pdp.fails && pdp.allowed.count(subject + "|" + text) != 0;
+                            d.unknown_subject = !pdp.fails && !d.allowed && pdp.unknown.count(subject) != 0;
                             out.push_back(d);
                           }
                           pdp.asked.push_back(names);
@@ -5499,8 +5501,19 @@ void test_creator_access() {
   CHECK(gate.tool_refused_action(key, *mcp_find_tool("list_hosts")).empty());
   CHECK_EQ(pdp.batches, before);
 
-  // After the period, the state is asked again: the creator lost every action of the key, the PDP does not know this person.
+  // After the period, the state is asked again: the creator lost every action of the key, but the PDP knows this person (a false
+  // decision with no reason). The key is not an orphan: it keeps its creator and has only the tools that use no action.
   pdp.allowed.clear();
+  clock += 30001;
+  state = gate.state(key);
+  CHECK(state.status == McpCreatorStatus::Active);
+  CHECK(!mcp_creator_orphan(state.status));
+  const auto has = [&](const char* name) { return std::find(state.tools.begin(), state.tools.end(), name) != state.tools.end(); };
+  CHECK(has("list_hosts") && !has("list_databases") && !has("system_overview") && !has("run_query"));
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("list_databases")), std::string("explorer.read"));
+
+  // The PDP does not know the creator any more (the reason "unknown_subject"): the key is an orphan.
+  pdp.unknown = {"alice"};
   clock += 30001;
   state = gate.state(key);
   CHECK(state.status == McpCreatorStatus::CreatorGone);
@@ -5508,7 +5521,8 @@ void test_creator_access() {
   CHECK(state.tools.empty());
   CHECK_EQ(std::string(mcp_creator_status_name(state.status)), std::string("creator_gone"));
 
-  // A failure of the PDP proves nothing: the state is Unknown, no tool passes, and nothing is kept.
+  // A failure of the PDP proves nothing: the state is Unknown, no tool passes, and nothing is kept. This is also true for a creator
+  // that the PDP does not know: a failure never makes an orphan.
   gate.forget(key.id);
   CHECK_EQ(gate.kept(), size_t(0));
   pdp.fails = true;
@@ -5523,18 +5537,30 @@ void test_creator_access() {
 
   // An adoption changes the creator: the state of the old creator never applies to the adopter.
   pdp.allowed = {"bob|explorer.read@service:db", "bob|system.read@service:db", "bob|query.run.read@service:db"};
-  gate.state(key);  // alice: gone, kept
+  CHECK(gate.state(key).status == McpCreatorStatus::CreatorGone);  // alice: gone, kept
   key.creator = "bob";
   state = gate.state(key);
   CHECK(state.status == McpCreatorStatus::Active);
   CHECK(std::find(state.tools.begin(), state.tools.end(), "run_query") != state.tools.end());
 
-  // A key whose tools use no action is never an orphan by its creator.
+  // A key whose tools use no action is never an orphan by its creator: the PDP is not asked, so no answer gives the reason.
   McpKey hosts_only = a_key({"list_hosts"}, {});
   hosts_only.id = "k2";
   hosts_only.source = "ui";
   hosts_only.creator = "carol";
+  pdp.unknown.insert("carol");
   CHECK(gate.state(hosts_only).status == McpCreatorStatus::Active);
+
+  // A true decision next to the reason "unknown_subject" is not an orphan: the PDP gave the creator an action.
+  McpKey mixed = a_key({"list_databases", "system_overview"}, {"*"});
+  mixed.id = "k3";
+  mixed.source = "ui";
+  mixed.creator = "dave";
+  pdp.unknown.insert("dave");
+  pdp.allowed.insert("dave|explorer.read@service:db");
+  state = gate.state(mixed);
+  CHECK(state.status == McpCreatorStatus::Active);
+  CHECK(has("list_databases") && !has("system_overview"));
 
   // The questions of one tool follow the rules of the key: explorer.read of a scoped tool is asked for each database.
   const auto questions = mcp_tool_access_questions(*mcp_find_tool("query_table"), {"otel", "chdash_ui.x"}, "db");

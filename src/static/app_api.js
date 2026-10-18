@@ -714,7 +714,7 @@ function normalizeMcpKey(raw) {
     subject: mcpText(key.subject) || null,
     expiresAt: mcpText(key.expires_at) || null,
         // The person who made a key of the page in the authzen mode. A key that has no creator, or whose creator the PDP does not know
-        // any more, is refused until a person adopts it (orphan: "no_creator" or "creator_gone").
+        // (the reason "unknown_subject"), is refused until a person adopts it (orphan: "no_creator" or "creator_gone").
     creator: mcpText(key.creator) || null,
     orphan: key.orphan === "no_creator" || key.orphan === "creator_gone" ? key.orphan : null,
     hosts: mcpList(key.hosts),

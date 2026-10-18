@@ -766,8 +766,8 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   }
   const McpKey& key = auth.key;
   // A key of the page in the authzen mode never has more than its creator (docs/mcp.md, "Keys and the access of humans"). A key with no
-  // creator, or whose creator the PDP does not know any more, gets the answer of a key that does not exist (contract 3.3) until a person
-  // adopts it; the log tells why. The other keys lose only the tools whose actions the creator lost.
+  // creator, or whose creator the PDP does not know (the reason "unknown_subject", contract 11.5), gets the answer of a key that does not
+  // exist (contract 3.3) until a person adopts it; the log tells why. The other keys lose only the tools whose actions the creator lost.
   std::optional<McpCreatorState> creator_state;
   if (mcp_creator_ && key.source == "ui") {
     creator_state = mcp_creator_->state(key);
@@ -1420,7 +1420,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         return;
       }
       if (!mcp_creator_orphan(status)) {
-        api_error(res, 409, "not_adoptable", "the creator of the key still holds its actions: only a key with no creator, or whose creator the PDP does not know, can be adopted");
+        api_error(res, 409, "not_adoptable", "the creator of the key exists: only a key with no creator, or whose creator the PDP does not know (unknown_subject), can be adopted");
         return;
       }
       // The person needs mcp.keys.write and each action that the tools of the key use, in one batch: a key never has more than its creator.
