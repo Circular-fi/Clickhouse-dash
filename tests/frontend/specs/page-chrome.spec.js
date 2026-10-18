@@ -501,6 +501,8 @@ const GRANTS = {
   'nav-explorer': ['explorer.read'],
   'nav-usage': ['query.run.read', 'mcp.usage.read'],
   'nav-admin': ALL_ACTIONS,
+  // The prefix rule of the grants (docs/access.md, "Hosts"): system.read on the host local, explorer.read on the host other.
+  'nav-hosts': ['system.read@host:local', 'explorer.read@host:other'],
 };
 const NAV_LINKS = { query: '#navQueryLink', explorer: '#navExplorerLink', observability: '#navObservabilityLink', system: '#navSystemLink', mcp: '#navMcpLink' };
 const DENIED_PATHS = { explorer: '/explorer/catalog', system: '/system', 'mcp-keys': '/mcp-integration', 'mcp-usage': '/mcp-integration/usage', query: '/query' };
@@ -622,6 +624,21 @@ test.describe('the navigation follows the access of the human', () => {
     }
     await page.goto(`${ACCESS}/explorer/catalog/chdash_ui/weather_observations/preview`);
     await expect(page.getByRole('button', { name: 'Open in Query' })).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('each page shows only the hosts on which the human holds an action of that page', async ({ page }) => {
+    await asHuman(page, 'nav-hosts');
+    // The two hosts are visible (one action on each). The System page keeps local, the Explorer keeps other.
+    await page.goto(`${ACCESS}/system`);
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect(page.locator('#hostPickerText')).toHaveText('local', { timeout: 15_000 });
+    await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveCount(1);
+    await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveAttribute('data-id', 'local');
+    await page.goto(`${ACCESS}/explorer/catalog`);
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect(page.locator('#hostPickerText')).toHaveText('other', { timeout: 15_000 });
+    await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveCount(1);
+    await expect(page.locator('#hostPickerMenu .pickerOption')).toHaveAttribute('data-id', 'other');
   });
 });
 

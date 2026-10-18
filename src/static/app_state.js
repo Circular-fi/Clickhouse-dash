@@ -395,9 +395,10 @@ const FEATURE_DEFAULTS = Object.freeze({
   query_library: { enabled: false, writable: false, libraries: [] },
   // The MCP endpoint (docs/mcp.md). Its page appears in the page switcher only when it is on.
   mcp: { enabled: false },
-  // The access of humans (docs/access.md). In the authzen mode, this holds the decisions of the PDP for the user, by action.
+  // The access of humans (docs/access.md). In the authzen mode, this holds the decisions of the PDP for the user, by action, and the
+  // decisions on each host that the user can see (hosts: { "<host>": { "<action>": true|false } }, null when the server sends none).
   // The flags above already mean "on and allowed". The allows(name) function reads one decision.
-  access: { mode: "open", subject: "", actions: {} },
+  access: { mode: "open", subject: "", actions: {}, hosts: null },
 });
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -466,14 +467,47 @@ function normalizeFeatures(raw) {
   };
 }
 
-// The access part of /api/version (docs/access.md): { mode, subject, actions: { "<action>": true|false } }.
+// The access part of /api/version (docs/access.md): { mode, subject, actions: { "<action>": true|false },
+// hosts: { "<host>": { "<action>": true|false } } }. An action is true when the user may use it on the service or on one host.
 function normalizeAccess(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const actions = {};
   if (src.actions && typeof src.actions === "object") {
     for (const [name, value] of Object.entries(src.actions)) actions[name] = value === true;
   }
-  return { mode: src.mode === "authzen" ? "authzen" : "open", subject: typeof src.subject === "string" ? src.subject : "", actions };
+  let hosts = null;
+  if (src.hosts && typeof src.hosts === "object" && !Array.isArray(src.hosts)) {
+    hosts = {};
+    for (const [host, decisions] of Object.entries(src.hosts)) {
+      const own = {};
+      if (decisions && typeof decisions === "object") {
+        for (const [name, value] of Object.entries(decisions)) own[name] = value === true;
+      }
+      hosts[host] = own;
+    }
+  }
+  return { mode: src.mode === "authzen" ? "authzen" : "open", subject: typeof src.subject === "string" ? src.subject : "", actions, hosts };
+}
+
+// The actions that let a page work on a host (the name is the data-page of the body of the shell). A page that is not in the table
+// is not tied to a host (the MCP pages): every host passes.
+const PAGE_HOST_ACTIONS = Object.freeze({
+  query: ["query.run.read", "query.run.write"],
+  explorer: ["explorer.read"],
+  observability: ["observability.read"],
+  trace: ["observability.read"],
+  system: ["system.read"],
+  shape: ["system.read"],
+});
+
+// It returns whether the host picker of the page `page` shows the host `hostId`. The open mode, and a server that sends no decisions by
+// host, show every host. In the authzen mode, the page needs one of its actions on that host. The server checks each route again.
+function hostAllowed(access, hostId, page) {
+  if (!access || access.mode !== "authzen" || !access.hosts) return true;
+  const actions = PAGE_HOST_ACTIONS[String(page || "")];
+  if (!actions) return true;
+  const decisions = access.hosts[String(hostId)];
+  return !!decisions && actions.some((name) => decisions[name] === true);
 }
 
 // It returns whether the user may do `name`. The open mode always allows it. The authzen mode allows it only when the PDP said true.
@@ -521,6 +555,7 @@ const ready = new Promise((resolve) => { resolveReady = resolve; });
 //   set(raw)             app_ui.js: it sets the features of /api/version.
 //   allows(name)         the decision for one action of the access of humans.
 //                        The open mode always allows it.
+//   hostAllowed(id, page)  the host picker of the page `page` (the data-page of the body) shows the host `id`.
 //   page(name)           the page (query, explorer, observability, system, mcp-keys, mcp-usage) is on and the
 //                        human may use it: a link to another page shows only then.
 //   servePages(text)     app_header.js: the pages that the server allowed for this render (meta chdash-pages).
@@ -539,6 +574,7 @@ const features = {
   },
   // The decision of the PDP for one action. An action name has dots, so get() cannot read it.
   allows: (name) => allowsAction(state.features.access, name),
+  hostAllowed: (hostId, page) => hostAllowed(state.features.access, hostId, page),
   page: (name) => pageAllowed(state.features, name),
   // The list of the meta element chdash-pages (space-separated page names), or null/undefined when the page has none.
   servePages(text) {

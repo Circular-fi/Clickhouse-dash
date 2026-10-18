@@ -312,14 +312,28 @@ function startHostsSse() {
   let hasSnapshot = false;
   let booting = false;
 
-  const useSnapshot = (snap) => {
-    if (!snap || !Array.isArray(snap.hosts)) return;
+  // The server lists only the hosts that the user can see (docs/access.md, "Hosts"). The page keeps the hosts on which the user holds
+  // one action of this page: for example, the System page shows only the hosts with system.read.
+  let rawSnapshot = null;
+  const page = document.body?.dataset.page || "";
+  const pageHosts = (snap) => {
+    const hosts = snap.hosts.filter((h) => h && features.hostAllowed(h.id, page));
+    return hosts.length === snap.hosts.length ? snap : { ...snap, hosts };
+  };
+  const useSnapshot = (raw) => {
+    if (!raw || !Array.isArray(raw.hosts)) return;
+    rawSnapshot = raw;
+    const snap = pageHosts(raw);
     hasSnapshot = true;
     state.hostsSnapshot = snap;
     renderHostPicker(snap);
     api.setApiOnline(true);
     window.dispatchEvent(new CustomEvent("chdash:hosts", { detail: { snapshot: snap } }));
   };
+  // The decisions by host come with /api/version, often after the first snapshot: filter that snapshot again.
+  features.on(() => {
+    if (rawSnapshot) useSnapshot(rawSnapshot);
+  });
 
   const closeStream = () => {
     if (!es) return;
