@@ -10,7 +10,7 @@
     "snapshots:check": "VISUAL_COMPARE=1 playwright test specs/visual-regression.spec.js"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.62.1",
     "axe-core": "4.13.0"
   }
