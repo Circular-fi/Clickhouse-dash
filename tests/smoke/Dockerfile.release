@@ -5,7 +5,7 @@
 #
 #   docker build -f tests/smoke/Dockerfile.release --target binary --output type=local,dest=out .
 #   python3 tests/smoke/release_smoke.py --binary out/chdash --scratch
-FROM ubuntu:22.04 AS build
+FROM ubuntu:25.10 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends binutils ca-certificates cmake curl file git ninja-build python3 xz-utils \
