@@ -5,6 +5,7 @@
 // that the human opens by its address without the action.
 // Pure code: no HTTP server and no PDP. server.cpp serves the shells with it.
 
+#include "access_actions.hpp"
 #include "access_pdp.hpp"
 
 #include <set>
@@ -35,8 +36,9 @@ const AccessPage* access_page_of_shell(std::string_view shell);
 // (an address of the Explorer that names a database). The questions on the service and on the hosts have the match "subtree": a grant
 // below a host shows the host and the page. They only show or hide the navigation; each route asks again with "node". GET /api/version
 // and GET /api/hosts ask the same questions without the database, so the cache of the PDP serves them all.
+// The questions are for the published actions only (access_published_actions): a feature that is off has no action and no question.
 std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::vector<std::string>& hosts,
-                                                        const std::string& database);
+                                                        const std::string& database, const AccessFeatures& features = AccessFeatures{});
 // The pages that the decisions of access_navigation_questions() allow: a page whose actions are true on the service or on one host. The
 // decision on a database never adds a page: it lets the human open an address of the Explorer in that database only.
 std::set<std::string> access_navigation_pages(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions);
@@ -44,8 +46,10 @@ std::set<std::string> access_navigation_pages(const std::vector<AccessQuestion>&
 // "subtree", a grant on a database of the host gives true). An action that takes no host shows no host.
 std::set<std::string> access_visible_hosts(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions);
 // For each action, true when one decision of the action is true on the service or on a host (the "actions" of GET /api/version).
+// The summary lists the published actions only.
 std::vector<std::pair<std::string, bool>> access_action_summary(const std::vector<AccessQuestion>& questions,
-                                                               const std::vector<AccessDecision>& decisions);
+                                                               const std::vector<AccessDecision>& decisions,
+                                                               const AccessFeatures& features = AccessFeatures{});
 
 // The shell of a page for one human. Each element with data-nav-page="<name>" of a page that the human cannot use gets the attributes
 // hidden and data-denied (data-nav-page="mcp" is the MCP entry of the header: it stays while the keys or the usage are allowed, and it

@@ -198,10 +198,14 @@ def test_u05_the_actions_are_published_without_a_token():
     assert doc["server"] == AUDIENCE
     actions = {a["name"]: a for a in doc["actions"]}
     assert "access" not in actions
+    # The document lists the published actions only (ProcurAuth 5.2a). The configuration of this test turns on the Explorer, the System
+    # page and MCP with its keys in the hybrid mode. It has no library and no OpenTelemetry signal: their actions are absent.
     assert set(actions) == {
-        "query.run.read", "query.run.write", "query.export", "library.read", "library.write", "explorer.read", "system.read",
-        "system.kill_query", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read",
+        "query.run.read", "query.run.write", "query.export", "explorer.read", "system.read", "system.kill_query",
+        "mcp.keys.read", "mcp.keys.write", "mcp.usage.read",
     }
+    for name in ("library.read", "library.write", "observability.read"):
+        assert name not in actions, name
     # The tree under the service: host, then database (contract 11.4).
     assert doc["resource_types"] == [
         {"name": "host", "parent": "service", "description": doc["resource_types"][0]["description"]},
@@ -209,9 +213,9 @@ def test_u05_the_actions_are_published_without_a_token():
     ]
     for name in ("query.run.read", "query.run.write", "explorer.read"):
         assert actions[name]["resource_types"] == ["service", "host", "database"], name
-    for name in ("query.export", "system.read", "system.kill_query", "observability.read"):
+    for name in ("query.export", "system.read", "system.kill_query"):
         assert actions[name]["resource_types"] == ["service", "host"], name
-    for name in ("library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
+    for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
         assert actions[name]["resource_types"] == ["service"], name
     assert all(a["description"] for a in actions.values())
     # The probes need no token either.
@@ -809,16 +813,16 @@ def test_one_batch_for_the_page_hides_what_is_denied():
     access = response.json()["features"]["access"]
     assert access["mode"] == "authzen" and access["subject"] == "erin"
     assert access["actions"]["system.read"] is False and access["actions"]["mcp.keys.write"] is False
-    assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 12
-    # The decisions of each visible host: the actions that take a host (seven), on local and on other.
+    assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 9
+    # The decisions of each visible host: the published actions that take a host (six), on local and on other.
     assert set(access["hosts"]) == {"local", "other"}, access
     assert access["hosts"]["local"]["system.read"] is False and access["hosts"]["other"]["explorer.read"] is True
-    assert len(access["hosts"]["local"]) == 7
+    assert len(access["hosts"]["local"]) == 6
     batches = received()[before:]
     assert len(batches) == 1 and batches[0]["path"] == "/access/v1/evaluations", batches
-    # One batch: the five actions without a host on the service, the seven others on each of the two hosts.
+    # One batch: the three published actions without a host on the service (the MCP keys and usage), the six others on each of the two hosts.
     asked_ = evaluations(batches[0])
-    assert len(asked_) == 5 + 7 * 2
+    assert len(asked_) == 3 + 6 * 2
     assert {e["resource"]["type"] for e in asked_} == {"service", "host"}
     # The batch of the page only shows or hides the navigation: each item has the match "subtree".
     assert {e["context"].get("match") for e in asked_} == {"subtree"}

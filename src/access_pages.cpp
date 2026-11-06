@@ -52,17 +52,19 @@ const AccessPage* access_page_of_shell(std::string_view shell) {
 }
 
 std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::vector<std::string>& hosts,
-                                                        const std::string& database) {
+                                                        const std::string& database, const AccessFeatures& features) {
   std::vector<AccessQuestion> out;
-  for (const AccessAction& action : access_actions()) {
+  const std::vector<AccessAction> actions = access_published_actions(features);
+  for (const AccessAction& action : actions) {
     if (!action.host) out.push_back(AccessQuestion{action.name, access_service_resource(service_id), AccessMatch::Subtree});
   }
   for (const auto& host : hosts) {
-    for (const AccessAction& action : access_actions()) {
+    for (const AccessAction& action : actions) {
       if (action.host) out.push_back(AccessQuestion{action.name, access_host_resource(service_id, host), AccessMatch::Subtree});
     }
   }
-  if (!database.empty()) {
+  // An address of the Explorer in one database asks explorer.read: with the Explorer off, nothing asks it.
+  if (!database.empty() && features.explorer) {
     for (const auto& host : hosts) out.push_back(AccessQuestion{"explorer.read", access_database_resource(service_id, host, database)});
   }
   return out;
@@ -98,9 +100,10 @@ std::set<std::string> access_visible_hosts(const std::vector<AccessQuestion>& qu
 }
 
 std::vector<std::pair<std::string, bool>> access_action_summary(const std::vector<AccessQuestion>& questions,
-                                                               const std::vector<AccessDecision>& decisions) {
+                                                               const std::vector<AccessDecision>& decisions,
+                                                               const AccessFeatures& features) {
   std::vector<std::pair<std::string, bool>> out;
-  for (const AccessAction& action : access_actions()) {
+  for (const AccessAction& action : access_published_actions(features)) {
     bool allowed = false;
     for (size_t i = 0; i < questions.size() && i < decisions.size() && !allowed; ++i) {
       if (page_level(questions[i]) && decisions[i].allowed && questions[i].action == action.name) allowed = true;

@@ -320,6 +320,67 @@ void test_actions_document() {
   CHECK(access_action("explorer.read") != nullptr && access_action("access") == nullptr);
 }
 
+// A feature that is off has no action in the document and no question to the PDP (ProcurAuth 5.1).
+std::set<std::string> published_names(const AccessFeatures& features) {
+  rapidjson::Document doc;
+  const std::string json = access_actions_json("db", features);
+  doc.Parse(json.c_str(), json.size());
+  std::set<std::string> names;
+  for (const auto& action : doc["actions"].GetArray()) names.insert(action["name"].GetString());
+  return names;
+}
+
+void test_actions_of_the_features_that_are_on() {
+  const std::set<std::string> always = {"query.run.read", "query.run.write", "query.export"};
+  // Every feature on: the 12 actions.
+  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(12));
+  // Every feature off: the query, the run and the export only.
+  AccessFeatures off;
+  off.query_library = off.query_library_writable = off.explorer = off.system = off.observability = off.mcp = off.mcp_keys_write = false;
+  CHECK(published_names(off) == always);
+  // MCP off: no MCP action, whatever the other MCP fields say.
+  AccessFeatures mcp_off;
+  mcp_off.mcp = false;
+  const auto without_mcp = published_names(mcp_off);
+  CHECK_EQ(without_mcp.size(), size_t(9));
+  for (const auto& name : {"mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(without_mcp.count(name) == 0);
+  // MCP on with the keys in static mode: the keys and their usage can be read, and the page makes no key.
+  AccessFeatures mcp_static;
+  mcp_static.mcp_keys_write = false;
+  const auto keys_read_only = published_names(mcp_static);
+  CHECK(keys_read_only.count("mcp.keys.read") == 1 && keys_read_only.count("mcp.keys.write") == 0 && keys_read_only.count("mcp.usage.read") == 1);
+  // The library: read when a library is on, write when one of them is writable.
+  AccessFeatures read_only_library;
+  read_only_library.query_library_writable = false;
+  const auto library_read = published_names(read_only_library);
+  CHECK(library_read.count("library.read") == 1 && library_read.count("library.write") == 0);
+  AccessFeatures no_library;
+  no_library.query_library = false;
+  const auto library_off = published_names(no_library);
+  CHECK(library_off.count("library.read") == 0 && library_off.count("library.write") == 0);
+  // The System page: both of its actions go. The observability and the Explorer have one action each.
+  AccessFeatures system_off;
+  system_off.system = false;
+  const auto without_system = published_names(system_off);
+  CHECK(without_system.count("system.read") == 0 && without_system.count("system.kill_query") == 0);
+  AccessFeatures observability_off;
+  observability_off.observability = false;
+  CHECK(published_names(observability_off).count("observability.read") == 0);
+  AccessFeatures explorer_off;
+  explorer_off.explorer = false;
+  CHECK(published_names(explorer_off).count("explorer.read") == 0);
+  // The questions to the PDP follow the document: an action that is not published is not asked, not even for the navigation.
+  const std::vector<std::string> hosts = {"local", "other"};
+  for (const auto& q : access_navigation_questions("db", hosts, "analytics", mcp_off)) {
+    CHECK(std::string(q.action).rfind("mcp.", 0) != 0);
+  }
+  CHECK(access_navigation_questions("db", hosts, "analytics", mcp_off).size() < access_navigation_questions("db", hosts, "analytics").size());
+  for (const auto& q : access_navigation_questions("db", hosts, "analytics", explorer_off)) CHECK(std::string(q.action) != "explorer.read");
+  // The summary of GET /api/version lists the published actions.
+  CHECK_EQ(access_action_summary({}, {}, mcp_off).size(), size_t(9));
+  CHECK_EQ(access_action_summary({}, {}).size(), size_t(12));
+}
+
 std::string rule_text(const char* method, const char* path) {
   const AccessRule rule = access_rule(method, path);
   const std::string where = std::string(rule.host ? "@host" : "") + (rule.database_param ? "/database" : "") + (rule.body ? " body" : "");
@@ -882,6 +943,7 @@ int main() {
   RUN(test_identity_token);
   RUN(test_es256_token);
   RUN(test_actions_document);
+  RUN(test_actions_of_the_features_that_are_on);
   RUN(test_route_rules);
   RUN(test_pdp_body_and_answer);
   RUN(test_pdp_client);

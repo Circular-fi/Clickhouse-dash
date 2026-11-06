@@ -487,6 +487,8 @@ private:
   // Return the name of this server for the PDP (access.identity.audience).
   // The name is "chdash" in the open mode.
   std::string access_server_name() const;
+  // The features that the configuration turns on: the actions of a feature that is off are not published and not asked (access_actions.hpp).
+  AccessFeatures access_features() const;
   void init_access();
   // The state of the access check belongs to the thread that serves the request.
   // before_routing resets this state first.

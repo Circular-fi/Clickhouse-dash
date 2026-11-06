@@ -90,7 +90,28 @@ const AccessAction* access_action(std::string_view name) {
   return nullptr;
 }
 
-std::string access_actions_json(std::string_view server) {
+bool access_action_published(const AccessAction& action, const AccessFeatures& features) {
+  const std::string_view name = action.name;
+  if (name == "library.read") return features.query_library;
+  if (name == "library.write") return features.query_library && features.query_library_writable;
+  if (name == "explorer.read") return features.explorer;
+  if (starts_with(name, "system.")) return features.system;
+  if (name == "observability.read") return features.observability;
+  if (name == "mcp.keys.read") return features.mcp;
+  if (name == "mcp.keys.write") return features.mcp && features.mcp_keys_write;
+  if (name == "mcp.usage.read") return features.mcp;
+  return true;
+}
+
+std::vector<AccessAction> access_published_actions(const AccessFeatures& features) {
+  std::vector<AccessAction> out;
+  for (const AccessAction& action : access_actions()) {
+    if (access_action_published(action, features)) out.push_back(action);
+  }
+  return out;
+}
+
+std::string access_actions_json(std::string_view server, const AccessFeatures& features) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -112,7 +133,7 @@ std::string access_actions_json(std::string_view server) {
   w.EndArray();
   w.Key("actions");
   w.StartArray();
-  for (const AccessAction& action : access_actions()) {
+  for (const AccessAction& action : access_published_actions(features)) {
     w.StartObject();
     w.Key("name");
     w.String(action.name);

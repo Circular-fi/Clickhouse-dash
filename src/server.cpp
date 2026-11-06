@@ -588,7 +588,7 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/.well-known/access-actions", [this](const httplib::Request&, httplib::Response& res) {
     res.status = 200;
     res.set_header("Cache-Control", "no-store");
-    res.set_content(access_actions_json(access_server_name()), "application/json");
+    res.set_content(access_actions_json(access_server_name(), access_features()), "application/json");
   });
   http_.Get("/api/meta", scoped([&](const auto& req, auto& res) { handle_api_meta(req, res); }));
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });

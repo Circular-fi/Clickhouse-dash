@@ -28,13 +28,32 @@ struct AccessResourceType {
 const std::vector<AccessResourceType>& access_resource_types();
 
 // The actions, in the order of the document. `access` is not one of them: the access gateway decides it.
+// This is the table of all the actions that the code knows. The document and the questions to the PDP use access_published_actions().
 const std::vector<AccessAction>& access_actions();
 // The action of a name, or null.
 const AccessAction* access_action(std::string_view name);
 
+// The features that the configuration turns on. A feature that is off has no action in the document and no question to the PDP:
+// ProcurAuth 5.1 (a service publishes the actions that it serves). The default is every feature on.
+struct AccessFeatures {
+  bool query_library = true;           // at least one library is enabled: library.read
+  bool query_library_writable = true;  // at least one enabled library is writable: library.write
+  bool explorer = true;                // the Explorer is on (explorer.browse or the graph): explorer.read
+  bool system = true;                  // the System page is on: system.read and system.kill_query
+  bool observability = true;           // the traces, the logs or the metrics are on for one host: observability.read
+  bool mcp = true;                     // the MCP endpoint is on: mcp.keys.read and mcp.usage.read
+  bool mcp_keys_write = true;          // MCP is on and the page may make keys (mcp.keys.mode is not "static"): mcp.keys.write
+};
+
+// True when the action is published with these features. The actions of the query, the run and the export are always published.
+bool access_action_published(const AccessAction& action, const AccessFeatures& features);
+// The published actions, in the order of the table.
+std::vector<AccessAction> access_published_actions(const AccessFeatures& features = AccessFeatures{});
+
 // The document of GET /.well-known/access-actions: {"server": <server>, "resource_types": [{name, parent, description}],
 // "actions": [{name, resource_types, description}]}. The types of an action are "service", then "host" and "database" when it takes them.
-std::string access_actions_json(std::string_view server);
+// The document lists the published actions only.
+std::string access_actions_json(std::string_view server, const AccessFeatures& features = AccessFeatures{});
 
 // What a route needs.
 enum class AccessRuleKind {

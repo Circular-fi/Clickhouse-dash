@@ -4,6 +4,8 @@
 
 #include "server.hpp"
 
+#include <algorithm>
+
 #include "access_actions.hpp"
 #include "access_pages.hpp"
 #include "api_error.hpp"
@@ -94,6 +96,19 @@ int64_t unix_now_s() {
 void Server::reset_access_state() { access_state() = AccessRequestState{}; }
 
 std::string Server::access_subject() { return access_state().subject; }
+
+AccessFeatures Server::access_features() const {
+  AccessFeatures features;
+  features.query_library = !cfg_.query_libraries.empty();
+  features.query_library_writable =
+      std::any_of(cfg_.query_libraries.begin(), cfg_.query_libraries.end(), [](const QueryLibrarySettings& library) { return library.writable; });
+  features.explorer = cfg_.explorer.enabled();
+  features.system = cfg_.system.enabled;
+  features.observability = cfg_.traces_on() || cfg_.logs_on() || cfg_.metrics_on();
+  features.mcp = cfg_.mcp.enabled;
+  features.mcp_keys_write = cfg_.mcp.enabled && cfg_.mcp.keys_mode != McpKeysMode::Static;
+  return features;
+}
 
 std::string Server::access_server_name() const { return cfg_.access.enforced() ? cfg_.access.audience : std::string("chdash"); }
 
@@ -380,7 +395,7 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
 }
 
 std::vector<AccessDecision> Server::access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database) {
-  *questions = access_navigation_questions(cfg_.access.audience, access_host_ids(), database);
+  *questions = access_navigation_questions(cfg_.access.audience, access_host_ids(), database, access_features());
   return access_decide(*questions);
 }
 
@@ -446,7 +461,7 @@ std::string Server::access_json() {
     // An action is true when the human may use it somewhere: on the service or on one host.
     w.Key("actions");
     w.StartObject();
-    for (const auto& [name, allowed] : access_action_summary(questions, decisions)) {
+    for (const auto& [name, allowed] : access_action_summary(questions, decisions, access_features())) {
       w.Key(name.c_str());
       w.Bool(allowed);
     }

@@ -107,6 +107,21 @@ ChDash publishes its actions at `GET /.well-known/access-actions`, without a tok
 
 `server` is `identity.audience` (`chdash` in the open mode). The list does not contain `access`. The top-level `resource_types` gives the tree under the service (refer to [Resources and hosts](#resources-and-hosts)). The `resource_types` of an action gives the types on which a grant for this action is valid.
 
+The document lists the published actions only (ProcurAuth 5.2a). An action of a feature that the configuration turns off is not in the document, and ChDash does not ask the PDP for it. This table lists all the actions. The column "Published when" gives the condition:
+
+| Action | Published when |
+|---|---|
+| `query.run.read`, `query.run.write`, `query.export` | Always. |
+| `explorer.read` | The Explorer is on: `explorer.browse` or the graph (`explorer.graph`). |
+| `system.read`, `system.kill_query` | `system.enabled` is `true`. |
+| `observability.read` | The traces, the logs or the metrics are on for at least one host. |
+| `library.read` | At least one `query_library` block is enabled. |
+| `library.write` | At least one enabled `query_library` block has `writable = true`. |
+| `mcp.keys.read`, `mcp.usage.read` | `mcp.enabled` is `true`. |
+| `mcp.keys.write` | `mcp.enabled` is `true` and `mcp.keys.mode` is not `static`. |
+
+The navigation follows the document: a page whose actions are not published has no link, and `GET /api/version` lists the published actions only. A system that holds grants (the portal) keeps a grant for an action that is not published. The grant applies again when the action is published again, for example when you set `mcp.enabled = true`. ChDash reads the configuration at start: a change of these settings needs a restart.
+
 | Action | Resource types | Routes |
 |---|---|---|
 | `query.run.read` | `service`, `host`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta` |
