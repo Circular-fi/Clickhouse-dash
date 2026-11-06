@@ -38,6 +38,15 @@ std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::strin
 // A bad URI stops the process at start, and not at the first request.
 std::string validate_clickhouse_uri(const std::string& uri);
 
+// True when this build has the TLS client (the CMake option CHDASH_TLS). Without it, a URI with secure=1 cannot connect.
+bool tls_available();
+
+// Returns "" when the TLS parameters of the URI can be used. Otherwise it returns the error text.
+// A URI without secure=1 always passes. With secure=1, the build must have TLS (tls_available), the file of the parameter
+// ca must be a readable file, and the directory of the parameter ca_dir must be a directory.
+// This check reads the file system. The configuration calls it at start, after validate_clickhouse_uri.
+std::string check_clickhouse_uri_tls(const std::string& uri);
+
 // Returns the URI with `password` as the password of its userinfo.
 // The password is percent-encoded. The user stays as it is. A URI with no user gets an empty user.
 // The configuration uses this function once for each URI, at start.

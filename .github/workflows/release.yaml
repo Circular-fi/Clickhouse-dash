@@ -206,9 +206,12 @@ jobs:
             binutils \
             ca-certificates \
             cmake \
+            curl \
             file \
             git \
+            make \
             ninja-build \
+            perl \
             python3
 
       - name: Install dependencies (macOS)
@@ -289,6 +292,28 @@ jobs:
 
           echo "ZIG_TOOLCHAIN_FILE=${TOOLCHAIN_FILE}" >> "${GITHUB_ENV}"
 
+      # TLS to ClickHouse (secure=1): the pinned OpenSSL, built as static libraries with the same musl compiler as ChDash.
+      - name: Build OpenSSL (Linux musl static)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS_DIR="${PWD}/.github-build-tools/${{ matrix.goos }}-${{ matrix.goarch }}"
+          case "${{ matrix.goarch }}" in
+            amd64) OPENSSL_TARGET=linux-x86_64 ;;
+            arm64) OPENSSL_TARGET=linux-aarch64 ;;
+            *) echo "no OpenSSL target for ${{ matrix.goarch }}"; exit 1 ;;
+          esac
+          CC="${TOOLS_DIR}/zig-cc" AR="${TOOLS_DIR}/zig-ar" RANLIB="${TOOLS_DIR}/zig-ranlib" ZIG_TARGET="${{ matrix.zig_target }}" \
+            bash tools/build_openssl.sh "${PWD}/.github-build-tools/openssl-${{ matrix.goos }}-${{ matrix.goarch }}" "${OPENSSL_TARGET}"
+
+      - name: Build OpenSSL (macOS)
+        if: matrix.goos == 'darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/build_openssl.sh "${PWD}/.github-build-tools/openssl-${{ matrix.goos }}-${{ matrix.goarch }}" "darwin64-${{ matrix.osx_arch }}-cc"
+
       - name: Configure (Linux musl static)
         if: matrix.goos == 'linux'
         shell: bash
@@ -299,6 +324,8 @@ jobs:
           cmake -S src -B "${BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="${ZIG_TOOLCHAIN_FILE}" \
+            -DCHDASH_TLS=ON \
+            -DOPENSSL_ROOT_DIR="${PWD}/.github-build-tools/openssl-${{ matrix.goos }}-${{ matrix.goarch }}" \
             -DCHDASH_EMBED_STATIC=ON \
             -DCHDASH_SEMVER_VALUE="${VERSION}" \
             -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
@@ -318,6 +345,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES="${{ matrix.osx_arch }}" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCHDASH_TLS=ON \
+            -DOPENSSL_ROOT_DIR="${PWD}/.github-build-tools/openssl-${{ matrix.goos }}-${{ matrix.goarch }}" \
             -DCHDASH_EMBED_STATIC=ON \
             -DCHDASH_SEMVER_VALUE="${VERSION}" \
             -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
@@ -375,6 +404,18 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/smoke/release_smoke.py --binary "${BUILD_DIR}/chdash"
+
+      # A binary without the TLS client stops the start when a URI has secure=1 (check_clickhouse_uri_tls). The release must not ship one.
+      - name: Check that the binary has the TLS client
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG="${RUNNER_TEMP}/tls-check.hcl"
+          printf '%s\n' \
+            'access { mode = "open" }' \
+            'clickhouse { host { name = "tls" runner_uri = "clickhouse://u@h?secure=1" system_uri = "clickhouse://u@h?secure=1" } }' \
+            > "${CONFIG}"
+          "${BUILD_DIR}/chdash" --config "${CONFIG}" --print-config > /dev/null
 
       - name: Package
         id: package

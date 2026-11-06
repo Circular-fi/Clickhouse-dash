@@ -356,6 +356,29 @@ void test_uris() {
   // The URI has no password_file parameter. The host attribute reads a file one time, at start.
   CHECK(contains(validate_clickhouse_uri("clickhouse://u@h:9000?password_file=/x"), "unknown parameter password_file"));
   CHECK_EQ(validate_clickhouse_uri("clickhouse://u@h:9000?secure=1&verify=0&ca=/x&ca_dir=/y&sni=0&compression=zstd"), std::string(""));
+  // The boolean parameters take one of eight words. Another text stops the start: `secure=ture` must not give a plain connection.
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?secure=ture"), "the parameter secure takes"));
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?secure=1&verify=fasle"), "the parameter verify takes"));
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?secure=1&sni=2"), "the parameter sni takes"));
+  CHECK_EQ(validate_clickhouse_uri("clickhouse://u@h?secure=YES&verify=Off&sni=true"), std::string(""));
+  CHECK_EQ(validate_clickhouse_uri("clickhouse://u@h?secure"), std::string(""));
+  // The TLS parameters need secure=1: a URI must not look secure and give no TLS.
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?ca=/x"), "the parameter ca needs secure=1"));
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?secure=0&verify=0"), "the parameter verify needs secure=1"));
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?ca_dir=/x"), "the parameter ca_dir needs secure=1"));
+  CHECK(contains(validate_clickhouse_uri("clickhouse://u@h?sni=0"), "the parameter sni needs secure=1"));
+  // check_clickhouse_uri_tls: no secure, no check. With secure, the build needs TLS and the files must exist.
+  CHECK_EQ(check_clickhouse_uri_tls("clickhouse://u@h:9000"), std::string(""));
+  CHECK_EQ(check_clickhouse_uri_tls("clickhouse://u@h:9000?secure=0"), std::string(""));
+  if (!tls_available()) {
+    CHECK(contains(check_clickhouse_uri_tls("clickhouse://u@h?secure=1"), "needs a build with TLS"));
+  } else {
+    CHECK_EQ(check_clickhouse_uri_tls("clickhouse://u@h?secure=1"), std::string(""));
+    CHECK(contains(check_clickhouse_uri_tls("clickhouse://u@h?secure=1&ca=/no/such/ca.pem"), "the parameter ca must name a readable file"));
+    CHECK(contains(check_clickhouse_uri_tls("clickhouse://u@h?secure=1&ca_dir=/no/such/dir"), "the parameter ca_dir must name a directory"));
+    CHECK_EQ(check_clickhouse_uri_tls("clickhouse://u@h?secure=1&ca=/etc/hostname"), std::string(""));
+    CHECK_EQ(check_clickhouse_uri_tls("clickhouse://u@h?secure=1&ca_dir=/etc"), std::string(""));
+  }
   // The port of TLS is 9440 when the URI names none.
   std::string err;
   CHECK_EQ(parse_clickhouse_uri("clickhouse://u@h?secure=1", &err)->port, uint16_t(9440));

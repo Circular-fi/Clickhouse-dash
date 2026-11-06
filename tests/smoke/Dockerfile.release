@@ -8,7 +8,7 @@
 FROM ubuntu:22.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends binutils ca-certificates cmake curl file git ninja-build python3 xz-utils \
+ && apt-get install -y --no-install-recommends binutils ca-certificates cmake curl file git make ninja-build perl python3 xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # The SHA-256 of each archive, from https://ziglang.org/download/index.json. A new ZIG_VERSION needs new sums.
@@ -43,6 +43,12 @@ RUN arch="$(uname -m)"; tools=/work/tools; mkdir -p "$tools" \
       'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -pie")' \
       > /work/tools/zig-musl-toolchain.cmake
 
+# TLS to ClickHouse: the pinned OpenSSL as static libraries, built with the same musl compiler (tools/build_openssl.sh).
+COPY tools/build_openssl.sh /work/build_openssl.sh
+RUN export ZIG_TARGET="$(uname -m)-linux-musl" \
+ && case "$(uname -m)" in x86_64) target=linux-x86_64 ;; aarch64) target=linux-aarch64 ;; *) echo "no OpenSSL target" >&2; exit 1 ;; esac \
+ && CC=/work/tools/zig-cc AR=/work/tools/zig-ar RANLIB=/work/tools/zig-ranlib bash /work/build_openssl.sh /work/openssl "$target"
+
 WORKDIR /work
 # The dependencies first (they change rarely): a build that only changes src/*.cpp reuses this layer.
 COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
@@ -50,6 +56,8 @@ RUN export ZIG_TARGET="$(uname -m)-linux-musl" \
  && cmake -S src -B build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_TOOLCHAIN_FILE=/work/tools/zig-musl-toolchain.cmake \
+      -DCHDASH_TLS=ON \
+      -DOPENSSL_ROOT_DIR=/work/openssl \
       -DCHDASH_BUILD_APP=OFF \
       -DFETCHCONTENT_BASE_DIR=/work/fetchcontent
 RUN export ZIG_TARGET="$(uname -m)-linux-musl" && cmake --build build --target clickhouse-cpp-lib --parallel 4
@@ -63,6 +71,8 @@ RUN export ZIG_TARGET="$(uname -m)-linux-musl" \
  && cmake -S src -B build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_TOOLCHAIN_FILE=/work/tools/zig-musl-toolchain.cmake \
+      -DCHDASH_TLS=ON \
+      -DOPENSSL_ROOT_DIR=/work/openssl \
       -DCHDASH_EMBED_STATIC=ON \
       -DCHDASH_BUILD_APP=ON \
       -DCHDASH_SEMVER_VALUE=0.0.0-smoke \

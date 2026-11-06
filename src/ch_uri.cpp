@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
 #include <unordered_map>
 
 namespace chdash {
@@ -302,6 +305,17 @@ bool known_uri_parameter(const std::string& name) {
   return false;
 }
 
+// The value of a boolean parameter: 1, true, yes, on, 0, false, no or off (any case). An empty value (secure, or secure=) means true.
+// Any other text is a mistake and stops the start: `secure=ture` must not give a connection without TLS, and `verify=fasle`
+// must not give a verified one by chance.
+std::optional<bool> strict_boolean(const std::string& text) {
+  std::string v = text;
+  std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (v.empty() || v == "1" || v == "true" || v == "yes" || v == "on") return true;
+  if (v == "0" || v == "false" || v == "no" || v == "off") return false;
+  return std::nullopt;
+}
+
 std::optional<clickhouse::CompressionMethod> parse_compression(std::string method, std::string* err) {
   std::transform(method.begin(), method.end(), method.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   if (method == "lz4" || method == "1" || method == "true") return clickhouse::CompressionMethod::LZ4;
@@ -326,6 +340,53 @@ std::string validate_clickhouse_uri(const std::string& uri) {
   }
   if (const auto compression = parsed->query.find("compression"); compression != parsed->query.end()) {
     if (!parse_compression(compression->second, &err)) return err;
+  }
+  for (const char* name : {"secure", "verify", "sni"}) {
+    const auto it = parsed->query.find(name);
+    if (it != parsed->query.end() && !strict_boolean(it->second)) {
+      return std::string("the parameter ") + name + " takes 1, true, yes, on, 0, false, no or off; the value is \"" + it->second + "\"";
+    }
+  }
+  // The TLS parameters have no effect without secure=1. A URI that sets one of them and gives no TLS would look secure and
+  // would not be.
+  const bool secure = parsed->query.count("secure") != 0 && strict_boolean(parsed->query.at("secure")).value_or(false);
+  if (!secure) {
+    for (const char* name : {"verify", "ca", "ca_dir", "sni"}) {
+      if (parsed->query.count(name) != 0) return std::string("the parameter ") + name + " needs secure=1";
+    }
+  }
+  return {};
+}
+
+bool tls_available() {
+#ifdef CHDASH_HAVE_TLS
+  return true;
+#else
+  return false;
+#endif
+}
+
+std::string check_clickhouse_uri_tls(const std::string& uri) {
+  std::string err;
+  const auto parsed = parse_clickhouse_uri(trim_ascii(uri), &err);
+  if (!parsed) return err;
+  const auto secure_it = parsed->query.find("secure");
+  if (secure_it == parsed->query.end() || !strict_boolean(secure_it->second).value_or(false)) return {};
+  if (!tls_available()) {
+    return "secure=1 needs a build with TLS. The release binaries from 1.2.1 have it; a build from the source needs -DCHDASH_TLS=ON "
+           "(tools/build_openssl.sh builds OpenSSL)";
+  }
+  if (const auto ca = parsed->query.find("ca"); ca != parsed->query.end() && !ca->second.empty()) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(ca->second, ec) || !std::ifstream(ca->second).good()) {
+      return "the parameter ca must name a readable file of certificates; the value is \"" + ca->second + "\"";
+    }
+  }
+  if (const auto dir = parsed->query.find("ca_dir"); dir != parsed->query.end() && !dir->second.empty()) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir->second, ec)) {
+      return "the parameter ca_dir must name a directory of certificates; the value is \"" + dir->second + "\"";
+    }
   }
   return {};
 }

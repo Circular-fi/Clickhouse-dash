@@ -468,6 +468,12 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     const auto check_uri = [&](const std::string& uri, const char* field) {
       const std::string problem = validate_clickhouse_uri(uri);
       if (!problem.empty()) throw std::runtime_error("clickhouse.host " + *name + ": " + field + ": " + problem);
+      const std::string tls_problem = check_clickhouse_uri_tls(uri);
+      if (!tls_problem.empty()) throw std::runtime_error("clickhouse.host " + *name + ": " + field + ": " + tls_problem);
+      if (const auto parsed = parse_clickhouse_uri(uri, nullptr);
+          parsed && !query_param_truthy(parsed->query, "verify", true) && query_param_truthy(parsed->query, "secure", false)) {
+        cfg.warnings.push_back("clickhouse.host " + *name + ": " + field + ": verify=0, so the certificate of the server is not verified");
+      }
     };
     check_uri(*runner_uri, "runner_uri");
     check_uri(*system_uri, "system_uri");

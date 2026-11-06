@@ -94,7 +94,7 @@ def test_the_release_smoke_image_builds_with_the_same_toolchain_and_flags_as_the
     version = re.search(r"version: (\d+\.\d+\.\d+)\n\s+use-cache: false", RELEASE).group(1)
     assert f"ARG ZIG_VERSION={version}" in docker
     for line in ('exec zig cc -target "${ZIG_TARGET}" -static "$@"', 'exec zig c++ -target "${ZIG_TARGET}" -static "$@"',
-                 'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -pie")', "-DCMAKE_BUILD_TYPE=Release", "-DCHDASH_EMBED_STATIC=ON", "check_release_binary.sh"):
+                 'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -pie")', "-DCMAKE_BUILD_TYPE=Release", "-DCHDASH_EMBED_STATIC=ON", "-DCHDASH_TLS=ON", "tools/build_openssl.sh", "check_release_binary.sh"):
         assert line in RELEASE and line in docker, line
 
 

@@ -45,6 +45,16 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
   GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
+# TLS to ClickHouse: the parameter secure=1 of a ClickHouse URI (docs/configuration.md). The client library needs OpenSSL for it.
+# A build with CHDASH_TLS=ON links the STATIC libraries of OpenSSL (the release binary has no shared library). tools/build_openssl.sh
+# builds the pinned version into a prefix; give the prefix with -DOPENSSL_ROOT_DIR=<prefix>. A build without CHDASH_TLS has no OpenSSL
+# and refuses secure=1 at start, with a message that names this option.
+option(CHDASH_TLS "Build the TLS client of ClickHouse (secure=1); needs the static OpenSSL, see tools/build_openssl.sh" OFF)
+if (CHDASH_TLS)
+  set(OPENSSL_USE_STATIC_LIBS ON)
+  set(WITH_OPENSSL ON CACHE BOOL "" FORCE)
+  add_compile_definitions(CHDASH_HAVE_TLS=1)
+endif()
 # A Bool is a ColumnBool (true, false), not a UInt8: the JSON encoder, the export and the type of a result say Bool.
 set(CH_MAP_BOOL_TO_UINT8 OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(clickhouse_cpp)
@@ -66,7 +76,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(rapidjson)
 
-# The signature checks of the identity token (docs/access.md): Ed25519 (EdDSA) from Monocypher and P-256 (ES256) from
+# The signature checks of the identity token (docs/access.md): Ed25519 from Monocypher and P-256 (ES256) from
 # micro-ecc. The build has no OpenSSL (the release binary is a static musl executable), and these two C files have no other
 # dependency. ChDash only verifies signatures with public keys: no secret goes through them.
 enable_language(C)

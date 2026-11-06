@@ -735,4 +735,38 @@ These rules apply to the passwords of a host:
 
 The URI parameters are `compression`, `secure`, `verify`, `ca`, `ca_dir` and `sni`. A parameter that is not in this list stops the start. With `secure=1` and no port in the URI, the port is 9440. This is the native TLS port of ClickHouse. Without `secure`, the port is 9000.
 
+### TLS to ClickHouse
+
+From version 1.2.1, the release binaries have a TLS client for the native protocol. The binary contains its own OpenSSL (static libraries, version in `tools/build_openssl.sh`). A build from the source has it only with the CMake option `-DCHDASH_TLS=ON`. A build without it stops the start when a URI has `secure=1`.
+
+| Parameter | Default | Use |
+|---|---|---|
+| `secure` | `0` | `1` connects with TLS. The port is 9440 when the URI names none. |
+| `verify` | `1` | `0` does not verify the certificate and the name of the host. Use it for a test only. The start writes a warning for each URI that has it. |
+| `ca` | the store of the system | The file of the CA certificates (PEM) that verify the server. It replaces the store of the system. The file must be readable, or the start stops. |
+| `ca_dir` | the store of the system | A directory of CA certificates with hashed names (`openssl rehash`). It must be a directory, or the start stops. |
+| `sni` | `1` | `0` sends no server name in the handshake. |
+
+The rules of the parameters:
+
+- A boolean takes `1`, `true`, `yes`, `on`, `0`, `false`, `no` or `off`. Another text stops the start, so `secure=ture` never gives a plain connection.
+- `verify`, `ca`, `ca_dir` and `sni` need `secure=1`. A URI that sets one of them without TLS stops the start.
+- ChDash verifies the certificate chain and the name of the host (the host of the URI must be in the subject alternative names of the certificate). The name that ChDash checks is the host of the URI, not an alias.
+- The store of the system is `/etc/ssl` (Debian, Alpine and Red Hat systems). An image that has no store, for example an image `FROM scratch`, needs `ca`.
+- The same parameters apply to `runner_uri`, `system_uri` and `mcp_uri`. The password never goes in the URI.
+
+```hcl
+clickhouse {
+  host {
+    name                 = "prod"
+    runner_uri           = "clickhouse://chdash_runner@clickhouse.example.internal?secure=1&ca=/run/secrets/clickhouse-ca.pem"
+    system_uri           = "clickhouse://chdash_system@clickhouse.example.internal?secure=1&ca=/run/secrets/clickhouse-ca.pem"
+    runner_password_file = "/run/secrets/chdash_runner_password"
+    system_password_file = "/run/secrets/chdash_system_password"
+  }
+}
+```
+
+ChDash does not send a client certificate. A ClickHouse server that needs one (`verificationMode` `strict` or `relaxed` with a client CA) refuses ChDash.
+
 The `compression` query parameter of the URI sets the compression of native protocol blocks for each connection. The values are `lz4` (default), `zstd` or `none`. For example: `clickhouse://chdash_runner@clickhouse:9000?compression=zstd`. LZ4 typically makes the traffic of results and exports 3-10x smaller, for a negligible CPU cost. Use `none` only when ClickHouse is on the same host and the CPU is the bottleneck.
