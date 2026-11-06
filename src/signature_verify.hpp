@@ -1,6 +1,6 @@
 #pragma once
 
-// The signature checks of the identity token (docs/access.md): Ed25519 (the JWS algorithm EdDSA, RFC 8037) and ECDSA on
+// The signature checks of the identity token (docs/access.md): Ed25519 (the JWS algorithm Ed25519, RFC 9864) and ECDSA on
 // P-256 with SHA-256 (ES256, RFC 7518). Only public keys go through this unit. The code of the curves is Monocypher (Ed25519)
 // and micro-ecc (P-256): this file is the one place that calls them.
 

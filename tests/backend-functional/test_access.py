@@ -161,8 +161,8 @@ def test_u03_a_token_that_is_not_valid_gets_401():
     for name, value in bad.items():
         response = call("GET", SYSTEM, tok=value)
         assert response.status_code == 401, (name, response.status_code, response.text)
-    # The valid forms: EdDSA, ES256, an audience in a list.
-    for name, value in {"eddsa": token(), "es256": token(key=P256), "list": token(aud=["x", AUDIENCE])}.items():
+    # The valid forms: Ed25519, ES256, an audience in a list.
+    for name, value in {"ed25519": token(), "es256": token(key=P256), "list": token(aud=["x", AUDIENCE])}.items():
         response = call("GET", "/api/version", tok=value)
         assert response.status_code == 200, (name, response.status_code, response.text)
 

@@ -7,7 +7,7 @@ protection against side channels: it is for test keys only. The server verifies 
     key = Ed25519Key(seed)          # 32 bytes
     key = P256Key(secret)           # an integer in [1, n-1]
     key.public_pem()                # the SubjectPublicKeyInfo in PEM, for access.identity.public_keys
-    make_token(key, claims)         # a compact JWS: EdDSA or ES256
+    make_token(key, claims)         # a compact JWS: Ed25519 or ES256
 """
 
 import base64
@@ -71,7 +71,7 @@ def _sha512_int(data):
 
 
 class Ed25519Key:
-    alg = "EdDSA"
+    alg = "Ed25519"
 
     def __init__(self, seed: bytes):
         assert len(seed) == 32

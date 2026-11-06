@@ -236,8 +236,9 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
   const auto alg = header.FindMember("alg");
   if (alg == header.MemberEnd() || !alg->value.IsString()) return refused("algorithm");
   const std::string algorithm(alg->value.GetString(), alg->value.GetStringLength());
-  if (algorithm != "EdDSA" && algorithm != "ES256") return refused("algorithm");
-  const IdentityKey::Type type = algorithm == "EdDSA" ? IdentityKey::Type::Ed25519 : IdentityKey::Type::P256;
+  // ProcurAuth 9.2: Ed25519 (RFC 9864) or ES256. The name EdDSA is deprecated (RFC 9864, 4.1.2), so a token with it is refused.
+  if (algorithm != "Ed25519" && algorithm != "ES256") return refused("algorithm");
+  const IdentityKey::Type type = algorithm == "Ed25519" ? IdentityKey::Type::Ed25519 : IdentityKey::Type::P256;
   // An extension that this verifier does not know must stop the token (RFC 7515, 4.1.11).
   if (header.HasMember("crit")) return refused("malformed");
   if (const auto typ = header.FindMember("typ"); typ != header.MemberEnd()) {

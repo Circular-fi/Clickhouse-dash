@@ -43,7 +43,7 @@ access {
 | `identity.header` | `X-Identity-Token` | The request header that carries the token. `Cookie`, `Authorization`, `Host`, `Content-Type` and `Content-Length` are refused. |
 | `identity.issuer` | (required) | The value that the `iss` claim must have. |
 | `identity.audience` | (required) | The name of this server: 1 to 256 bytes of UTF-8, no control character. The `aud` claim must contain it. It is also the `id` of the `service` resource and the `server` of the list of actions. |
-| `identity.public_keys` | (required) | The public keys of the issuer in PEM: 1 to 16 `-----BEGIN PUBLIC KEY-----` blocks. Each key is Ed25519 (`EdDSA`) or P-256 with an uncompressed point (`ES256`). It has the forms `public_keys`, `public_keys_env` and `public_keys_file`. Give exactly one. |
+| `identity.public_keys` | (required) | The public keys of the issuer in PEM: 1 to 16 `-----BEGIN PUBLIC KEY-----` blocks. Each key is Ed25519 (`Ed25519`) or P-256 with an uncompressed point (`ES256`). It has the forms `public_keys`, `public_keys_env` and `public_keys_file`. Give exactly one. |
 | `identity.max_age` | `5m` | The longest life of a token (`exp - iat`). From `1s` to `24h`. |
 | `pdp.url` | (required) | The base URL of the PDP: `http://host[:port][/path]`. It has the forms `url`, `url_env` and `url_file`. Give exactly one. |
 | `pdp.token_env`, `pdp.token_file` | (required) | The token of this server at the PDP. It is a secret: give exactly one of the two forms. A token in clear text (`token = "..."`) stops the start. |
@@ -70,7 +70,7 @@ The identity token is a JWT (RFC 7519) in the compact JWS form. ChDash verifies 
 
 | Item | Rule |
 |---|---|
-| Header | `alg` is `EdDSA` (Ed25519) or `ES256` (P-256, SHA-256). A header with `crit`, or a `typ` that is not `JWT`, is refused. ChDash never fetches a key: `jku`, `x5u` and `jwk` have no effect. ChDash tries each configured key of the algorithm, so a rotation can use two keys. |
+| Header | `alg` is `Ed25519` or `ES256` (P-256, SHA-256). The name `EdDSA` is deprecated (RFC 9864, 4.1.2): a token with it is refused. A header with `crit`, or a `typ` that is not `JWT`, is refused. ChDash never fetches a key: `jku`, `x5u` and `jwk` have no effect. ChDash tries each configured key of the algorithm, so a rotation can use two keys. |
 | Signature | It must be valid for one of the configured keys. |
 | `iss` | It must be equal to `identity.issuer`. |
 | `aud` | A text equal to `identity.audience`, or a list that contains it. |

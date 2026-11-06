@@ -82,7 +82,7 @@ struct TestKey {
     return "-----BEGIN PUBLIC KEY-----\n" + encode64(der, false) + "\n-----END PUBLIC KEY-----\n";
   }
 
-  std::string token(const std::string& claims, const std::string& header = R"({"alg":"EdDSA","typ":"JWT"})") const {
+  std::string token(const std::string& claims, const std::string& header = R"({"alg":"Ed25519","typ":"JWT"})") const {
     const std::string input = b64url(header) + "." + b64url(claims);
     std::array<uint8_t, 64> signature{};
     crypto_ed25519_sign(signature.data(), secret.data(), reinterpret_cast<const uint8_t*>(input.data()), input.size());
@@ -233,11 +233,13 @@ void test_identity_token() {
   // The header: the algorithm, crit, typ.
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"none"})")), std::string("algorithm"));
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"HS256"})")), std::string("algorithm"));
+  // EdDSA is the deprecated name (RFC 9864, 4.1.2; ProcurAuth 9.2): a token with it is refused, also with a valid Ed25519 signature.
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"EdDSA","typ":"JWT"})")), std::string("algorithm"));
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"ES256"})")), std::string("signature"));
   CHECK_EQ(reason(key.token(claims(), R"({"typ":"JWT"})")), std::string("algorithm"));
-  CHECK_EQ(reason(key.token(claims(), R"({"alg":"EdDSA","crit":["exp"]})")), std::string("malformed"));
-  CHECK_EQ(reason(key.token(claims(), R"({"alg":"EdDSA","typ":"jwt","kid":"anything"})")), std::string("ok:alice"));
-  CHECK_EQ(reason(key.token(claims(), R"({"alg":"EdDSA","typ":"at+jwt"})")), std::string("malformed"));
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","crit":["exp"]})")), std::string("malformed"));
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","typ":"jwt","kid":"anything"})")), std::string("ok:alice"));
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","typ":"at+jwt"})")), std::string("malformed"));
   // The form of the token.
   const std::string good = key.token(claims());
   CHECK_EQ(reason(good.substr(0, good.rfind('.'))), std::string("malformed"));

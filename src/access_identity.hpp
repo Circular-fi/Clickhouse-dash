@@ -1,7 +1,7 @@
 #pragma once
 
 // The identity token of the access of humans (docs/access.md, contract 11.3). The access gateway authenticates the human
-// and gives the server a short JWT in one request header. The server verifies the signature (EdDSA with Ed25519, or ES256),
+// and gives the server a short JWT in one request header. The server verifies the signature (Ed25519, or ES256),
 // `iss`, `aud`, `exp` and the duration `exp - iat` on each request. The token holds no permission: the PDP gives them.
 //
 // The public keys come from the configuration as PEM text (one or more SubjectPublicKeyInfo blocks). ChDash never fetches a

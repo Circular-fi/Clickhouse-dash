@@ -491,7 +491,7 @@ const ACCESS_KEY = crypto.createPrivateKey({
 const b64url = (data) => Buffer.from(data).toString('base64url');
 function identityToken(sub) {
   const now = Math.floor(Date.now() / 1000);
-  const input = `${b64url(JSON.stringify({ alg: 'EdDSA', typ: 'JWT' }))}.${b64url(JSON.stringify({ iss: 'https://access.test', sub, aud: 'db', iat: now - 5, exp: now + 240 }))}`;
+  const input = `${b64url(JSON.stringify({ alg: 'Ed25519', typ: 'JWT' }))}.${b64url(JSON.stringify({ iss: 'https://access.test', sub, aud: 'db', iat: now - 5, exp: now + 240 }))}`;
   return `${input}.${b64url(crypto.sign(null, Buffer.from(input), ACCESS_KEY))}`;
 }
 const ALL_ACTIONS = ['query.run.read', 'query.run.write', 'query.export', 'library.read', 'library.write', 'explorer.read', 'system.read',

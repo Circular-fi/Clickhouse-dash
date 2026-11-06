@@ -13,7 +13,7 @@ Older snapshots may not receive fixes.
 
 ChDash has no login page. The configuration requires an `access` block. The `access` block selects the model ([docs/access.md](docs/access.md)):
 
-- `mode = "authzen"`: An access gateway authenticates each human. It gives ChDash a signed identity token (EdDSA or ES256). ChDash verifies the token on each request to the pages and to the API. Without a valid token, ChDash returns `401`. ChDash asks an AuthZEN PDP for each action, on the service, on the host or on the database of the request. When the answer is `false`, or when the PDP does not answer, ChDash returns `403`. A run has `readonly = 1` if the user does not have `query.run.write` on its host. The pages show only the hosts on which the user holds an action. A request for another host gets the answer of a host that does not exist.
+- `mode = "authzen"`: An access gateway authenticates each human. It gives ChDash a signed identity token (Ed25519 or ES256). ChDash verifies the token on each request to the pages and to the API. Without a valid token, ChDash returns `401`. ChDash asks an AuthZEN PDP for each action, on the service, on the host or on the database of the request. When the answer is `false`, or when the PDP does not answer, ChDash returns `403`. A run has `readonly = 1` if the user does not have `query.run.write` on its host. The pages show only the hosts on which the user holds an action. A request for another host gets the answer of a host that does not exist.
 - `mode = "open"`: Everyone who can reach the port has the ClickHouse rights of the configured accounts. ChDash writes a warning at each start. Use this mode only for a server that stands alone on a closed network and serves a trusted team.
 
 ### Threat model
