@@ -6560,6 +6560,173 @@ void test_identity_budgets() {
   CHECK_EQ(inner.calls.size(), size_t(1));
 }
 
+// The mode keys (owner decision of 2026-11-07): a call of a tool of query.run.read (run_query, explain_query, format_sql, explorer_names,
+// query_execution) is one use of the creator of the key. It takes one unit of the budget `queries` of the creator with one question with
+// context.usage on the host of the call, and no question without context.usage on the same resource goes before it (ProcurAuth 10.1).
+void test_creator_budgets() {
+  struct Pdp {
+    std::set<std::string> allowed;  // "subject|action@path" with the prefix rule of the grants
+    std::vector<std::string> plain;  // the questions without context.usage, "subject|action@path"
+    std::vector<std::string> uses;   // the questions with context.usage
+    AccessDecision use_answer;
+  };
+  Pdp pdp;
+  const chdash_test::GrantRules rules("db");
+  McpCreatorAccess gate(
+      "db", std::chrono::milliseconds(30000),
+      [&](const std::string& subject, const std::vector<AccessQuestion>& questions) {
+        std::vector<std::string> grants;
+        for (const auto& entry : pdp.allowed) {
+          if (entry.rfind(subject + "|", 0) == 0) grants.push_back(entry.substr(subject.size() + 1));
+        }
+        std::vector<AccessDecision> out;
+        for (const auto& q : questions) {
+          pdp.plain.push_back(subject + "|" + question_text(q));
+          AccessDecision d;
+          d.source = "pdp";
+          d.allowed = rules.decide(grants, q.action, q.resource).decision;
+          out.push_back(d);
+        }
+        return out;
+      },
+      [] { return int64_t{1000}; },
+      [&](const std::string& subject, const AccessQuestion& question) {
+        pdp.uses.push_back(subject + "|" + question_text(question));
+        return pdp.use_answer;
+      },
+      [](const std::string& action) { return action == "query.run.read" || action == "query.run.write"; });
+  const auto granted = [](std::optional<uint64_t> units) {
+    AccessDecision d;
+    d.allowed = true;
+    d.source = "pdp";
+    d.usage_units = units;
+    return d;
+  };
+  McpKey key = a_key({"run_query", "explain_query", "format_sql", "explorer_names", "query_execution", "list_databases", "list_hosts"}, {"*"});
+  key.source = "ui";
+  key.creator = "alice";
+  pdp.allowed = {"alice|query.run.read@service:db", "alice|explorer.read@service:db"};
+  const auto prod = args_of(R"({"host":"prod","sql":"select 1"})");
+  const auto none = args_of("{}");
+
+  // Each tool of query.run.read is one use: one question with usage on the host of the call, and no question without usage.
+  for (const char* name : {"run_query", "explain_query", "format_sql", "explorer_names", "query_execution"}) {
+    pdp.plain.clear();
+    pdp.uses.clear();
+    pdp.use_answer = granted(1);
+    const McpCreatorCall decided = gate.call(key, *mcp_find_tool(name), name == std::string("run_query") ? prod : none);
+    CHECK(decided.access == McpAccess::Allowed && decided.use);
+    CHECK(pdp.uses == (std::vector<std::string>{"alice|query.run.read@service:db/host:prod"}));
+    CHECK(pdp.plain.empty());
+  }
+  // A true answer with the units 0 (no budget applies to the creator) lets the call run too.
+  pdp.use_answer = granted(0);
+  CHECK(gate.call(key, *mcp_find_tool("run_query"), prod).access == McpAccess::Allowed);
+
+  // A spent budget: BudgetExceeded with the seconds of retry_after. The tool never runs.
+  AccessDecision spent;
+  spent.source = "pdp";
+  spent.reason = PdpReason::BudgetExceeded;
+  spent.retry_after = 42;
+  pdp.use_answer = spent;
+  McpCreatorCall decided = gate.call(key, *mcp_find_tool("run_query"), prod);
+  CHECK(decided.access == McpAccess::BudgetExceeded && decided.retry_after == uint64_t(42) && decided.action == "query.run.read");
+  // No valid answer: Failed (the route answers 503), never a denial. The question went one time.
+  pdp.uses.clear();
+  pdp.use_answer = AccessDecision{};
+  pdp.use_answer.failed = true;
+  decided = gate.call(key, *mcp_find_tool("explain_query"), none);
+  CHECK(decided.access == McpAccess::Failed && pdp.uses.size() == 1);
+  // A plain false, and a true answer without units (6.12): Denied.
+  pdp.use_answer = AccessDecision{};
+  CHECK(gate.call(key, *mcp_find_tool("format_sql"), none).access == McpAccess::Denied);
+  pdp.use_answer = AccessDecision{};
+  pdp.use_answer.usage_invalid = true;
+  CHECK(gate.call(key, *mcp_find_tool("format_sql"), none).access == McpAccess::Denied);
+  // A true answer with a ceiling: the server makes it false with the name of the ceiling (a key cannot apply it). The unit is taken: Denied
+  // with the ceiling, and no second question.
+  pdp.uses.clear();
+  pdp.use_answer = AccessDecision{};
+  pdp.use_answer.ceiling_refused = "max_rows";
+  decided = gate.call(key, *mcp_find_tool("run_query"), prod);
+  CHECK(decided.access == McpAccess::Denied && decided.ceiling == "max_rows" && pdp.uses.size() == 1);
+
+  // The other tools take no unit: a tool of the Explorer asks without usage, and a tool with no action asks nothing.
+  pdp.plain.clear();
+  pdp.uses.clear();
+  pdp.use_answer = granted(1);
+  CHECK(gate.call(key, *mcp_find_tool("list_databases"), none).access == McpAccess::Allowed);
+  CHECK(gate.call(key, *mcp_find_tool("list_hosts"), none).access == McpAccess::Allowed);
+  CHECK(pdp.uses.empty());
+  CHECK(pdp.plain == (std::vector<std::string>{"alice|explorer.read@service:db/host:prod"}));
+
+  // A call that names a host that is not a host of the key runs nothing (not_found): no unit, the plain question decides.
+  pdp.plain.clear();
+  CHECK(gate.call(key, *mcp_find_tool("run_query"), args_of(R"({"host":"other","sql":"select 1"})")).access == McpAccess::Allowed);
+  CHECK(pdp.uses.empty() && pdp.plain.size() == 1);
+  // A host that is not text runs nothing either.
+  CHECK(!gate.call(key, *mcp_find_tool("run_query"), args_of(R"({"host":7})")).use);
+
+  // A key of several hosts: the use is on the host of the call, and the other host of the key is asked without usage, first.
+  McpKey two = key;
+  two.id = "k2";
+  two.hosts = {"prod", "stage"};
+  pdp.plain.clear();
+  pdp.uses.clear();
+  decided = gate.call(two, *mcp_find_tool("run_query"), args_of(R"({"host":"stage","sql":"select 1"})"));
+  CHECK(decided.access == McpAccess::Allowed && decided.use);
+  CHECK(pdp.plain == (std::vector<std::string>{"alice|query.run.read@service:db/host:prod"}));
+  CHECK(pdp.uses == (std::vector<std::string>{"alice|query.run.read@service:db/host:stage"}));
+  // Without a host, a key of several hosts gives host_required: no use.
+  pdp.uses.clear();
+  CHECK(!gate.call(two, *mcp_find_tool("run_query"), none).use && pdp.uses.empty());
+  // A refused question without usage stops the call before the use: no unit is taken (ProcurAuth 10.1a).
+  pdp.allowed = {"alice|query.run.read@service:db/host:stage"};
+  decided = gate.call(two, *mcp_find_tool("run_query"), args_of(R"({"host":"stage","sql":"select 1"})"));
+  CHECK(decided.access == McpAccess::Denied && !decided.use && pdp.uses.empty());
+  pdp.allowed = {"alice|query.run.read@service:db"};
+
+  // A key with no creator: Denied, nothing asked.
+  McpKey orphan = key;
+  orphan.creator.clear();
+  pdp.uses.clear();
+  CHECK(gate.call(orphan, *mcp_find_tool("run_query"), prod).action == "creator" && pdp.uses.empty());
+
+  // Without the function of the uses, the gate asks as before: one question without usage.
+  McpCreatorAccess plain_gate("db", std::chrono::milliseconds(30000),
+                              [&](const std::string&, const std::vector<AccessQuestion>& questions) {
+                                std::vector<AccessDecision> out(questions.size());
+                                for (auto& d : out) d.allowed = true;
+                                return out;
+                              },
+                              [] { return int64_t{1000}; });
+  CHECK(plain_gate.call(key, *mcp_find_tool("run_query"), prod).access == McpAccess::Allowed && !plain_gate.call(key, *mcp_find_tool("run_query"), prod).use);
+
+  // The protocol of the mode keys: a spent budget is the tool error budget_exceeded with retry_after (HTTP 200, binding 5.3), and a failure
+  // of the question of the use is HTTP 503 with -32603. The tool never runs.
+  struct Gated : FakeBackend {
+    McpAccess answer = McpAccess::Allowed;
+    McpAccess tool_permitted(const McpKey&, const McpToolInfo&, const rapidjson::Value&, McpCallInfo* call) override {
+      if (answer == McpAccess::BudgetExceeded) call->retry_after = 42;
+      return answer;
+    }
+  };
+  Gated backend;
+  McpServerInfo info;
+  const int64_t now = 1'800'000'000;
+  const std::string run = rpc("tools/call", R"({"name":"run_query","arguments":{"host":"prod","sql":"select 1"}})");
+  backend.answer = McpAccess::BudgetExceeded;
+  const auto budget = mcp_handle_message(run, key, backend, info, now);
+  CHECK_EQ(budget.http_status, 200);
+  CHECK_EQ(budget.outcome.error_code, std::string("budget_exceeded"));
+  CHECK(contains(budget.body, "\\\"retry_after\\\":42"));
+  backend.answer = McpAccess::Failed;
+  const auto failed = mcp_handle_message(run, key, backend, info, now);
+  CHECK_EQ(failed.http_status, 503);
+  CHECK_EQ(failed.rpc_error, kRpcInternalError);
+  CHECK(backend.calls.empty());
+}
+
 void test_identity_protocol() {
   struct Spy : FakeBackend {
     McpCeilings ceilings;
@@ -9226,6 +9393,7 @@ int main() {
   test_api_tools();
   test_analysis_tools();
   test_identity_mode(make_temp_dir());
+  test_creator_budgets();
   test_tool_support();
   test_tool_errors_frame_the_text_of_clickhouse();
   test_config(dir);

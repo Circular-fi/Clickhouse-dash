@@ -262,8 +262,22 @@ void Server::init_access() {
       return decisions;
     };
   };
+  // The question of one use (an action that lists a budget), with context.usage: PdpClient::decide_use never sends it again after a timeout
+  // (ProcurAuth 10.6). `can_apply` false: the path applies no ceiling, so a true answer with a ceiling is false (ProcurAuth 7.5).
+  const auto use_for = [this](bool can_apply) {
+    return [this, can_apply](const std::string& subject, const AccessQuestion& question) {
+      PdpCallContext context;
+      context.request_id = current_request_context().request_id;
+      AccessDecision decision = pdp_->decide_use(subject, question, context);
+      std::vector<AccessQuestion> questions = {question};
+      std::vector<AccessDecision> decisions = {decision};
+      access_enforce_ceilings(context.request_id, questions, &decisions, access_features(), can_apply);
+      return decisions.front();
+    };
+  };
   // The MCP keys of the page never have more than their creator (docs/mcp.md, "Keys and the access of humans"). The state of a key is
-  // kept for pdp.cache_ttl, as the answers of the PDP are.
+  // kept for pdp.cache_ttl, as the answers of the PDP are. A call of a tool whose action lists a budget is one use of the creator: it takes
+  // a unit of the budget of the creator, as a run of the Query page does (docs/access.md, "Budgets").
   if (mcp_keys_) {
     mcp_creator_ = std::make_unique<McpCreatorAccess>(
         // The MCP keys of the page apply no ceiling: a true answer with a ceiling is false (ProcurAuth 7.5).
@@ -271,7 +285,8 @@ void Server::init_access() {
         [] {
           return static_cast<int64_t>(
               std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-        });
+        },
+        use_for(false), [this](const std::string& action) { return access_action_has_budget(action, access_features()); });
   }
   // The identity mode of POST /mcp: the PDP decides each request for the subject of the identity token.
   if (mcp_keys_ && cfg_.mcp.identity_auth()) {
@@ -280,18 +295,8 @@ void Server::init_access() {
       if (!host.mcp_uri.empty()) hosts.push_back(host.id);
     }
     // The tools of the identity mode apply the ceilings that the document declares for their actions (mcp_host_limits).
-    // A use of an action that lists a budget (the tool run_query, mcp.session) asks with context.usage: PdpClient::decide_use never sends it
-    // again after a timeout (ProcurAuth 10.6).
-    const auto use_for = [this](const std::string& subject, const AccessQuestion& question) {
-      PdpCallContext context;
-      context.request_id = current_request_context().request_id;
-      AccessDecision decision = pdp_->decide_use(subject, question, context);
-      std::vector<AccessQuestion> questions = {question};
-      std::vector<AccessDecision> decisions = {decision};
-      access_enforce_ceilings(context.request_id, questions, &decisions, access_features(), true);
-      return decisions.front();
-    };
-    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, std::move(hosts), access_features(), decide_for(true), use_for);
+    // A use of an action that lists a budget (the tool run_query, mcp.session) asks with context.usage.
+    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, std::move(hosts), access_features(), decide_for(true), use_for(true));
   }
 }
 

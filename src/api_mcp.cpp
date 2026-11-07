@@ -498,17 +498,21 @@ public:
                 tools.end());
     return tools;
   }
-  // A failure of the PDP refuses the tool as a denial: the mode "keys" keeps this answer (docs/mcp.md, "Keys and the access of humans").
+  // A failure of the PDP for a question without context.usage refuses the tool as a denial: the mode "keys" keeps this answer (docs/mcp.md,
+  // "Keys and the access of humans"). A call of a tool whose action lists a budget is one use of the creator (McpCreatorAccess::call): a
+  // spent budget gives the tool error budget_exceeded, and a failure of the question of the use gives 503, as on the routes.
   McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
     if (inner_.tool_permitted(key, tool, arguments, call) != McpAccess::Allowed) return McpAccess::Denied;
-    std::string ceiling;
-    const std::string refused = gate_.tool_refused_action(key, tool, &ceiling);
-    if (refused.empty()) return McpAccess::Allowed;
+    const McpCreatorCall decided = gate_.call(key, tool, arguments);
+    if (decided.access == McpAccess::Allowed) return McpAccess::Allowed;
+    if (decided.access == McpAccess::BudgetExceeded && call) call->retry_after = decided.retry_after.value_or(1);
     // A key cannot apply a ceiling (ProcurAuth 7.5): the grant of the creator makes the tool unusable for the key. The answer says so.
-    if (!ceiling.empty() && call) call->ceiling_refused = ceiling;
+    if (decided.access == McpAccess::Denied && !decided.ceiling.empty() && call) call->ceiling_refused = decided.ceiling;
+    const char* outcome = decided.access == McpAccess::BudgetExceeded ? "budget_exceeded" : decided.access == McpAccess::Failed ? "failed" : "denied";
     log_event(LogLevel::Warn, "mcp.tool_refused",
-              {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", refused}, {"ceiling", ceiling.substr(0, 128)}});
-    return McpAccess::Denied;
+              {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", decided.action}, {"ceiling", decided.ceiling.substr(0, 128)},
+               {"outcome", outcome}, {"usage", decided.use}});
+    return decided.access;
   }
 
 private:

@@ -12,6 +12,24 @@ bool same_question(const AccessQuestion& a, const AccessQuestion& b) {
   return a.action == b.action && access_resource_path(a.resource) == access_resource_path(b.resource);
 }
 
+// The index in `questions` of the question of the host of the call: the host that the argument `host` names, or the only question when the
+// call names no host. -1 when no question fits: the tool then runs nothing (host_required, not_found or invalid_argument).
+long call_question_index(const std::vector<AccessQuestion>& questions, const rapidjson::Value& arguments) {
+  const rapidjson::Value* host = nullptr;
+  if (arguments.IsObject()) {
+    const auto it = arguments.FindMember("host");
+    if (it != arguments.MemberEnd() && !it->value.IsNull()) host = &it->value;
+  }
+  if (host && !host->IsString()) return -1;
+  const std::string named = host ? std::string(host->GetString(), host->GetStringLength()) : std::string();
+  // An empty `host` is no host, as for the tool (resolve_host).
+  if (named.empty()) return questions.size() == 1 ? 0 : -1;
+  for (size_t i = 0; i < questions.size(); ++i) {
+    if (questions[i].resource.type == "host" && questions[i].resource.id == named) return static_cast<long>(i);
+  }
+  return -1;
+}
+
 } // namespace
 
 const char* mcp_creator_status_name(McpCreatorStatus status) {
@@ -28,8 +46,14 @@ bool mcp_creator_orphan(McpCreatorStatus status) {
   return status == McpCreatorStatus::NoCreator || status == McpCreatorStatus::CreatorGone;
 }
 
-McpCreatorAccess::McpCreatorAccess(std::string service_id, std::chrono::milliseconds period, Decide decide, Clock clock)
-    : service_id_(std::move(service_id)), period_(period), decide_(std::move(decide)), clock_(std::move(clock)) {}
+McpCreatorAccess::McpCreatorAccess(std::string service_id, std::chrono::milliseconds period, Decide decide, Clock clock, DecideUse decide_use,
+                                   HasBudget has_budget)
+    : service_id_(std::move(service_id)),
+      period_(period),
+      decide_(std::move(decide)),
+      clock_(std::move(clock)),
+      decide_use_(std::move(decide_use)),
+      has_budget_(std::move(has_budget)) {}
 
 McpCreatorState McpCreatorAccess::state(const McpKey& key) {
   McpCreatorState out;
@@ -111,6 +135,71 @@ std::string McpCreatorAccess::tool_refused_action(const McpKey& key, const McpTo
     }
   }
   return {};
+}
+
+McpCreatorCall McpCreatorAccess::call(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments) {
+  McpCreatorCall out;
+  if (key.creator.empty()) {
+    out.action = "creator";
+    return out;
+  }
+  std::vector<AccessQuestion> questions = mcp_tool_access_questions(tool, key.hosts, key.databases, service_id_);
+  if (questions.empty()) {
+    out.access = McpAccess::Allowed;
+    return out;
+  }
+  // The use: the tool runs the work of the creator on one host, and its action lists a budget (ProcurAuth 6.4). One tool asks one action.
+  const char* action = mcp_tool_access_action(tool);
+  std::optional<AccessQuestion> use;
+  if (decide_use_ && has_budget_ && action && has_budget_(action)) {
+    const long index = call_question_index(questions, arguments);
+    if (index >= 0) {
+      use = questions[static_cast<size_t>(index)];
+      // ProcurAuth 10.1: the question of the use is the question of the operation. The same question without context.usage never goes first.
+      questions.erase(questions.begin() + index);
+    }
+  }
+  // The other permissions of the tool first, without context.usage (ProcurAuth 5.5a). A refusal stops the call: no unit is taken (10.1a).
+  if (!questions.empty()) {
+    std::vector<AccessDecision> decisions = decide_(key.creator, questions);
+    decisions.resize(questions.size());
+    for (size_t i = 0; i < questions.size(); ++i) {
+      if (decisions[i].allowed) continue;
+      out.action = questions[i].action;
+      out.ceiling = decisions[i].ceiling_refused;
+      return out;
+    }
+  }
+  if (!use) {
+    out.access = McpAccess::Allowed;
+    return out;
+  }
+  out.use = true;
+  const AccessDecision decision = decide_use_(key.creator, *use);
+  switch (access_outcome(decision)) {
+    case AccessOutcome::Allowed:
+      out.access = McpAccess::Allowed;
+      return out;
+    case AccessOutcome::Failed:
+      // No valid answer: the PDP can have counted the use. The call answers 503, and nothing sends the question again (ProcurAuth 10.6).
+      out.access = McpAccess::Failed;
+      out.action = use->action;
+      return out;
+    case AccessOutcome::BudgetExceeded:
+      out.access = McpAccess::BudgetExceeded;
+      out.action = use->action;
+      out.retry_after = decision.retry_after.value_or(1);
+      return out;
+    case AccessOutcome::Denied:
+      // A plain false, a true answer without units (6.12), or a true answer with a ceiling that a key cannot apply (7.5). The PDP took the
+      // unit of a true answer: ChDash does not ask again.
+      out.access = McpAccess::Denied;
+      out.action = use->action;
+      out.ceiling = decision.ceiling_refused;
+      return out;
+  }
+  out.action = use->action;
+  return out;
 }
 
 void McpCreatorAccess::forget(const std::string& key_id) {

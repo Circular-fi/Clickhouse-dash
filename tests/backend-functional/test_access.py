@@ -1183,6 +1183,49 @@ def test_a_creator_without_permissions_keeps_the_key():
 
 
 @needs_access
+def test_a_query_tool_of_an_mcp_key_takes_a_unit_of_the_budget_of_its_creator():
+    # Owner decision 2026-11-07: a key of the mode keys spends the budget `queries` of its creator. Each call of a tool of query.run.read
+    # (run_query, explain_query, format_sql, explorer_names, query_execution) sends one question with usage for the creator, on the host of
+    # the call, and the tools of the other actions take no unit.
+    answer(default=True)
+    tok = token("keyspender")
+    made = make_mcp_key(tok, f"budget-{uuid.uuid4().hex[:8]}", ["run_query", "explain_query", "format_sql", "explorer_names", "list_databases"], ["*"])
+    assert made.status_code == 201, made.text
+    key, secret = made.json()["key"], made.json()["secret"]
+    try:
+        for tool, arguments in (("run_query", {"sql": "SELECT 1"}), ("explain_query", {"sql": "SELECT 1"}),
+                                ("format_sql", {"body": {"sql": "select 1"}}), ("explorer_names", {"params": {}})):
+            since = len(received())
+            response = mcp_call(secret, tool, arguments)
+            assert response.status_code == 200 and "error" not in response.json(), (tool, response.text)
+            uses = usage_asked(since=since)
+            assert len(uses) == 1, (tool, uses)
+            assert uses[0]["subject"]["id"] == "keyspender" and uses[0]["action"]["name"] == "query.run.read", uses
+            assert uses[0]["resource"] == host_resource("local") and uses[0]["context"] == {"usage": {"units": 1}}, uses
+            # The question of the use goes alone, and the call sends no question of the tool without usage before it (ProcurAuth 10.1,
+            # 6.11). Only the batch of the state of the key (kept for cache_ttl) can hold the action without usage.
+            plain = [r for r in received()[since:] if r["path"] == "/access/v1/evaluation"
+                     and any(e["action"]["name"] == "query.run.read" and "usage" not in e["context"] for e in evaluations(r))]
+            assert plain == [], (tool, plain)
+        since = len(received())
+        assert mcp_call(secret, "list_databases").json()["result"]["isError"] is False
+        assert usage_asked(since=since) == []
+        # A spent budget of the creator: the tool error budget_exceeded with retry_after, and the tool does not run.
+        answer(default=True, usage={"query.run.read": {"exceeded": 9}})
+        spent = mcp_call(secret, "run_query", {"sql": "SELECT 1"})
+        assert spent.status_code == 200, spent.text
+        error = json.loads(spent.json()["result"]["content"][0]["text"])["error"]
+        assert error["code"] == "budget_exceeded" and error["retry_after"] == 9 and error["retryable"] is True, error
+        # No valid answer to the question of the use: HTTP 503, never a denial.
+        answer(default=True, usage={"query.run.read": {"status": 500}})
+        failed = mcp_call(secret, "explain_query", {"sql": "SELECT 1"})
+        assert failed.status_code == 503 and failed.json()["error"]["code"] == -32603, failed.text
+    finally:
+        answer(default=True)
+        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
+
+
+@needs_access
 def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
     # User decision 2026-10-18: a key whose creator the PDP does not know (false with "context": {"reason": "unknown_subject"}) is
     # refused (401) and listed as an orphan. A person with mcp.keys.write and every action of its tools adopts it: the person becomes

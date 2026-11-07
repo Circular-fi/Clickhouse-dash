@@ -370,7 +370,28 @@ In the `authzen` mode ([access.md](access.md)), a key of the page never has more
 - On each request of the key, ChDash finds the state of the key: one batch to the PDP for the creator, with all the questions of the key. ChDash keeps this state for `pdp.cache_ttl`, so it sends at most one such batch for each key and each period. It never keeps a state that has a failure of the PDP.
 - `tools/list` shows only the tools whose actions the creator holds in this state. The tools that use no action stay.
 - `tools/call` asks the PDP for the actions of the called tool only, not for all the actions of the key. The cache of the decisions applies. When the PDP refuses an action of the tool, or does not answer, the call gets the answer of a tool that does not exist (`-32602`, contract 3.6). The log has the line `mcp.tool_refused` with the key, the creator, the tool and the action. The other tools of the key continue to work.
+- A call of a tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`) is one use of the creator. It takes one unit of the budget `queries` of the creator (refer to [Budgets of the keys](#budgets-of-the-keys)).
 - A key of the configuration is not checked: the operator writes it in the configuration.
+
+### Budgets of the keys
+
+A key of the page uses the budget `queries` of its creator, as the Query page does for this person ([access.md](access.md#budgets)). Thus a person with a budget cannot use a key to run more queries than the budget gives.
+
+- A use is one `tools/call` of a tool whose action is `query.run.read`: `run_query`, `explain_query`, `format_sql`, `explorer_names` and `query_execution`. Each call takes one unit, also for the tools that run no SQL of the person. The API tool calls its route in the process, and the route asks the PDP nothing, so a call never takes two units.
+- ChDash sends one Access Evaluation request for the creator, with `context.usage` equal to `{"units": 1}`, for `query.run.read` on the host of the call. The host of the call is the argument `host`, or the only host of the key. The questions of the other hosts of the key go first, without `context.usage`. The question of the use never goes without `context.usage` before it (ProcurAuth 10.1).
+- A call that names no host of the key runs nothing (`host_required` or `not_found`). It takes no unit.
+- A call takes its unit before the tool checks its arguments. A call that the tool refuses later (a bad argument, a host that is down) has used its unit, as a run of the Query page.
+- The other tools take no unit. Their actions list no budget.
+
+| Answer of the PDP for the use | `tools/call` |
+| --- | --- |
+| `true` with `context.usage.units` 1 or 0 | The tool runs. |
+| `true` without `context.usage.units`, or `false` with no `budget_exceeded` | HTTP 200 and `-32602`, as for a tool that does not exist. |
+| `true` with a ceiling | HTTP 403 and `-32001` with a fixed message: a key cannot apply a ceiling. The PDP took the unit. |
+| `false` with `budget_exceeded` and `retry_after` | HTTP 200 and the tool error `budget_exceeded` with `retry_after` (binding 5.3). The tool does not run. |
+| No valid answer | HTTP 503 and `-32603`. ChDash does not send the question again (ProcurAuth 10.6). |
+
+The log line `mcp.tool_refused` has the outcome (`denied`, `budget_exceeded` or `failed`) and `usage` true for a refused use. The state of the key that ChDash keeps for `pdp.cache_ttl` comes from a batch without `context.usage`. When this state expires at a call, the batch of the state goes before the question of the use in the same request.
 
 ### Orphan keys and their adoption
 
@@ -529,7 +550,7 @@ The tool error of a spent budget has the code `budget_exceeded`, `retryable` tru
 {"error":{"code":"budget_exceeded","message":"The budget of this action is spent.","retryable":true,"retry_after":12}}
 ```
 
-A notification that the budget refuses gets HTTP 429 with `Retry-After` and an empty body, because it has no `id`. The mode `keys` takes no unit: its tools ask the PDP for the creator of the key, and the creator is not the subject of the use.
+A notification that the budget refuses gets HTTP 429 with `Retry-After` and an empty body, because it has no `id`. In the mode `keys`, a call of a tool of `query.run.read` takes one unit of the budget `queries` of the creator of the key (refer to [Budgets of the keys](#budgets-of-the-keys)).
 
 ### Ceilings
 
