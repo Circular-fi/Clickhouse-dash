@@ -4,9 +4,10 @@ name: Conformance
 # The job builds the binary as the release does, and runs tests/conformance/run.sh. The script fails only for a failed case that
 # tests/conformance/expected.txt does not list.
 # The ProcurAuth repository is public: the job checks it out without a secret.
-# The expected result (2026-11-07): 99 cases, 94 passed, 0 failed, 5 skipped. tests/conformance/expected.txt is empty. The MCP cases need a
-# runner whose MCP requests have the headers Mcp-Method and Mcp-Name (ProcurAuth commit 85b695d or later): with an older runner, 11 MCP
-# cases fail, and the job fails.
+# The expected result (2026-11-07): 99 cases, 94 passed, 0 failed, 5 skipped. tests/conformance/expected.txt is empty.
+# The job checks out one fixed commit of ProcurAuth (the `ref` below), so a change of the runner never changes the result alone.
+# To bump it: run tests/conformance/run.sh with PROCURAUTH_DIR on the new commit and CONFORMANCE_STRICT=1, update expected.txt, then put the
+# full SHA of the new commit in `ref` and in docs/conformance.md ("The commit of the runner").
 # On request (Actions > Conformance > Run workflow), and on a pull request that changes the access code or the files of the run.
 on:
   workflow_dispatch:
@@ -47,6 +48,8 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           repository: SCcagg5/procurauth
+          # ProcurAuth main of 2026-11-07: the runner with Mcp-Method and Mcp-Name, and the rule of use_ceiling (U37).
+          ref: 7b1365206a363833ffe104b74357869636a4bb3f
           path: procurauth
           persist-credentials: false
 

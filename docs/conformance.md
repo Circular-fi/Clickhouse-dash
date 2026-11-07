@@ -40,6 +40,16 @@ tests/conformance/run.sh /path/to/chdash
 | `CONFORMANCE_STRICT` | Set it to `1`. The script then fails also for a case of the list that passes. |
 | `CONFORMANCE_KEEP` | Set it to `1` to keep the containers and the work directory for a look at the logs. |
 
+### The commit of the runner
+
+The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `7b1365206a363833ffe104b74357869636a4bb3f` (main of 2026-11-07). A change of the runner thus never changes the result of the job alone. To bump the commit:
+
+1. Run `tests/conformance/run.sh` with `PROCURAUTH_DIR` on the new commit and `CONFORMANCE_STRICT=1`.
+2. Update `tests/conformance/expected.txt` and the result in this document.
+3. Put the full SHA of the new commit in `ref` of the step "Checkout ProcurAuth" of the workflow, and in this section.
+
+A local run uses the commit that `PROCURAUTH_DIR` holds. Use the same commit as the workflow.
+
 ### Exit code
 
 | Code | Meaning |
