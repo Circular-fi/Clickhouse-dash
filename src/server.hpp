@@ -477,6 +477,10 @@ private:
   static void access_forbidden(httplib::Response& res, const std::string& action);
   // Write the 503 of a decision that the PDP did not give (pdp_unavailable, retryable).
   static void access_unavailable(httplib::Response& res, const std::string& action);
+  // A statement of the route went past a row or byte ceiling of the grant (ChCeilingRefusal): replace the answer with the refusal 403
+  // ceiling_exceeded, which names the action, the ceiling and its value (docs/access.md, "A result past a ceiling"). A stream that already
+  // started keeps its status: its own error event names the ceiling.
+  void refuse_past_ceiling(const httplib::Request& req, httplib::Response& res, const ChCeilingRefusal& refusal) const;
   // The databases of `databases` on the host `host_id` that the subject of this request may read: one batch asks each action of
   // `actions` on the host and on each database of the host. A database passes when one action is true on it or on the host (a grant
   // on the service covers the host). Return nullopt when every database passes: no check applies, or an action is true on the host.
@@ -868,10 +872,10 @@ private:
   }
   // A shared cache of the answers of a page: a request with a ceiling of a grant does not use it (docs/access.md, "Shared caches and
   // ceilings"). Its work runs for the request alone, so the ceilings bound it, and its answer, which a ceiling can cut, is not kept.
-  // The caches of the Explorer, of the System page and of the data of the observability (facets, prefill, metric catalog) use it, and so do
-  // the DDL texts and the replica counts (ExplorerCaches). The caches of internal statements do not (the ACL, the capabilities, the metadata
-  // of the editor and of the signals, the structure of the signal tables, the functions of the server): no ceiling applies to an internal
-  // statement. The databases of
+  // The caches of the Explorer (with the functions of the server), of the System page and of the observability (facets, prefill, metric
+  // catalog, and the structure of the signal tables: log columns, metric tables, trace map columns) use it, and so do the DDL texts and the
+  // replica counts (ExplorerCaches). The caches of internal statements do not (the ACL, the capabilities, the metadata of the editor and of
+  // the signals): no ceiling applies to an internal statement. The databases of
   // the route of the options and the cost of an MCP key have no ceiling: their actions declare none. The formatted shape text holds no data.
   template <typename Options>
   static Options skip_with_ceilings(Options options) {
@@ -923,9 +927,8 @@ private:
       std::chrono::seconds(30), {}, 1024, 64u << 20, cache_size::table_detail))};
   TtlCache<std::string, ExplorerGraph> explorer_graph_cache_{skip_with_ceilings(cache_options<ExplorerGraph>(
       explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::graph))};
-  // The functions of the server: an internal read (the metadata of the server), so every request shares this cache.
-  TtlCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_{cache_options<ExplorerFunctionsCatalog>(
-      std::chrono::milliseconds(std::max(1000, cfg_.explorer.function_cache_ttl_ms)), {}, 256, 64u << 20, cache_size::functions)};
+  TtlCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_{skip_with_ceilings(cache_options<ExplorerFunctionsCatalog>(
+      std::chrono::milliseconds(std::max(1000, cfg_.explorer.function_cache_ttl_ms)), {}, 256, 64u << 20, cache_size::functions))};
   // The storage distribution of the whole server. The Explorer System section uses it.
   TtlCache<std::string, ExplorerStorageMap> explorer_storage_cache_{skip_with_ceilings(cache_options<ExplorerStorageMap>(
       explorer_ttl(), std::chrono::minutes(1), 256, 32u << 20, cache_size::storage))};
@@ -1019,9 +1022,9 @@ private:
 
   // These caches hold what the Logs, Metrics and Traces-logs routes read about a source (otel_caches.hpp).
   SignalMetaCache signal_meta_cache_{signal_meta_cache_options()};
-  LogsSchemaCache logs_schema_cache_{logs_schema_cache_options()};
-  LogColumnsCache log_columns_cache_{log_columns_cache_options()};
-  KindTablesCache kind_tables_cache_{kind_tables_cache_options()};
+  LogsSchemaCache logs_schema_cache_{skip_with_ceilings(logs_schema_cache_options())};
+  LogColumnsCache log_columns_cache_{skip_with_ceilings(log_columns_cache_options())};
+  KindTablesCache kind_tables_cache_{skip_with_ceilings(kind_tables_cache_options())};
 
   // The Logs service (logs_service.hpp) uses the schema of the table and the facets as its caches.
   logs::LogsService logs_service_{[this](const HostSpec& host, std::string* error) { return open_logs_executor(host, error); },
@@ -1032,7 +1035,7 @@ private:
                                            metrics::MetricsCaches{metrics_catalog_cache_, kind_tables_cache_}};
 
   // The Traces service (trace_service.hpp) has a cache for its attribute columns.
-  trace::AttributeMapCache trace_attribute_maps_cache_{trace::attribute_map_cache_options()};
+  trace::AttributeMapCache trace_attribute_maps_cache_{skip_with_ceilings(trace::attribute_map_cache_options())};
   trace::TraceService trace_service_{[this](const HostSpec& host, std::string* error) { return open_trace_executor(host, error); },
                                      trace::TraceCaches{trace_attribute_maps_cache_, trace_prefill_cache_, trace_facet_keys_cache_,
                                                         trace_facet_values_cache_}};

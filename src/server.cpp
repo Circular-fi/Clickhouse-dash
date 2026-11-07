@@ -575,10 +575,16 @@ Server::Server(AppConfig cfg, bool start_background)
   // A route that reads ClickHouse runs its handler inside a query scope (ch_query.hpp,
   // request_limits). Its statements carry the label and the deadline of the request.
   // They stop when the browser goes away.
+  // A statement that goes past a row or byte ceiling of the grant makes the answer a refusal that names the ceiling (docs/access.md, "A
+  // result past a ceiling"): never a cut answer, and never the generic error of the route.
   const auto scoped = [this](auto handler) {
     return [this, handler](const httplib::Request& req, httplib::Response& res) {
-      RequestScope scope(make_context(req));
-      handler(req, res);
+      ChCeilingRefusalScope refusals(RequestScope::active());
+      {
+        RequestScope scope(make_context(req));
+        handler(req, res);
+      }
+      if (const auto refusal = refusals.take()) refuse_past_ceiling(req, res, *refusal);
     };
   };
 
@@ -586,10 +592,14 @@ Server::Server(AppConfig cfg, bool start_background)
   // Past the wait, the request is refused with 503 server_busy. The route does not open as many connections to the host as there are requests.
   const auto limited = [this](WorkClass work, auto handler) {
     return [this, work, handler](const httplib::Request& req, httplib::Response& res) {
-      RequestScope scope(make_context(req));
-      const auto ticket = admit(work, req, res);
-      if (!ticket) return;
-      handler(req, res);
+      ChCeilingRefusalScope refusals(RequestScope::active());
+      {
+        RequestScope scope(make_context(req));
+        const auto ticket = admit(work, req, res);
+        if (!ticket) return;
+        handler(req, res);
+      }
+      if (const auto refusal = refusals.take()) refuse_past_ceiling(req, res, *refusal);
     };
   };
 
@@ -931,7 +941,8 @@ ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_dead
     limits.max_execution_time_s = 30;
     limits.max_result_bytes = 64 * 1024 * 1024;
     limits.result_overflow_mode = "break";
-    // A View or a Distributed table runs its whole source. The read stops at the cap, and the preview has fewer rows.
+    // A View or a Distributed table runs its whole source. The read stops at the cap, and the preview has fewer rows. A ceiling of the grant
+    // that sets a bound is not a cap of the preview: apply_ceilings then sets "throw", and the route refuses (docs/access.md).
     limits.read_overflow_mode = "break";
   } else if (!system_page && req.path.rfind("/api/explorer/", 0) == 0) {
     limits.max_execution_time_s = 10;

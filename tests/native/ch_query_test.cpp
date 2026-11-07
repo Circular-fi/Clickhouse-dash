@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -174,7 +175,8 @@ void test_apply_ceilings_lowers_and_never_loosens() {
   ChQueryLimits again = limits;
   apply_ceilings(lower_rows, again);
   CHECK(again.ceilings.max_rows == 4 && again.ceilings.max_duration == 30 && again.max_result_rows == 4);
-  // A bound that is lower than the ceiling stays; a bound that is higher is lowered. The mode of the route stays too.
+  // A bound that is lower than the ceiling stays, with the mode of the route; a bound that is higher is lowered. A row or byte ceiling that
+  // sets a bound also sets the mode "throw" over "break": here the ceiling of the result bytes sets the bound, so the result mode is "throw".
   ChQueryLimits bounded;
   bounded.max_rows_to_read = 500;
   bounded.max_bytes_to_read = 9999;
@@ -190,7 +192,29 @@ void test_apply_ceilings_lowers_and_never_loosens() {
   CHECK(bounded.max_result_bytes == uint64_t(2048));
   CHECK(bounded.max_execution_time_s == int64_t(10));
   CHECK(bounded.max_memory_usage == uint64_t(1'000'000));
-  CHECK(bounded.result_overflow_mode == "break");
+  CHECK(bounded.result_overflow_mode == "throw");
+  // A route with "break" whose own bounds stay lower than the ceilings keeps "break": the cut is the one of the route, not of the grant.
+  ChQueryLimits preview;
+  preview.max_result_rows = 5;
+  preview.max_result_bytes = 1024;
+  preview.result_overflow_mode = "break";
+  preview.max_rows_to_read = 100;
+  preview.max_bytes_to_read = 1024;
+  preview.read_overflow_mode = "break";
+  apply_ceilings(ceilings, preview);
+  CHECK(preview.result_overflow_mode == "break" && preview.read_overflow_mode == "break");
+  // The same route under a lower ceiling: the ceiling sets the bound, and the mode becomes "throw" (a refusal, never a cut answer).
+  AccessCeilings low;
+  low.max_rows = 3;
+  low.max_rows_read = 50;
+  ChQueryLimits preview_low;
+  preview_low.max_result_rows = 5;
+  preview_low.result_overflow_mode = "break";
+  preview_low.max_rows_to_read = 100;
+  preview_low.read_overflow_mode = "break";
+  apply_ceilings(low, preview_low);
+  CHECK(preview_low.max_result_rows == uint64_t(3) && preview_low.result_overflow_mode == "throw");
+  CHECK(preview_low.max_rows_to_read == uint64_t(50) && preview_low.read_overflow_mode == "throw");
   // No ceiling changes nothing. A duration above the largest signed value does not wrap.
   ChQueryLimits untouched;
   untouched.max_rows_to_read = 7;
@@ -940,10 +964,61 @@ void test_mcp_settings_follow_the_profile() {
   CHECK(plan.max_rows == 1000 && !plan.rows_cut_by_profile && plan.max_bytes == 1'048'576 && !plan.bytes_cut_by_profile);
 }
 
+// A result past a row or byte ceiling of the grant is a refusal that names the ceiling (docs/access.md, "A result past a ceiling"). The
+// limit errors of ClickHouse name the ceiling only when the ceiling set the bound; the note of a refusal stays in its thread and route.
+void test_a_result_past_a_ceiling_names_the_ceiling() {
+  AccessCeilings ceilings;
+  ceilings.max_rows_read = 1000;
+  ceilings.max_read_size = 4096;
+  ceilings.max_rows = 10;
+  ceilings.max_result_size = 2048;
+  ChQueryLimits limits;
+  limits.max_rows_to_read = 500;      // the route reads less than the ceiling: its own bound
+  limits.max_result_bytes = 1 << 20;  // the ceiling of the result bytes sets the bound
+  apply_ceilings(ceilings, limits);
+  const auto name = [](const std::optional<ChCeilingRefusal>& refusal) { return refusal ? refusal->ceiling : std::string("none"); };
+  CHECK(name(ch_ceiling_of_server_error(158, "Limit for rows exceeded, max rows: 500.00", limits)) == std::string("none"));
+  CHECK(name(ch_ceiling_of_server_error(307, "Limit for (uncompressed) bytes to read exceeded, max bytes: 4.00 KiB", limits)) == std::string("max_read_size"));
+  CHECK(name(ch_ceiling_of_server_error(396, "Limit for result exceeded, max rows: 10.00, current rows: 65.41 thousand", limits)) == std::string("max_rows"));
+  const auto bytes = ch_ceiling_of_server_error(396, "Limit for result exceeded, max bytes: 2.00 KiB, current bytes: 1.00 MiB", limits);
+  CHECK(bytes && bytes->ceiling == "max_result_size" && bytes->value == uint64_t(2048));
+  CHECK(!ch_ceiling_of_server_error(159, "Timeout exceeded", limits));
+  CHECK(!ch_ceiling_of_server_error(62, "Syntax error", limits));
+  // No ceiling, or an internal scope: no refusal.
+  CHECK(!ch_ceiling_of_server_error(396, "Limit for result exceeded, max rows: 10.00", ChQueryLimits{}));
+  CHECK(!ch_ceiling_of_server_error(396, "Limit for result exceeded, max rows: 10.00", ch_internal_limits(limits)));
+
+  // The note: the first refusal of the thread stays, take() forgets it.
+  CHECK(!ch_take_ceiling_refusal());
+  ch_note_ceiling_refusal(ChCeilingRefusal{"max_rows", 10});
+  ch_note_ceiling_refusal(ChCeilingRefusal{"max_read_size", 4096});
+  auto kept = ch_take_ceiling_refusal();
+  CHECK(kept && kept->ceiling == "max_rows" && kept->value == uint64_t(10) && !ch_take_ceiling_refusal());
+  // A route that runs inside an outer request (an MCP tool) sees only its own refusal, and the outer one comes back after it.
+  ch_note_ceiling_refusal(ChCeilingRefusal{"max_rows_read", 1000});
+  {
+    ChCeilingRefusalScope route(true);
+    CHECK(!route.take());
+    ch_note_ceiling_refusal(ChCeilingRefusal{"max_result_size", 2048});
+    const auto own = route.take();
+    CHECK(own && own->ceiling == "max_result_size");
+  }
+  kept = ch_take_ceiling_refusal();
+  CHECK(kept && kept->ceiling == "max_rows_read");
+  // Without an outer request, an old refusal of the thread is dropped.
+  ch_note_ceiling_refusal(ChCeilingRefusal{"max_rows", 1});
+  {
+    ChCeilingRefusalScope route(false);
+    CHECK(!route.take());
+  }
+  CHECK(!ch_take_ceiling_refusal());
+}
+
 int main() {
   test_settings_follow_the_scope_and_never_loosen_the_profile();
   test_the_bytes_read_are_a_bound_like_the_rows_read();
   test_apply_ceilings_lowers_and_never_loosens();
+  test_a_result_past_a_ceiling_names_the_ceiling();
   test_an_internal_scope_removes_the_ceilings_and_nothing_else();
   test_readonly_or_unknown_profile_gets_no_setting();
   test_read_only_and_the_overflow_modes();

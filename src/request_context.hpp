@@ -57,6 +57,8 @@ public:
   RequestScope& operator=(const RequestScope&) = delete;
 
   const RequestContext& context() const { return context_; }
+  // True when this thread serves a request (a scope lives).
+  static bool active() { return current_ != nullptr; }
 
 private:
   RequestContext context_;

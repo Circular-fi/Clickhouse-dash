@@ -403,9 +403,14 @@ def test_a_true_answer_with_a_ceiling_that_chdash_cannot_apply_is_a_denial():
         assert response.status_code == 403 and response.json()["action"] == "system.read", (limits, response.text)
         assert "max_" not in response.text, response.text
     # A declared ceiling is applied, not refused. A value above the declared max is not a fault either.
-    for limits in ({"max_rows": 10}, {"max_rows_read": 1000000, "max_duration": 30}, {"max_rows": 2**52}):
+    for limits in ({"max_rows": 1000000}, {"max_rows_read": 1000000, "max_duration": 30}, {"max_rows": 2**52}):
         answer(fixed={"system.read": {"decision": True, "context": {"limits": limits}}})
         assert call("GET", SYSTEM).status_code == 200, limits
+    # A declared ceiling that the answer goes past: ChDash applied it, and the answer is the refusal that names the ceiling (owner decision
+    # of 2026-11-07), not the denial of the action.
+    answer(fixed={"system.read": {"decision": True, "context": {"limits": {"max_rows": 1}}}})
+    applied = call("GET", SYSTEM)
+    assert applied.status_code == 403 and applied.json()["error_code"] == "ceiling_exceeded" and applied.json()["ceiling"] == "max_rows", applied.text
     # ProcurAuth 7.6: the limits of a false answer mean nothing.
     answer(fixed={"system.read": {"decision": False, "context": {"limits": "not an object"}}})
     assert call("GET", SYSTEM).status_code == 403
@@ -480,6 +485,31 @@ def test_a_low_explorer_ceiling_does_not_stop_the_acl_discovery():
     assert "acl_discovery_failed" not in response.text, response.text[:300]
     response = call("GET", "/api/explorer/table?host_id=local&database=system&table=one&refresh=1")
     assert "acl_discovery_failed" not in response.text, response.text[:300]
+
+
+@needs_access
+def test_a_result_past_a_ceiling_is_a_refusal_that_names_the_ceiling():
+    # Owner decision 2026-11-07 (docs/access.md, "A result past a ceiling"): the list of the functions obeys the ceilings of the caller, and
+    # a result past a row ceiling is a refusal 403 that names the ceiling, never a cut answer and never the generic 503 of the route.
+    answer(default=True, limits={"explorer.read": {"max_rows": 5}})
+    refused = call("GET", "/api/explorer/functions?host_id=local&refresh=1")
+    assert refused.status_code == 403, refused.text[:300]
+    body = refused.json()
+    assert body["error_code"] == "ceiling_exceeded" and body["ceiling"] == "max_rows" and body["limit"] == 5, body
+    assert body["action"] == "explorer.read" and body["retryable"] is False and "max_rows" in body["message"], body
+    # A value that the list does not go past: the list comes.
+    answer(default=True, limits={"explorer.read": {"max_rows": 1000000}})
+    assert call("GET", "/api/explorer/functions?host_id=local").status_code == 200
+    # The preview of a table: past the ceiling, a refusal; before, the preview had the first rows, cut without a word. system.numbers has one
+    # column, so the read of its columns fits the ceiling, and only the rows of the preview count.
+    answer(default=True, limits={"explorer.read": {"max_rows": 5}})
+    preview = call("POST", "/api/explorer/table/data", json={"host_id": "local", "database": "system", "table": "numbers", "limit": 10})
+    assert preview.status_code == 403 and preview.json()["ceiling"] == "max_rows", preview.text[:300]
+    fits = call("POST", "/api/explorer/table/data", json={"host_id": "local", "database": "system", "table": "numbers", "limit": 5})
+    assert fits.status_code == 200 and len(fits.json()["rows"]) == 5, fits.text[:300]
+    # Without a ceiling the routes do not change.
+    answer(default=True)
+    assert call("GET", "/api/explorer/functions?host_id=local").status_code == 200
 
 
 @needs_access

@@ -3,7 +3,6 @@
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
-#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "otel_allowlist.hpp"
 
@@ -45,8 +44,6 @@ KindTables MetricsService::kind_tables(ChExecutor& db, const HostSpec& host) con
   const MetricSettings& metrics = host.otel.metrics;
   const std::string key = host.system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix;
   const auto result = kinds_.get(key, [&](KindTables& tables_of, std::string&, std::string&) {
-    // The read of the structure of the tables is a statement of ChDash, not of a person: the ceilings of the grant never apply.
-    ChInternalScope internal;
     std::set<std::string> tables;
     db.select(existing_kinds_sql(metrics), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) tables.insert(ch_block_text_at(block, 0, row));

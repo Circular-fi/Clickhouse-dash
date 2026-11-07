@@ -526,6 +526,31 @@ void Server::access_forbidden(httplib::Response& res, const std::string& action)
 
 void Server::access_unavailable(httplib::Response& res, const std::string& action) { refuse_decision(res, access_refusal_of({}), action); }
 
+void Server::refuse_past_ceiling(const httplib::Request& req, httplib::Response& res, const ChCeilingRefusal& refusal) const {
+  if (res.content_provider_) return;
+  const AccessRule rule = access_rule(req.method, req.path);
+  const std::string action = rule.action ? std::string(rule.action)
+                             : rule.kind == AccessRuleKind::Run ? std::string("query.run.read")
+                             : rule.kind == AccessRuleKind::Export ? std::string("query.export")
+                                                                    : std::string();
+  log_event(LogLevel::Info, "access.ceiling_refused",
+            {{"request_id", req.get_header_value("X-Request-Id")}, {"path", req.path.substr(0, 512)}, {"action", action},
+             {"ceiling", refusal.ceiling}, {"limit", refusal.value}, {"status_before", res.status}});
+  // The answer of the route goes: its body, its type and the headers of its cache.
+  res.body.clear();
+  for (const char* header : {"Content-Type", "Content-Length", "ETag", "Last-Modified", "X-Cache", "Age"}) res.headers.erase(header);
+  ApiError error;
+  error.status = 403;
+  error.code = "ceiling_exceeded";
+  error.retryable = false;
+  error.message = "The answer goes past the limit " + refusal.ceiling + " (" + std::to_string(refusal.value) + ") of your grant" +
+                  (action.empty() ? std::string() : " for the action " + action) + ". Ask for less data, or ask for a higher limit.";
+  if (!action.empty()) error.text.emplace_back("action", action);
+  error.text.emplace_back("ceiling", refusal.ceiling);
+  error.numbers.emplace_back("limit", static_cast<int64_t>(std::min<uint64_t>(refusal.value, static_cast<uint64_t>(INT64_MAX))));
+  send_error(res, error);
+}
+
 bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions, bool for_key) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp() || questions.empty()) return true;

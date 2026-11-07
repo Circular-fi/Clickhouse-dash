@@ -381,7 +381,7 @@ Every table numbers its rows from 1. A missing value is one dash.
 
 ## Data preview
 
-`POST /api/explorer/table/data` defaults to `LIMIT 100`. It clamps the request to 1–500 rows. The read has a limit of 30 seconds and 64 MiB of result at most (`max_result_bytes` with `result_overflow_mode = 'break'`). A table with very large cells gives fewer rows.
+`POST /api/explorer/table/data` defaults to `LIMIT 100`. It clamps the request to 1–500 rows. The read has a limit of 30 seconds and 64 MiB of result at most (`max_result_bytes` with `result_overflow_mode = 'break'`). A table with very large cells gives fewer rows. A ceiling of the grant of the person never cuts the preview: past it, the route answers `403` `ceiling_exceeded` ([access.md](access.md#a-result-past-a-ceiling)).
 
 A View, a Distributed table or a table function runs its whole source. For this reason, these bounds matter. Every other statement of the Explorer stops after 10 seconds (`docs/configuration.md`, "The bounds of the queries"). The Preview tab offers 50 / 100 / 500. The browser remembers the choice. The tab shows these items:
 

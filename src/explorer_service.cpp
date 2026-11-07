@@ -1,7 +1,6 @@
 #include "explorer_service.hpp"
 
 #include "allowed_objects.hpp"
-#include "ch_query.hpp"
 #include "time_util.hpp"
 
 #include <algorithm>
@@ -282,10 +281,6 @@ Result<Cached<ExplorerFunctionsCatalog>> ExplorerService::functions(const Reques
   auto result = stores_.functions.get(
       functions_key(host_id),
       [&](ExplorerFunctionsCatalog& value, std::string& code, std::string& message) {
-        // The functions of the server are metadata of the server, as the functions of the editor (GET /api/meta): the read is a statement of
-        // ChDash, not a data statement of a person, so the ceilings of the grant never apply and the cache is shared (docs/access.md,
-        // "Statements that a ceiling bounds"). A ceiling of max_rows below the number of functions would otherwise refuse the list (503).
-        ChInternalScope internal;
         std::string error;
         auto runner = connect_(host.runner_uri, &error);
         if (!runner) {

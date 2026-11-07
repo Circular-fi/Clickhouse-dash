@@ -85,7 +85,7 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 | Operation | Request | Action and resource |
 |---|---|---|
 | `use_plain` | `GET /api/explorer/functions?host_id=conf` | `explorer.read` on the host `conf`. The route asks exactly one question. |
-| `use_ceiling` | The same request | `explorer.read` with the ceiling `max_rows`. The read of the functions is internal ([access.md](access.md#statements-that-a-ceiling-bounds)), so the ceiling bounds no statement of this route. The case U37 tests that ChDash accepts a `true` answer with a ceiling that the action declares (ProcurAuth 7.5). |
+| `use_ceiling` | The same request | `explorer.read` with the ceiling `max_rows` = 1000000 (`ceiling_value`). The list of the functions obeys the ceiling, and its result does not go past this value. The case U37 tests that ChDash accepts a `true` answer with a ceiling that the action declares (ProcurAuth 7.5). A value below the number of the functions gives `403` `ceiling_exceeded` ([access.md](access.md#a-result-past-a-ceiling)). |
 | `use_budget` | `POST /api/query/run` with the body `{"host_id": "conf", "sql": "SELECT 1"}` | `query.run.read` on the host `conf`, with `context.usage` ([Budgets](access.md#budgets)). The SQL is a read, so the use is `query.run.read`. |
 | `use_service` | `GET /api/query-library?host_id=conf` | `library.read` on the service. |
 | `list_options` | `GET /.well-known/procurauth/resources?type=host` | The route of the options (the profile has `options_type` = `host`). |
@@ -119,7 +119,7 @@ The list of expected failures (`tests/conformance/expected.txt`) is empty. The c
 
 ### Notes
 
-- Before the decision on the shared caches (2026-11-07), U37 passed only because the list of functions came from the cache. With its own read, the list of more than 100 functions went past `max_rows` = 100, and the route answered `503`. The read of the functions is internal since then.
+- Before the decision on the shared caches (2026-11-07), U37 passed only because the list of functions came from the cache. With its own read, the list of more than 100 functions goes past `max_rows` = 100, and a correct PEP refuses it. The profile now gives `ceiling_value` = 1000000. The ProcurAuth commit `7b13652` writes this rule of the profile: the result of `use_ceiling` must not go past `ceiling_value`.
 
 - The cases U02, U40, U59 and U84 use `use_service`. They failed during the first run, because `GET /api/query-library` needs the parameter `host_id` (`400`). The profile has the parameter since.
 - A case that the run skips does not pass. It tests nothing.

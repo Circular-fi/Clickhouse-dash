@@ -144,7 +144,9 @@ uint64_t access_ceiling_max(const AccessCeilings& bounds, const AccessCeilingInf
 // The one function that applies the ceilings to the bounds of a statement. Each ceiling lowers the matching field of `limits`:
 // the value of the field becomes the lower of the old value and the ceiling (a field of 0 had no bound). No ceiling loosens a bound.
 // Then ch_query_settings takes the lower value again with the settings profile of the ClickHouse user. A field with a ceiling
-// gets the overflow mode "throw" when the field of the mode is empty, so a run fails with a clear error and no cut result is silent.
+// gets the overflow mode "throw" when the field of the mode is empty, so a run fails with a clear error and no cut result is silent. A row
+// or byte ceiling that sets the bound also replaces the mode "break" of a route with "throw": the route answers a refusal that names the
+// ceiling (ChCeilingRefusal), never a cut answer.
 void apply_ceilings(const AccessCeilings& ceilings, ChQueryLimits& limits);
 
 // The error that a backstop gives. `code` is the code of the error (422 style: query_scan_limit and query_result_limit, 504 style:

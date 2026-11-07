@@ -181,6 +181,38 @@ class ChInternalScope {
 // answer: the work runs for this request alone, so the ceilings bound it. A cache hit would run no statement, and no ceiling would apply.
 bool ch_scope_has_ceilings();
 
+// A ceiling of a grant that a statement of this thread went past (docs/access.md, "A result past a ceiling"): a row or byte ceiling,
+// max_rows_read, max_read_size, max_rows or max_result_size, and its value. The route then answers a refusal that names the ceiling
+// (HTTP 403, ceiling_exceeded), never a cut answer.
+struct ChCeilingRefusal {
+  std::string ceiling;
+  uint64_t value = 0;
+};
+// Keep the first refusal of this thread. The backstop of the statements of ChDash and the limit errors of ClickHouse call it.
+void ch_note_ceiling_refusal(ChCeilingRefusal refusal);
+// The kept refusal of this thread, and forget it.
+std::optional<ChCeilingRefusal> ch_take_ceiling_refusal();
+// The ceiling of `limits` that set the bound of a ClickHouse limit error with `code` (158 rows read, 307 bytes read, 396 rows or bytes of
+// the result; `message` tells "max rows" from "max bytes"). nullopt when the scope has no ceiling, or when the bound of the route (the
+// configuration) is lower than the ceiling: then the error is not the one of the grant. Pure: the native tests check it.
+std::optional<ChCeilingRefusal> ch_ceiling_of_server_error(int code, std::string_view message, const ChQueryLimits& limits);
+
+// The refusals of one route (Server, the routes of the pages): the object takes the refusal of an outer request (an MCP tool that calls
+// the route in the process) away and gives it back at its end, so the route sees only its own. Without an outer request, an old refusal
+// of the thread is dropped.
+class ChCeilingRefusalScope {
+ public:
+  explicit ChCeilingRefusalScope(bool nested);
+  ~ChCeilingRefusalScope();
+  ChCeilingRefusalScope(const ChCeilingRefusalScope&) = delete;
+  ChCeilingRefusalScope& operator=(const ChCeilingRefusalScope&) = delete;
+  // The refusal of a statement of this route, if one went past a ceiling.
+  std::optional<ChCeilingRefusal> take();
+
+ private:
+  std::optional<ChCeilingRefusal> outer_;
+};
+
 // The caller of the scope went away. Its statements stop.
 class ChQueryCanceled : public std::runtime_error {
  public:

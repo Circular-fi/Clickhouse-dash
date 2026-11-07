@@ -431,7 +431,7 @@ An action lists its ceilings only when the action is published. In the mode `ide
 1. The rule of the route asks the PDP. ChDash keeps the ceilings of the `true` answer of the action that guards the route. An export keeps the ceilings of `query.export` and of the class of its SQL.
 2. One function, `apply_ceilings`, lowers the bounds of a statement. It does nothing for an internal statement ([Statements that a ceiling bounds](#statements-that-a-ceiling-bounds)). Four places call it: the run of the Query page (`QuerySession`), the statements of the pages (`request_limits`), Deep Analyze (`user_sql_limits`) and the export stream. A route that an MCP tool calls in the mode `identity` gets the ceilings of the call ([mcp.md](mcp.md#ceilings)).
 3. The ceiling lowers the matching bound. The value that ClickHouse gets is the lowest of the ceiling, the bound of the configuration and the settings profile of the runner user. A ceiling never makes a bound looser.
-4. A ceiling that lowers a bound also sets the overflow mode `throw` when the route sets none. The run then fails with a clear error and gives no cut result.
+4. A ceiling that lowers a bound also sets the overflow mode `throw` when the route sets none. A row or byte ceiling that sets the bound also replaces the mode `break` of a route (the preview of a table) with `throw`. The run then fails with a clear error and gives no cut result.
 5. `max_memory` has no backstop in ChDash. The settings profile of the ClickHouse user enforces it, with the setting `max_memory_usage`. To limit the memory of a statement that sets its own `max_memory_usage`, use a constraint in the profile.
 
 ClickHouse lets a `SETTINGS` clause of a statement replace the setting of the client. A profile with `readonly = 1` takes no setting at all. Thus ChDash also counts what it sees, in the run of the Query page and in the export:
@@ -445,9 +445,26 @@ ClickHouse lets a `SETTINGS` clause of a statement replace the setting of the cl
 
 A run that goes past a ceiling ends with an `error` event that has the code in the table and the name and the value of the ceiling. An export writes the error in `error.txt` of the archive and stops. In an export, each statement has its own counters and its own deadline.
 
-The statements that ChDash writes for the pages (Explorer, System, Traces, Logs, Metrics, the metadata of the editor) have the same backstop, because many of them carry their own `SETTINGS` clause. Each statement counts the rows and bytes read, the rows of its result and its time. Past a ceiling it ends, and the route answers as for the ClickHouse code of the same meaning (`<page>_scan_limit` or `<page>_timeout`, [operations.md](operations.md#errors)). The pages have no backstop for `max_result_size`: its setting is the only bound there. The progress packets of ClickHouse give the rows and bytes read, so a statement that reads very little can end before a packet arrives.
+The statements that ChDash writes for the pages (Explorer, System, Traces, Logs, Metrics, the metadata of the editor) have the same backstop, because many of them carry their own `SETTINGS` clause. Each statement counts the rows and bytes read, the rows of its result and its time. Past a row or byte ceiling it ends, and the route answers a refusal that names the ceiling ([A result past a ceiling](#a-result-past-a-ceiling)). Past `max_duration`, the route answers as for the ClickHouse code of the same meaning (`<page>_timeout`, [operations.md](operations.md#errors)). The pages have no backstop for `max_result_size`: its setting is the only bound there. The progress packets of ClickHouse give the rows and bytes read, so a statement that reads very little can end before a packet arrives.
 
 The pages keep shared caches of their answers. A request with a ceiling does not use them (refer to [Shared caches and ceilings](#shared-caches-and-ceilings)).
+
+### A result past a ceiling
+
+A result that goes past a row or byte ceiling of the grant (`max_rows_read`, `max_read_size`, `max_rows` or `max_result_size`) is a refusal. ChDash never sends a cut answer for it (decision of 2026-11-07). This applies to each route of the pages and of the API, and to the routes that an MCP tool calls:
+
+- ChDash finds the breach in two places. The backstop of a statement of ChDash counts the rows and the bytes. ClickHouse refuses a statement with `TOO_MANY_ROWS` (158), `TOO_MANY_BYTES` (307) or `TOO_MANY_ROWS_OR_BYTES` (396) when the ceiling set the bound. When the bound of the route is lower than the ceiling, the error is the one of the route (`<page>_scan_limit`).
+- The answer is `403`, also when the route caught the error and had a partial answer:
+
+```json
+{"error_code": "ceiling_exceeded", "action": "explorer.read", "ceiling": "max_rows", "limit": 100, "retryable": false,
+ "message": "The answer goes past the limit max_rows (100) of your grant for the action explorer.read. Ask for less data, or ask for a higher limit."}
+```
+
+- `ceiling` names the ceiling, and `limit` gives its value. The answer never holds a reason of the PDP (ProcurAuth 10.3). The log has the line `access.ceiling_refused` with the route, the action, the ceiling and the status that the route had.
+- A stream that started keeps its status. The `error` event of a run names the ceiling (`query_result_limit`, `query_scan_limit`).
+- `max_duration` and `max_memory` keep the answers of the time and of the memory (`<page>_timeout`, `<page>_memory_limit`).
+- The editor keeps working with a low ceiling: the reads of `GET /api/meta` are internal.
 
 ### Shared caches and ceilings
 
@@ -463,16 +480,15 @@ The caches that a request with a ceiling does not use:
 
 | Page | Caches |
 |---|---|
-| Explorer | The catalog (the list and the objects of a database), the table card, the graph and the storage map. Also the DDL texts and the replica counts, which these answers use. |
+| Explorer | The catalog (the list and the objects of a database), the table card, the graph, the functions and the storage map. Also the DDL texts and the replica counts, which these answers use. |
 | System | Overview, Activity, Keeper, the series, the queries, the detail of a query, the disks and the growth of the disks. The replica counts of Activity. |
-| Observability | The prefill and the facets of the traces, the facets of the logs and the catalog of the metrics. |
+| Observability | The prefill and the facets of the traces, the facets of the logs and the catalog of the metrics. The structure of the tables of the signals: the columns of the logs table, the tables of the metrics and the map columns of the traces. |
 
 The caches that every request uses, because a ceiling cannot change their value:
 
 | Cache | Why |
 |---|---|
-| The runner ACL, the capabilities of the System page, the metadata of the editor (`GET /api/meta`) and of the signals, the functions of the Explorer (`GET /api/explorer/functions`) | The statements are internal ([Statements that a ceiling bounds](#statements-that-a-ceiling-bounds)). No ceiling applies to them. |
-| The structure of the tables of the signals (the columns of the logs table, the tables of the metrics, the map columns of the traces) | The same: these reads of the schema are internal since 1.3.0. |
+| The runner ACL, the capabilities of the System page, the metadata of the editor (`GET /api/meta`) and of the signals | The statements are internal ([Statements that a ceiling bounds](#statements-that-a-ceiling-bounds)). No ceiling applies to them. |
 | The databases of the route of the options, the cost of an MCP key | The routes have no ceiling: `GET /.well-known/procurauth/resources` asks no action with a ceiling, and `mcp.usage.read` declares none. |
 | The format cache, the formatted texts of the shapes of System > Queries, the DESCRIBE plans of the runs | The value is the layout of a SQL text or the types of its columns. It holds no row of a table and no count of the server. |
 
@@ -485,18 +501,16 @@ A ceiling bounds the work of the person. It does not bound the work that ChDash 
 | Statement | The ceilings apply |
 |---|---|
 | The SQL of the person: the run of the Query page, an export, Deep Analyze | Yes. |
-| The statements that a page runs to show data: the Explorer (catalog, graph, table card and data preview), the System page, Traces, Logs, Metrics | Yes. |
+| The statements that a page runs to show data: the Explorer (catalog, graph, table card, data preview and the functions of the server), the System page, Traces, Logs, Metrics, with the reads of the structure of the tables of the signals | Yes. |
 | The discovery of the ACL (`CHECK GRANT`, `SHOW`, the zero-row probes and `DESCRIBE`), for the Explorer, the System page, exports, analysis and MCP | No. |
 | The probes of the capabilities of the server (the tables and the columns of `system` that the System page needs, the refreshable views of the Explorer graph) | No. |
 | The reads of the schema for the editor (`GET /api/meta`: keywords, functions, databases, tables, columns) | No. |
-| The read of the functions of the server for the Explorer (`GET /api/explorer/functions`, `system.functions`) | No. It is the same metadata as the functions of the editor. |
 | The lookup of `system.query_log` for the execution of a run, the reads of the tables of the signals of OpenTelemetry, and `SYSTEM FLUSH LOGS` | No. |
-| The reads of the structure of the tables of the signals: the columns of the logs table and its skipping indexes, the tables and the scope columns of the metrics, the map columns of the traces | No. |
 | The probe of the settings profile of a connection, and the checks of the health runner | No. They have no scope of a request, so no ceiling reaches them. |
 
 The rule is in the code. A scope of statements has the flag `internal` (`ChQueryLimits::internal`). The object `ChInternalScope` sets it for the statements that follow in the same thread. The builder of an internal statement opens this object. It never opens it for the SQL of a person or for a statement that shows data.
 
-A low ceiling of `explorer.read` therefore lets the Explorer find the objects that the runner may read. The ceiling then bounds the data statements of the page, and the page answers with its own scan or time error (`<page>_scan_limit`). The page does not answer `503` with `acl_discovery_failed`, because a retry cannot help in that case. A `503 acl_discovery_failed` always means that ClickHouse did not answer the discovery.
+A low ceiling of `explorer.read` therefore lets the Explorer find the objects that the runner may read. The ceiling then bounds the data statements of the page, and the page answers a refusal that names the ceiling ([A result past a ceiling](#a-result-past-a-ceiling)), or its own time error. The page does not answer `503` with `acl_discovery_failed`, because a retry cannot help in that case. A `503 acl_discovery_failed` always means that ClickHouse did not answer the discovery.
 
 ### Read and write
 
@@ -749,6 +763,7 @@ The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run 
 | The budget `queries` of the creator of an MCP key of the mode `keys` (decision of 2026-11-07) | `tests/native/mcp_test.cpp` (`test_creator_budgets`): one question with `context.usage` on the host of the call for each tool of `query.run.read`, none without it, `budget_exceeded`, `503` for a failure, no unit for the other tools; `test_a_query_tool_of_an_mcp_key_takes_a_unit_of_the_budget_of_its_creator` of `test_access.py` |
 | A request with a ceiling neither reads nor fills a shared cache of a page (decision of 2026-11-07) | `tests/native/cache_acl_test.cpp` (`ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps`, `ddl_text_cache_a_request_with_a_ceiling_reads_every_text_and_keeps_none`), and `test_a_request_with_a_ceiling_neither_reads_nor_fills_the_shared_cache_of_a_page` of `test_access.py` |
 | The deadline of a split batch and the limit of the wait of a use (decision of 2026-11-07) | `tests/native/pdp_transport_cases.hpp` (`test_pdp_batch_deadline`), `tests/native/access_test.cpp` (`test_pdp_usage_wait_limit`), `tests/native/config_test.cpp` (the keys `access.pdp.batch_timeout` and `access.pdp.usage_max_seconds`), and the case 10 of `tests/tls/pdp.sh` (the start stops above the limit) |
+| A result past a row or byte ceiling is a refusal 403 `ceiling_exceeded` that names the ceiling; the list of the functions and the structure of the signal tables obey the ceilings (decision of 2026-11-07) | `tests/native/ch_query_test.cpp` (`test_a_result_past_a_ceiling_names_the_ceiling`, `test_apply_ceilings_lowers_and_never_loosens`), `test_a_result_past_a_ceiling_is_a_refusal_that_names_the_ceiling` of `test_access.py`, and the case U37 of the ProcurAuth runner |
 | The reason `unknown_subject` (ProcurAuth 11.1) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).

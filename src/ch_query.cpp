@@ -322,6 +322,56 @@ bool ch_scope_has_ceilings() {
   return limits && !limits->internal && limits->ceilings.any();
 }
 
+namespace {
+thread_local std::optional<ChCeilingRefusal> t_ceiling_refusal;
+}  // namespace
+
+void ch_note_ceiling_refusal(ChCeilingRefusal refusal) {
+  if (!t_ceiling_refusal) t_ceiling_refusal = std::move(refusal);
+}
+
+std::optional<ChCeilingRefusal> ch_take_ceiling_refusal() {
+  std::optional<ChCeilingRefusal> out = std::move(t_ceiling_refusal);
+  t_ceiling_refusal.reset();
+  return out;
+}
+
+std::optional<ChCeilingRefusal> ch_ceiling_of_server_error(int code, std::string_view message, const ChQueryLimits& limits) {
+  if (limits.internal || !limits.ceilings.any()) return std::nullopt;
+  const ChQueryBounds before = limits.before_ceilings.value_or(ChQueryBounds{});
+  const AccessCeilings& ceilings = limits.ceilings;
+  // The ceiling set the bound when it is not above the bound of the route (0: the route had no bound).
+  const auto set_bound = [](uint64_t ceiling, uint64_t bound) { return ceiling != 0 && (bound == 0 || ceiling <= bound); };
+  switch (code) {
+    case 158:  // TOO_MANY_ROWS: max_rows_to_read
+      if (set_bound(ceilings.max_rows_read, before.max_rows_to_read)) return ChCeilingRefusal{"max_rows_read", ceilings.max_rows_read};
+      break;
+    case 307:  // TOO_MANY_BYTES: max_bytes_to_read
+      if (set_bound(ceilings.max_read_size, before.max_bytes_to_read)) return ChCeilingRefusal{"max_read_size", ceilings.max_read_size};
+      break;
+    case 396: {  // TOO_MANY_ROWS_OR_BYTES: max_result_rows or max_result_bytes ("Limit for result exceeded, max rows: ..." or "max bytes: ...")
+      const bool bytes = message.find("max bytes") != std::string_view::npos;
+      if (bytes && set_bound(ceilings.max_result_size, before.max_result_bytes)) return ChCeilingRefusal{"max_result_size", ceilings.max_result_size};
+      if (!bytes && set_bound(ceilings.max_rows, before.max_result_rows)) return ChCeilingRefusal{"max_rows", ceilings.max_rows};
+      break;
+    }
+    default:
+      break;
+  }
+  return std::nullopt;
+}
+
+ChCeilingRefusalScope::ChCeilingRefusalScope(bool nested) : outer_(ch_take_ceiling_refusal()) {
+  if (!nested) outer_.reset();
+}
+
+ChCeilingRefusalScope::~ChCeilingRefusalScope() {
+  t_ceiling_refusal.reset();
+  if (outer_) t_ceiling_refusal = std::move(outer_);
+}
+
+std::optional<ChCeilingRefusal> ChCeilingRefusalScope::take() { return ch_take_ceiling_refusal(); }
+
 std::string ch_statement_query_id() {
   const ChQueryLimits* limits = ChQueryScope::current();
   return limits && limits->query_id ? limits->query_id() : std::string();
@@ -401,11 +451,27 @@ class StatementCeilings {
  private:
   static void check(const std::optional<CeilingBreach>& breach) {
     if (!breach) return;
+    // A row or byte ceiling: the route answers a refusal that names it (ch_note_ceiling_refusal).
+    const ChQueryLimits* limits = ChQueryScope::current();
+    const AccessCeilings ceilings = limits ? limits->ceilings : AccessCeilings{};
+    const uint64_t value = breach->ceiling == "max_rows_read"     ? ceilings.max_rows_read
+                           : breach->ceiling == "max_read_size"   ? ceilings.max_read_size
+                           : breach->ceiling == "max_rows"        ? ceilings.max_rows
+                           : breach->ceiling == "max_result_size" ? ceilings.max_result_size
+                                                                  : 0;
+    if (value != 0) ch_note_ceiling_refusal(ChCeilingRefusal{breach->ceiling, value});
     const int code = breach->ceiling == "max_duration" ? 159 : (breach->ceiling == "max_read_size" || breach->ceiling == "max_result_size" ? 307 : 158);
     throw ChCeilingExceeded(code, ceiling_breach_text(*breach));
   }
   std::optional<CeilingMeter> meter_;
 };
+
+// A limit error of ClickHouse for a bound that a ceiling of the grant set: the route answers a refusal that names the ceiling.
+void note_server_limit(const clickhouse::ServerError& error) {
+  const ChQueryLimits* limits = ChQueryScope::current();
+  if (!limits) return;
+  if (auto refusal = ch_ceiling_of_server_error(error.GetCode(), error.what(), *limits)) ch_note_ceiling_refusal(std::move(*refusal));
+}
 
 }  // namespace
 
@@ -428,7 +494,12 @@ void ch_select(clickhouse::Client& client, const std::string& sql, const ChParam
     ch_check_canceled();
     ceilings->on_progress(progress);
   });
-  Runner(client).run(query);
+  try {
+    Runner(client).run(query);
+  } catch (const clickhouse::ServerError& error) {
+    note_server_limit(error);
+    throw;
+  }
 }
 
 void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
@@ -455,7 +526,10 @@ void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
     // Some servers end a canceled stream with QUERY_WAS_CANCELLED (394) or QUERY_WAS_CANCELLED_BY_CLIENT (735).
     // They send this instead of the normal end of the stream. The rows that the callback kept are the answer.
     // The exception is the last packet.
-    if (!(stopped && (error.GetCode() == 394 || error.GetCode() == 735))) throw;
+    if (!(stopped && (error.GetCode() == 394 || error.GetCode() == 735))) {
+      note_server_limit(error);
+      throw;
+    }
   }
 }
 
@@ -466,7 +540,12 @@ void ch_execute(clickhouse::Client& client, const std::string& sql) {
     ch_check_canceled();
     ceilings->on_progress(progress);
   });
-  Runner(client).run(query);
+  try {
+    Runner(client).run(query);
+  } catch (const clickhouse::ServerError& error) {
+    note_server_limit(error);
+    throw;
+  }
 }
 
 void ch_execute(clickhouse::Client& client, const clickhouse::Query& query) { Runner(client).run(query); }
@@ -616,21 +695,29 @@ void apply_ceilings(const AccessCeilings& ceilings, ChQueryLimits& limits) {
   limits.ceilings = access_ceilings_lowest(limits.ceilings, ceilings);
   // The lower of two bounds. 0 means that a side has no bound.
   const auto tighter = [](uint64_t current, uint64_t ceiling) -> uint64_t { return current == 0 ? ceiling : std::min(current, ceiling); };
+  // A row or byte ceiling that sets the bound (the bound of the route is not lower) also sets the overflow mode "throw", also over the
+  // mode "break" of a route: a result past a ceiling is a refusal that names the ceiling, never a cut answer (docs/access.md, "A result
+  // past a ceiling"). A bound of the route that stays lower keeps its own mode.
+  const auto sets = [](uint64_t current, uint64_t ceiling) { return current == 0 || ceiling <= current; };
   if (ceilings.max_rows_read != 0) {
+    const bool bound = sets(limits.max_rows_to_read, ceilings.max_rows_read);
     limits.max_rows_to_read = tighter(limits.max_rows_to_read, ceilings.max_rows_read);
-    if (limits.read_overflow_mode.empty()) limits.read_overflow_mode = "throw";
+    if (limits.read_overflow_mode.empty() || bound) limits.read_overflow_mode = "throw";
   }
   if (ceilings.max_read_size != 0) {
+    const bool bound = sets(limits.max_bytes_to_read, ceilings.max_read_size);
     limits.max_bytes_to_read = tighter(limits.max_bytes_to_read, ceilings.max_read_size);
-    if (limits.read_overflow_mode.empty()) limits.read_overflow_mode = "throw";
+    if (limits.read_overflow_mode.empty() || bound) limits.read_overflow_mode = "throw";
   }
   if (ceilings.max_rows != 0) {
+    const bool bound = sets(limits.max_result_rows, ceilings.max_rows);
     limits.max_result_rows = tighter(limits.max_result_rows, ceilings.max_rows);
-    if (limits.result_overflow_mode.empty()) limits.result_overflow_mode = "throw";
+    if (limits.result_overflow_mode.empty() || bound) limits.result_overflow_mode = "throw";
   }
   if (ceilings.max_result_size != 0) {
+    const bool bound = sets(limits.max_result_bytes, ceilings.max_result_size);
     limits.max_result_bytes = tighter(limits.max_result_bytes, ceilings.max_result_size);
-    if (limits.result_overflow_mode.empty()) limits.result_overflow_mode = "throw";
+    if (limits.result_overflow_mode.empty() || bound) limits.result_overflow_mode = "throw";
   }
   if (ceilings.max_duration != 0) {
     // The seconds of a bound are a signed value: a ceiling above the largest one has no more effect than the largest one.

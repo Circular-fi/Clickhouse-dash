@@ -4,7 +4,6 @@
 #include "api_error.hpp"
 #include "api_params.hpp"
 #include "ch_block_value.hpp"
-#include "ch_query.hpp"
 #include "ch_error.hpp"
 #include "ch_uri.hpp"
 #include "facet_limits.hpp"
@@ -98,9 +97,6 @@ LogsSchema LogsService::load_schema(ChExecutor& db, const HostSpec& host) const 
   const LogSettings& logs = host.otel.logs;
   const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
   const auto result = caches_.schema.get(key, [&](LogsSchema& schema, std::string&, std::string&) {
-    // The read of the structure of the table is a statement of ChDash, not of a person: the ceilings of the grant never apply. The cache
-    // is shared, and no ceiling can change a column (docs/access.md, "Shared caches and ceilings").
-    ChInternalScope internal;
     std::map<std::string, std::string> columns;
     const SqlStatement column_statement = schema_columns_statement(logs);
     db.select(column_statement.sql, column_statement.params.list(), [&](const clickhouse::Block& block) {
