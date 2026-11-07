@@ -1,0 +1,4 @@
+# The cases of the runner that fail today, and are known. One case id, then # and the reason.
+# tests/conformance/run.sh gives the exit code 1 for a failed case that this list does not name.
+# When a case of this list passes, the script says so: remove its line.
+U37 # ChDash declares no ceiling yet: it treats a true answer with max_rows as false (403). The ceilings of ChDash fix it (branch wip/ceilings).
