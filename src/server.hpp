@@ -533,6 +533,9 @@ private:
   // readonly and the ceilings. Return false after the function writes the refusal (403, 429 with Retry-After, or 503). Return true when
   // no check applies.
   bool access_use_run(httplib::Response& res, const std::string& host_id, const std::vector<std::string>& sql_texts);
+  // An operation on a run that is not a use (Deep Analyze joins a job that runs already): query.run.read or query.run.write on the host,
+  // without context.usage (ProcurAuth 10.1). False: the refusal (403, 429 or 503) is in `res`.
+  bool access_run_permitted(httplib::Response& res, const std::string& host_id);
   // One question with context.usage for the subject of this request, for an action that the document lists with a budget (else one
   // question without it). A true answer with a ceiling that ChDash cannot apply is false. *pdp_true (when not null) receives the answer of
   // the PDP before that check: true means that the PDP took the unit.

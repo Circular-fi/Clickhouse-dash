@@ -400,7 +400,12 @@ void PdpClient::cache_store(std::string key, const PdpAnswer& answer, std::chron
   if (answer.usage_units && *answer.usage_units > 0) return;
   auto life = std::chrono::duration_cast<std::chrono::steady_clock::duration>(options_.cache_ttl);
   // A false answer with budget_exceeded is kept for the lower of retry_after and cache_ttl.
-  if (answer.retry_after) life = std::min(life, std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::seconds(*answer.retry_after)));
+  // The comparison is in whole seconds first: a very large retry_after must not overflow the arithmetic of the clock.
+  const auto ttl_seconds = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(options_.cache_ttl).count());
+  if (answer.retry_after && *answer.retry_after <= ttl_seconds) {
+    life = std::min(life, std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                              std::chrono::seconds(static_cast<int64_t>(*answer.retry_after))));
+  }
   const auto expires = now + life;
   const size_t bytes = cache_entry_bytes(key, answer);
   if (const auto known = cache_.find(std::string_view(key)); known != cache_.end()) cache_erase(known->second);

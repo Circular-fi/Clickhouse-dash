@@ -235,17 +235,22 @@ def test_the_actions_are_published_without_a_token():
         assert actions[name]["resource_types"] == ["service"], name
     assert all(a["description"] for a in actions.values())
     # The six ceilings (ProcurAuth 6.1): declared once, listed by the actions that apply them (docs/access.md, "Limits of a grant").
-    ceilings = {item["name"]: item for item in doc["limits"]}
+    # The member limits also declares the budgets (test_the_document_declares_the_budgets_and_the_actions_list_them): this test keeps the ceilings.
+    ceilings = {item["name"]: item for item in doc["limits"] if item["kind"] == "ceiling"}
     assert list(ceilings) == ["max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"]
     for item in ceilings.values():
         assert set(item) == {"name", "label", "description", "unit", "kind", "min", "max"}, item
         assert item["kind"] == "ceiling" and item["min"] == 1 and item["min"] <= item["max"] <= 2**53, item
         assert 0 < len(item["label"]) <= 60 and 0 < len(item["description"]) <= 300 and 0 < len(item["unit"]) <= 20, item
     every = list(ceilings)
+
+    def ceilings_of(name):
+        return [limit for limit in actions[name].get("limits", []) if limit in ceilings]
+
     for name in ("query.run.read", "query.run.write", "query.export"):
-        assert actions[name]["limits"] == every, name
-    assert actions["explorer.read"]["limits"] == ["max_rows", "max_rows_read", "max_duration", "max_memory"]
-    assert actions["system.read"]["limits"] == ["max_rows_read", "max_rows", "max_duration"]
+        assert ceilings_of(name) == every, name
+    assert ceilings_of("explorer.read") == ["max_rows", "max_rows_read", "max_duration", "max_memory"]
+    assert ceilings_of("system.read") == ["max_rows_read", "max_rows", "max_duration"]
     for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
         assert "limits" not in actions[name], name
     # The member resources names the hosts: one node for each, with no actions (ProcurAuth 5.2).
@@ -404,6 +409,14 @@ def test_a_true_answer_with_a_ceiling_that_chdash_cannot_apply_is_a_denial():
     # ProcurAuth 7.6: the limits of a false answer mean nothing.
     answer(fixed={"system.read": {"decision": False, "context": {"limits": "not an object"}}})
     assert call("GET", SYSTEM).status_code == 403
+    # The catalog of the Explorer asks explorer.read on the host with the match "subtree", and it runs data statements with the ceilings of
+    # that answer: the same rule applies. explorer.read does not list max_read_size, and 0 is below the min.
+    for limits in ({"max_read_size": 10}, {"max_rows": 0}):
+        answer(fixed={"explorer.read": {"decision": True, "context": {"limits": limits}}})
+        response = call("GET", "/api/explorer/catalog?host_id=local")
+        assert response.status_code == 403 and response.json()["action"] == "explorer.read", (limits, response.text)
+    answer(fixed={"explorer.read": {"decision": True, "context": {"limits": {"max_rows": 100000}}}})
+    assert call("GET", "/api/explorer/catalog?host_id=local").status_code == 200
 
 
 @needs_access

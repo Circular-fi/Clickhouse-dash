@@ -449,8 +449,14 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
       // A listing of the databases of a host that names no database: any grant on the host or below it lets the route run, and the route
       // keeps the databases that the human may read (access_readable_databases). It never runs for a host that the human cannot see.
       const AccessMatch match = rule.list_filter && resource.type == "host" ? AccessMatch::Subtree : AccessMatch::Node;
-      const auto decisions = access_decide({AccessQuestion{rule.action, resource, match}});
+      auto decisions = access_decide({AccessQuestion{rule.action, resource, match}});
       if (!decisions.front().allowed) return deny(rule.action, decisions);
+      if (match == AccessMatch::Subtree && !decisions.front().limits.empty()) {
+        // The route runs data statements with the ceilings of this answer, so a ceiling that ChDash cannot apply makes it false
+        // (ProcurAuth 7.5). access_decide checks only the questions with the match "node".
+        access_enforce_ceilings(state.call.request_id, {AccessQuestion{rule.action, resource}}, &decisions, access_features(), true);
+        if (!decisions.front().allowed) return deny(rule.action, decisions);
+      }
       // The ceilings of the action apply to each query that the route sends (ProcurAuth 7.4).
       state.ceilings = AccessRunCeilings{};
       state.ceilings.base = access_ceilings_of(decisions.front().limits);
@@ -775,6 +781,16 @@ bool Server::access_use_run(httplib::Response& res, const std::string& host_id, 
   state.read_only = use.read_only;
   state.use_pending = false;
   return true;
+}
+
+bool Server::access_run_permitted(httplib::Response& res, const std::string& host_id) {
+  const AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return true;
+  const AccessResource resource = access_resource_of(host_id, std::string());
+  const auto decisions = access_decide({AccessQuestion{"query.run.read", resource}, AccessQuestion{"query.run.write", resource}});
+  if (decisions.size() == 2 && (decisions[0].allowed || decisions[1].allowed)) return true;
+  refuse_decision(res, access_refusal_of(decisions), "query.run.read");
+  return false;
 }
 
 bool Server::access_use_export(httplib::Response& res, const std::string& host_id) {

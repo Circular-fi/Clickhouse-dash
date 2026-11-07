@@ -619,7 +619,7 @@ ChDash had no TLS client up to version 1.2.0. From version 1.2.1 it has one for 
 - Use an `https` URL in `pdp.url`. The release binaries have the TLS client. A build from the source needs `-DCHDASH_TLS=ON`. A build without it stops the start with a message that names this option.
 - ChDash verifies the certificate chain and the host name of the URL (RFC 6125). For an IP address in the URL, it checks the IP entries of the certificate. The lowest TLS version is 1.2.
 - `pdp.ca_file` names a file of PEM certificates. It replaces the store of the system. Without it, ChDash reads the store in the directory of the OpenSSL of the build (`/etc/ssl`). ChDash never reads `SSL_CERT_FILE` or `SSL_CERT_DIR`: the configuration file is the only source.
-- `pdp.verify = false` turns off the check of the chain and of the name. ChDash then writes a `config.warning` at each start. Use it only to test.
+- `pdp.verify = false` turns off the check of the chain and of the name. ChDash then writes a `config.warning` at each start. Use it only to test. `pdp.verify = false` together with `pdp.ca_file` stops the start, because the CA file is then never used.
 - A request that fails in the TLS handshake is a failure of the PDP (503). The log line `access.pdp_failed` gives the cause, for example the certificate that is not valid.
 - `tests/tls/pdp.sh` tests these cases with Docker: a verified chain and name, an unknown CA, a name that is not in the certificate, `verify = false`, and an `http` URL to an `https` port.
 

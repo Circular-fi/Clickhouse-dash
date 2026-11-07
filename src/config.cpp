@@ -1115,6 +1115,11 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
                              "or a network that only this server and the PDP reach (docs/access.md, \"Transport\")");
     }
   } else {
+    if (!out.pdp_verify && pdp->attrs.count("ca_file") != 0) {
+      // A CA that nothing checks looks like a protection and gives none.
+      throw std::runtime_error("access.pdp.ca_file and access.pdp.verify = false contradict each other: verify = false checks no certificate, so "
+                               "the CA file is never used. Remove one of the two keys");
+    }
     if (!out.pdp_ca_file.empty()) {
       const std::string problem = pdp_check_ca_file(out.pdp_ca_file);
       if (!problem.empty()) throw std::runtime_error("access.pdp.ca_file must name a readable file of PEM certificates; the value is \"" + out.pdp_ca_file + "\": " + problem);

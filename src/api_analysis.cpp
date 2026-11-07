@@ -878,8 +878,12 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
     res.set_header("Cache-Control", "no-store");
     res.set_content(buffer.GetString(), buffer.GetSize(), "application/json");
   };
-  // The analysis of this query already runs. This is the same job. No second EXPLAIN ANALYZE starts.
-  if (!started.created) return answer(started.job_id);
+  // The analysis of this query already runs. This is the same job. No second EXPLAIN ANALYZE starts, and no unit is taken. The PDP still
+  // decides this operation: query.run.read or query.run.write on the host, without context.usage (ProcurAuth 10.1).
+  if (!started.created) {
+    if (!access_run_permitted(res, host_id)) return;
+    return answer(started.job_id);
+  }
 
   // A place for the job is held until the job ends. Without a place (during a burst of analyses), the answer is 503 server_busy.
   auto ticket = admit(WorkClass::Analysis, req, res);

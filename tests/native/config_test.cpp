@@ -733,6 +733,9 @@ void test_access_block() {
       CHECK_EQ(source(unverified, "access.pdp.verify"), std::string("file|false"));
       CHECK(std::any_of(unverified.warnings.begin(), unverified.warnings.end(), [](const std::string& w) { return contains(w, "access.pdp.verify = false"); }));
       CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = \"no\"")), "access.pdp.verify must be a boolean"));
+      // verify = false with a ca_file: the two keys contradict each other (the CA would never be used).
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = false\n ca_file = \"/etc/hostname\"")),
+                     "access.pdp.ca_file and access.pdp.verify = false contradict each other"));
       // ca_file: a readable file with a certificate. An empty text, a missing file, a file without a certificate and a bad value stop the start.
       write_file(dir + "/pdp-ca.pem",
                  "-----BEGIN CERTIFICATE-----\nMIIBijCCAS+gAwIBAgIUR1dHE+FNg5b40FpV48U7ZKM6cqgwCgYIKoZIzj0EAwIw\nGTEXMBUGA1UEAwwOY2hkYXNoLXRlc3QtY2EwIBcNMjYxMTA3MDIwOTM2WhgPMjEy\n"
