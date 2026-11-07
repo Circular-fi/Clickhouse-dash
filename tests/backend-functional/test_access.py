@@ -481,6 +481,180 @@ def test_the_stream_of_an_export_asks_the_host_of_the_job():
     assert call("POST", "/api/export/stream", tok=tok, json={"token": response.json()["token"]}).status_code == 200
 
 
+# ---- the budgets (docs/access.md, "Budgets"; ProcurAuth 6.4, 6.11, 6.12, 10.1, 10.3, 10.6; cases U04, U19, U21, U22, U32, U33, U58, U62, U68) --
+
+
+def usage_asked(action: str | None = None, since: int = 0) -> list[dict]:
+    """The questions with context.usage that the PDP got since `since` requests, for one action or for every action."""
+    return [e for r in received()[since:] for e in evaluations(r) if "usage" in e["context"] and (action is None or e["action"]["name"] == action)]
+
+
+def start_run(sql: str = "SELECT 1", tok: str | None = "default") -> requests.Response:
+    return call("POST", "/api/query/run", tok=tok, json={"host_id": "local", "sql": sql})
+
+
+@needs_access
+def test_the_document_declares_the_budgets_and_the_actions_list_them():
+    limits = {item["name"]: item for item in call("GET", "/.well-known/procurauth/actions", tok=None).json()["limits"]}
+    for name in ("queries", "exports"):
+        assert limits[name]["kind"] == "budget" and "min" not in limits[name] and "max" not in limits[name] and not name.startswith("max_")
+        assert 1 <= len(limits[name]["label"]) <= 60 and 1 <= len(limits[name]["description"]) <= 300 and 1 <= len(limits[name]["unit"]) <= 20
+    actions = {item["name"]: item.get("limits", []) for item in call("GET", "/.well-known/procurauth/actions", tok=None).json()["actions"]}
+    assert "queries" in actions["query.run.read"] and "queries" in actions["query.run.write"] and "exports" in actions["query.export"]
+    for name in ("explorer.read", "system.read", "observability.read", "library.read"):
+        assert not {"queries", "exports", "requests"} & set(actions.get(name, [])), name
+
+
+@needs_access
+def test_a_run_sends_one_question_with_usage_and_no_same_question_without_it():
+    # U19, U21: one question with usage 1 for the action of the use; the other run action goes without usage; the action of the use
+    # never goes without usage before.
+    answer(default=True)
+    since = len(received())
+    response = start_run()
+    assert response.status_code == 200, response.text
+    reads = [e for r in received()[since:] for e in evaluations(r) if e["action"]["name"] == "query.run.read"]
+    assert len(reads) == 1 and reads[0]["context"] == {"usage": {"units": 1}}, reads
+    writes = [e for r in received()[since:] for e in evaluations(r) if e["action"]["name"] == "query.run.write"]
+    assert writes and all("usage" not in e["context"] for e in writes), writes
+    # The question with usage is one Access Evaluation request, never a batch (U24, ProcurAuth 6.11).
+    usage_requests = [r for r in received()[since:] if any("usage" in e["context"] for e in evaluations(r))]
+    assert len(usage_requests) == 1 and usage_requests[0]["path"] == "/access/v1/evaluation"
+    # A write (SET) is a use of query.run.write; the other action is query.run.read, without usage.
+    since = len(received())
+    assert start_run("SET max_threads = 1", token("setter")).status_code == 200
+    assert [e["action"]["name"] for e in usage_asked(since=since)] == ["query.run.write"]
+    # The routes that run no SQL of the person take no unit: the formatter, the names of the editor, the Explorer.
+    since = len(received())
+    assert call("POST", "/api/format", json={"host_id": "local", "sql": "select 1"}).status_code in (200, 400, 404, 422)
+    assert call("GET", "/api/meta?host_id=local&types=databases").status_code == 200
+    assert call("GET", "/api/explorer/functions?host_id=local").status_code == 200
+    assert usage_asked(since=since) == []
+
+
+@needs_access
+def test_each_use_takes_its_own_unit_and_a_true_answer_with_units_1_is_never_kept():
+    # U22: three runs, three questions with usage, whatever the cache of the other answers holds.
+    answer(default=True)
+    since = len(received())
+    tok = token("repeat")
+    for _ in range(3):
+        assert start_run(tok=tok).status_code == 200
+    assert len(usage_asked("query.run.read", since)) == 3
+
+
+@needs_access
+def test_a_true_answer_with_units_0_is_kept_and_lets_the_next_use_run_with_no_question():
+    # U33 and ProcurAuth 10.1: units 0 tells that no budget applies; the answer may be kept for cache_ttl.
+    answer(default=True, usage={"query.run.read": {"units": 0}})
+    since = len(received())
+    tok = token("nobudget")
+    assert start_run(tok=tok).status_code == 200
+    assert start_run(tok=tok).status_code == 200
+    assert len(usage_asked("query.run.read", since)) == 1
+
+
+@needs_access
+def test_budget_exceeded_gives_429_with_retry_after_for_a_run():
+    # U04, U62, U63: 429, the Retry-After of the PDP, no reason in the body, and no other action tried.
+    answer(default=True, usage={"query.run.read": {"exceeded": 12}})
+    since = len(received())
+    response = start_run(tok=token("spender"))
+    assert response.status_code == 429, response.text
+    assert response.headers["Retry-After"] == "12"
+    body = response.json()
+    assert body["error_code"] == "too_many_requests" and body["retryable"] is True and "budget_exceeded" not in response.text
+    assert [e["action"]["name"] for e in usage_asked(since=since)] == ["query.run.read"]
+    # U58: the kept refusal gives a Retry-After that is not above the first one.
+    again = start_run(tok=token("spender"))
+    assert again.status_code == 429 and 1 <= int(again.headers["Retry-After"]) <= 12
+    # The values 1 and 86400 pass as they are (U63).
+    for value in (1, 86400):
+        answer(default=True, usage={"query.run.read": {"exceeded": value}})
+        assert start_run(tok=token(f"spender{value}")).headers["Retry-After"] == str(value)
+
+
+@needs_access
+def test_a_counter_of_the_pdp_ends_the_runs_of_a_person():
+    answer(default=True, usage={"query.run.read": {"amount": 2, "retry_after": 5}})
+    tok = token("counted")
+    assert start_run(tok=tok).status_code == 200
+    time.sleep(CACHE_TTL + 0.2)
+    assert start_run(tok=tok).status_code == 200
+    time.sleep(CACHE_TTL + 0.2)
+    third = start_run(tok=tok)
+    assert third.status_code == 429 and third.headers["Retry-After"] == "5", third.text
+    # Another person has a counter of its own.
+    assert start_run(tok=token("other-counted")).status_code == 200
+
+
+@needs_access
+def test_a_true_answer_without_units_is_a_denial_and_no_other_action_is_tried():
+    # U32: 403 and one question with usage.
+    answer(default=True, usage={"query.run.read": {"omit_units": True}})
+    since = len(received())
+    response = start_run(tok=token("nounits"))
+    assert response.status_code == 403 and response.json()["action"] == "query.run.read", response.text
+    assert len(usage_asked(since=since)) == 1
+
+
+@needs_access
+def test_a_failure_of_the_question_with_usage_gives_503_and_it_is_sent_one_time():
+    # U68, U67: a lost answer, a status that is not 200, a retry_after that is not valid, a late answer: 503, never again.
+    bad_retry_after = {"decision": False, "context": {"reason": "budget_exceeded", "retry_after": 0}}
+    for order in ({"usage": {"query.run.read": {"status": 500}}}, {"usage": {"query.run.read": {"drop": True}}},
+                  {"usage": {"query.run.read": {"delay_ms": 2000}}}, {"fixed": {"query.run.read": bad_retry_after}}):
+        pdp("/control/reset", {})
+        answer(default=True, **order)
+        since = len(received())
+        response = start_run(tok=token("lost"))
+        assert response.status_code == 503, (order, response.text)
+        assert response.json()["error_code"] == "pdp_unavailable" and response.json()["retryable"] is True
+        time.sleep(0.3)
+        assert len(usage_asked(since=since)) == 1, (order, usage_asked(since=since))
+
+
+@needs_access
+def test_a_person_with_query_run_write_only_runs_a_read_with_a_second_question():
+    # ProcurAuth 10.1: the first use (query.run.read) is a plain false; the PEP then asks query.run.write with usage.
+    answer(default=True, deny=["query.run.read"])
+    since = len(received())
+    assert start_run(tok=token("write-only")).status_code == 200
+    # The first question with usage counted nothing (a plain false); the second one took the unit.
+    assert [e["action"]["name"] for e in usage_asked(since=since)] == ["query.run.read", "query.run.write"]
+
+
+@needs_access
+def test_the_stream_of_an_export_takes_the_unit_and_the_run_takes_none():
+    answer(default=True)
+    tok = token("exporter2")
+    since = len(received())
+    made = call("POST", "/api/export/run", tok=tok, json={"host_id": "local", "queries": ["SELECT 1 AS one"], "format": "csv"})
+    assert made.status_code == 200, made.text
+    assert usage_asked(since=since) == [], "the run of an export takes no unit: an abandoned export costs nothing"
+    since = len(received())
+    stream = call("POST", "/api/export/stream", tok=tok, json={"token": made.json()["token"]})
+    assert stream.status_code == 200, stream.text[:300]
+    used = usage_asked(since=since)
+    assert [e["action"]["name"] for e in used] == ["query.export"] and used[0]["context"] == {"usage": {"units": 1}}
+    assert used[0]["resource"]["id"] == "local"
+    # A spent budget at the stream: 429 with Retry-After, before any SQL runs, and the job stays for another try.
+    made = call("POST", "/api/export/run", tok=tok, json={"host_id": "local", "queries": ["SELECT 1 AS one"], "format": "csv"})
+    answer(default=True, usage={"query.export": {"exceeded": 9}})
+    refused = call("POST", "/api/export/stream", tok=tok, json={"token": made.json()["token"]})
+    assert refused.status_code == 429 and refused.headers["Retry-After"] == "9", refused.text
+    assert refused.json()["error_code"] == "too_many_requests" and "budget_exceeded" not in refused.text
+    answer(default=True)
+    assert call("POST", "/api/export/stream", tok=tok, json={"token": made.json()["token"]}).status_code == 200
+    # A failure of the PDP gives 503 and the question is not sent again.
+    made = call("POST", "/api/export/run", tok=tok, json={"host_id": "local", "queries": ["SELECT 1 AS one"], "format": "csv"})
+    answer(default=True, usage={"query.export": {"status": 500}})
+    since = len(received())
+    failed = call("POST", "/api/export/stream", tok=tok, json={"token": made.json()["token"]})
+    assert failed.status_code == 503, failed.text
+    assert len(usage_asked("query.export", since)) == 1
+
+
 # Old id u09. No ProcurAuth case id: the protocol lets a PEP keep answers (10.1), and the cases do not test the TTL of ChDash.
 @needs_access
 def test_a_change_of_the_answer_applies_after_cache_ttl_at_most():
@@ -747,9 +921,12 @@ def test_readonly_follows_the_host_of_the_run():
     assert refused.status_code == 403 and refused.json()["action"] == "query.run.read", refused.text
     export = call("POST", "/api/export/run", tok=tok, json={"host_id": "other", "queries": ["SELECT 1"], "format": "csv"})
     assert export.status_code == 403 and export.json()["action"] == "query.export", export.text
-    # Without a run action on any host, the run is refused before the server reads the body.
+    # Without a run action on any host, the run is refused (403). A run is a use of the budget `queries`: it asks the PDP when the handler
+    # has the SQL, so the server reads the body first. An export is still refused before the body is read.
     answer(default=False, allow=["system.read@host:local"])
     refused = call("POST", "/api/query/run", tok=tok, json={"host_id": "local", "sql": "SELECT 1"})
+    assert refused.status_code == 403 and refused.json()["action"] == "query.run.read", refused.text
+    refused = call("POST", "/api/export/run", tok=tok, json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
     assert refused.status_code == 403 and "close" in refused.headers.get("Connection", "").lower(), refused.headers
 
 

@@ -17,6 +17,9 @@ enum class McpAccess {
   Allowed,
   Denied,  // false: the answer of a tool that does not exist (-32602), or HTTP 403 for another request
   Failed,  // the PDP gave no valid answer: HTTP 503 with -32603
+  // false with budget_exceeded (binding 5.3, 5.4): the tool error `budget_exceeded` on tools/call, HTTP 429 with -31429 on another request.
+  // The seconds of retry_after come with the result (McpCallInfo::retry_after, session_permitted).
+  BudgetExceeded,
 };
 
 // The ceilings that a call must keep (ProcurAuth 7.3, 7.5). Each member is the lowest ceiling of the actions that the tool uses.

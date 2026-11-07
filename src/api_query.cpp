@@ -65,6 +65,10 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
         "Direct KILL QUERY is disabled in panel SQL; use the query cancel capability.");
   }
   const std::string host_id = doc["host_id"].GetString();
+  // This run is one use of query.run.read or query.run.write: it takes one unit of the budget `queries` (docs/access.md, "Budgets"). The
+  // unit is taken here, before the host is looked up and before the session exists. The check also sets readonly and the ceilings. A host
+  // that the configuration does not have goes to the service, so a hidden host and a missing host get the same answer.
+  if (!access_use_run(res, host_id, {sql})) return;
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) {
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
@@ -102,8 +106,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   QuerySessionOptions run_options = cfg_.query_options;
   run_options.read_only_strict = access_read_only();
   // The ceilings of the grant (docs/access.md, "Limits of a grant"): a person with query.run.read and query.run.write gets the ceilings of
-  // the action that fits the SQL. The session lowers its bounds with them and keeps the backstops of the client.
-  access_classify_sql({registry_sql});
+  // the action that fits the SQL (access_use_run classified it). The session lowers its bounds with them and keeps the backstops of the client.
   run_options.ceilings = access_ceilings();
   auto session = std::make_shared<QuerySession>(
       qid,

@@ -148,12 +148,13 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
     w.EndArray();
     w.Key("description");
     w.String(action.description);
-    // The ceilings of the action (ProcurAuth 5.2, 6.2): the names that the member "limits" of the document declares.
-    const std::vector<std::string> ceilings = access_action_ceilings(action.name);
-    if (!ceilings.empty()) {
+    // The ceilings and the budgets of the action (ProcurAuth 5.2, 6.2): the names that the member "limits" of the document declares.
+    std::vector<std::string> limits = access_action_ceilings(action.name);
+    for (std::string& budget : access_action_budgets(action.name)) limits.push_back(std::move(budget));
+    if (!limits.empty()) {
       w.Key("limits");
       w.StartArray();
-      for (const std::string& name : ceilings) write_json_text(w, name);
+      for (const std::string& name : limits) write_json_text(w, name);
       w.EndArray();
     }
     w.EndObject();
@@ -195,6 +196,26 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
     w.Uint64(access_ceiling_max(bounds, info));
     w.EndObject();
   }
+  // The declaration of the budgets (ProcurAuth 6.1): a budget has no min and no max. A budget is declared when a published action lists it.
+  for (const AccessBudgetInfo& info : access_budget_table()) {
+    bool listed = false;
+    for (const AccessAction& action : access_published_actions(features)) {
+      for (const std::string& name : access_action_budgets(action.name)) listed = listed || name == info.name;
+    }
+    if (!listed) continue;
+    w.StartObject();
+    w.Key("name");
+    w.String(info.name);
+    w.Key("label");
+    w.String(info.label);
+    w.Key("description");
+    w.String(info.description);
+    w.Key("unit");
+    w.String(info.unit);
+    w.Key("kind");
+    w.String("budget");
+    w.EndObject();
+  }
   w.EndArray();
   w.EndObject();
   return std::string(sb.GetString(), sb.GetSize());
@@ -228,7 +249,10 @@ AccessRule access_rule(std::string_view method_in, std::string_view path) {
   if ((path == "/api/query/run" || path == "/api/query" || path == "/api/query/analysis" || path == "/api/format" ||
        path == "/api/query/deep-analysis") &&
       method == "POST") {
-    return host_rule(AccessRuleKind::Run, nullptr, false, true);
+    AccessRule out = host_rule(AccessRuleKind::Run, nullptr, false, true);
+    // The run of the Query page and the replay of Deep Analyze run SQL: each one is a use that takes a unit of the budget `queries`.
+    out.spend = path == "/api/query/run" || path == "/api/query" || path == "/api/query/deep-analysis";
+    return out;
   }
   if ((path == "/api/query/deep-analysis" || path == "/api/query/execution") && method == "GET") return host_rule(AccessRuleKind::Run, nullptr);
   // The names of the editor (keywords, functions, the tables and the columns of a database).

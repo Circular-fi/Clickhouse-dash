@@ -513,6 +513,19 @@ private:
   // the host of the job. Ask query.export, query.run.read and query.run.write on that host. Return false after the function writes the
   // refusal (403, 429 or 503). `stored` is what the run decided: the stream applies the lower ceilings and keeps readonly = 1.
   bool access_check_export_stream(httplib::Response& res, const std::string& host_id, const ExportJobAccess& stored);
+  // The use of an export (docs/access.md, "Budgets"): the stream spends the unit, not the run. Ask query.export on the host of the job with
+  // context.usage, after access_check_export_stream and before any SQL runs. Return false after the function writes the refusal (403, 429
+  // with Retry-After, or 503). The ceilings of the answer lower the ceilings of the stream (access_ceilings).
+  bool access_use_export(httplib::Response& res, const std::string& host_id);
+  // The use of a run of SQL (ProcurAuth 6.4, 10.1; docs/access.md, "Budgets"): the route has AccessRule::spend, so its check asked nothing.
+  // The handler calls this function once it has the SQL and before it starts the run. The function classifies the SQL, asks the other
+  // run action without context.usage, then asks the action of the use with context.usage. It sets readonly and the ceilings. Return
+  // false after the function writes the refusal (403, 429 with Retry-After, or 503). Return true when no check applies.
+  bool access_use_run(httplib::Response& res, const std::string& host_id, const std::vector<std::string>& sql_texts);
+  // One question with context.usage for the subject of this request, for an action that the document lists with a budget (else one
+  // question without it). A true answer with a ceiling that ChDash cannot apply is false. *pdp_true (when not null) receives the answer of
+  // the PDP before that check: true means that the PDP took the unit.
+  AccessDecision access_decide_use(const AccessQuestion& question, bool* pdp_true);
   // Return the access part of /api/version, as a JSON object.
   // The object has the mode, the subject, each action that the subject may use somewhere, and the decisions on each visible host.
   // The server makes one batch for each page. *failed (when not null) receives true when a decision of the batch failed: the route then

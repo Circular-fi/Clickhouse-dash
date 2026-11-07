@@ -17,7 +17,12 @@
 //     "context": {"match": "subtree"} for a question of the navigation (AccessMatch);
 //   - keeps the whole answer of the PDP for cache_ttl at most (subject, action, the path of the resource and the match are the key),
 //     never a failure and never an answer with context.usage.units above 0 (ProcurAuth 10.1). A false answer with budget_exceeded is
-//     kept for the lower of retry_after and cache_ttl. The key has no part for context.usage: the client sends no usage question yet;
+//     kept for the lower of retry_after and cache_ttl;
+//   - sends the question of a use of an action that lists a budget with decide_use (ProcurAuth 6.4, 6.11, 10.1, 10.6): one Access Evaluation
+//     with "context": {"usage": {"units": 1}}, never in a batch and never with the match "subtree". It waits for usage_timeout() and never
+//     sends the request again: no pool retry, no second try after a timeout or a lost answer. A true answer without context.usage.units is
+//     false (6.12). The answers of the uses have their own entries in the cache, apart from the other answers: only a true answer with units 0
+//     and a false answer with budget_exceeded are kept (10.1), and a kept budget_exceeded gives the seconds that remain as retry_after;
 //   - bounds the cache by a count of entries and by a count of bytes (cache_entries and cache_bytes). When the cache is full, it
 //     removes the expired answers, then the oldest answers until the new answer fits;
 //   - keeps a small pool of connections open (ProcurAuth 10.7), http or https, with one deadline for each request (connect, TLS, write and
@@ -122,6 +127,9 @@ struct AccessDecision {
   std::optional<uint64_t> retry_after;
   PdpLimits limits;
   std::optional<uint64_t> usage_units;
+  // True when the PDP answered true to a question with context.usage but gave no context.usage.units. ProcurAuth 6.12 treats this answer
+  // as false: `allowed` is false, with no reason and no ceiling. The flag lets a caller see that the answer is not a plain denial.
+  bool usage_invalid = false;
   // context.error of the item (PdpAnswer::error_status). For the logs only: a client never gets it.
   std::optional<int64_t> error_status;
   std::string error_message;
@@ -333,6 +341,17 @@ public:
   // are not sent: each of their questions is failed, without a new wait.
   std::vector<AccessDecision> decide(const std::string& subject, const std::vector<AccessQuestion>& questions, const PdpCallContext& context);
 
+  // The question of one use of an action that lists a budget (ProcurAuth 6.4): ONE Access Evaluation with context.usage = {"units": 1}.
+  // `question` has the match "node" (6.11: context.usage and the match "subtree" are not sent together; such a question fails). The
+  // request goes by PdpTransport::post_once with usage_timeout(), so nothing sends it again after a timeout, a lost answer or a
+  // connection error (10.6): the decision is failed and the units that the PDP took stay counted. The cache answers only with a kept true
+  // answer with units 0 or a kept budget_exceeded (10.1). The result has these cases:
+  //   - allowed, usage_units 0 or 1: the use runs; limits are the ceilings of the answer (6.4, 10 step 6);
+  //   - allowed false with usage_invalid: the PDP answered true without units (6.12);
+  //   - allowed false, reason BudgetExceeded and retry_after: the route answers 429 (10.3);
+  //   - failed: no valid answer: the route answers 503.
+  AccessDecision decide_use(const std::string& subject, const AccessQuestion& question, const PdpCallContext& context);
+
   // One attempt to read the metadata of the PDP (AuthZEN 1.0, l.1327-1334). Loaded and Absent set the endpoints of the client; the other
   // states keep them. The server calls it at the start: Invalid stops the start, Unreachable is a warning. With PdpOptions::discovery,
   // decide() also calls it before a question while no metadata is known (at most once each second), and again after one hour.
@@ -364,6 +383,8 @@ public:
 
   // The body of a request (evaluation for one question, evaluations for more). For the tests.
   static std::string request_body(const std::string& subject, const std::vector<AccessQuestion>& questions);
+  // The body of the request of decide_use: one evaluation with "context": {"usage": {"units": 1}}. For the tests.
+  static std::string use_request_body(const std::string& subject, const AccessQuestion& question);
   // The decisions of an answer, in the order of the questions; false when the body is not a valid answer for `count` questions.
   // A decision can have a "context" object. A "context" that is not an object makes the answer not valid. Its members:
   //   - "reason" (text) on a false decision gives PdpReason; "unknown_subject" also sets unknown_subject. Another type means Other.
@@ -407,7 +428,10 @@ private:
   // The headers of a request and the CLIENT span of a call.
   std::vector<std::pair<std::string, std::string>> request_headers(const PdpCallContext& context, PdpCall* call) const;
   // Check the status, the size and the echoed X-Request-ID of a result; the text of the fault, or "" when the result is good.
-  std::string check_result(const PdpHttpResult& result, std::chrono::steady_clock::duration elapsed, const PdpCallContext& context, const std::string& path);
+  std::string check_result(const PdpHttpResult& result, std::chrono::steady_clock::duration elapsed, const PdpCallContext& context, const std::string& path,
+                           std::chrono::milliseconds timeout);
+  // The key of the entry of a use (decide_use): apart from the keys of the other answers.
+  std::string use_cache_key(const std::string& subject, const AccessQuestion& question) const;
 
   const PdpOptions options_;
   std::unique_ptr<PdpTransport> transport_;

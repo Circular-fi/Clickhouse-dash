@@ -99,6 +99,36 @@ std::vector<std::string> access_action_ceilings(std::string_view action) {
   return {};
 }
 
+const std::vector<AccessBudgetInfo>& access_budget_table() {
+  static const std::vector<AccessBudgetInfo> table = {
+      {"queries", "Queries run",
+       "The number of queries that a person runs. Each run of the Query page and each run_query call of MCP takes one unit when the run "
+       "starts. The formatter, the names of the editor, the Explorer and the other pages take none.",
+       "query"},
+      {"exports", "Exports downloaded",
+       "The number of exports that a person downloads. One unit is taken when the download starts. The preparation of an export takes no "
+       "unit, so an export that nobody downloads costs nothing.",
+       "export"},
+      {"requests", "MCP requests with no tool",
+       "The number of MCP requests that read no data of a host: initialize, ping, server/discover, the notifications and the tools of the "
+       "action mcp.session. Each one takes one unit. The other tools take units from the budget of their own action.",
+       "request"},
+  };
+  return table;
+}
+
+std::vector<std::string> access_action_budgets(std::string_view action) {
+  if (action == "query.run.read" || action == "query.run.write") return {"queries"};
+  if (action == "query.export") return {"exports"};
+  if (action == "mcp.session") return {"requests"};
+  return {};
+}
+
+bool access_action_has_budget(std::string_view action, const AccessFeatures& features) {
+  const AccessAction* known = access_action(action);
+  return known && access_action_published(*known, features) && !access_action_budgets(action).empty();
+}
+
 std::set<std::string> access_declared_ceilings(std::string_view action, const AccessFeatures& features) {
   const AccessAction* known = access_action(action);
   if (!known || !access_action_published(*known, features)) return {};
@@ -163,6 +193,48 @@ void CeilingDeadline::run(uint64_t seconds) {
   expired_ = true;
   lock.unlock();
   if (on_expired_) on_expired_();
+}
+
+AccessRunUse access_run_use(SqlStatementClass sql_class, const std::function<AccessDecision(const std::string& action)>& ask,
+                            const std::function<AccessDecision(const std::string& action, bool* pdp_true)>& ask_use) {
+  AccessRunUse out;
+  const bool read_class = sql_class == SqlStatementClass::Read;
+  const std::string first = read_class ? "query.run.read" : "query.run.write";
+  const std::string second = read_class ? "query.run.write" : "query.run.read";
+  out.action = first;
+
+  const AccessDecision other = ask(second);
+  if (other.failed) {
+    out.refusal = other;
+    out.action = second;
+    return out;
+  }
+  bool pdp_true = false;
+  const AccessDecision first_decision = ask_use(first, &pdp_true);
+  AccessDecision second_decision = other;
+  AccessDecision used = first_decision;
+  const bool plain_false = !first_decision.allowed && !first_decision.failed && !first_decision.usage_invalid && !pdp_true &&
+                           first_decision.reason != PdpReason::BudgetExceeded;
+  if (plain_false && other.allowed) {
+    out.action = second;
+    used = ask_use(second, &pdp_true);
+    second_decision = used;
+  }
+  if (!used.allowed) {
+    out.refusal = access_refusal_of({used, first_decision, other});
+    return out;
+  }
+  // The decision of each action is final here: the action of the use has its answer with context.usage (its ceilings), the other one has
+  // the answer without it (or, after the second try, the first one is false).
+  const AccessDecision& read = read_class ? first_decision : second_decision;
+  const AccessDecision& write = read_class ? second_decision : first_decision;
+  out.allowed = true;
+  out.ceilings.has_read = read.allowed;
+  out.ceilings.has_write = write.allowed;
+  if (read.allowed) out.ceilings.read = access_ceilings_of(read.limits);
+  if (write.allowed) out.ceilings.write = access_ceilings_of(write.limits);
+  out.read_only = !write.allowed;
+  return out;
 }
 
 void access_enforce_ceilings(const std::string& request_id, const std::vector<AccessQuestion>& questions,

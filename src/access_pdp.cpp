@@ -58,12 +58,20 @@ void write_action(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_vie
   w.EndObject();
 }
 
-// The context of a question: {"match": "subtree"} for the navigation, else empty (the PDP takes "node").
-void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match) {
+// The context of a question: {"match": "subtree"} for the navigation, else empty (the PDP takes "node"). The question of a use has
+// {"usage": {"units": 1}} (ProcurAuth 6.4) and never the match "subtree" (6.11).
+void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match, bool usage = false) {
   w.StartObject();
   if (match == AccessMatch::Subtree) {
     w.Key("match");
     w.String("subtree");
+  }
+  if (usage) {
+    w.Key("usage");
+    w.StartObject();
+    w.Key("units");
+    w.Uint(1);
+    w.EndObject();
   }
   w.EndObject();
 }
@@ -187,6 +195,19 @@ AccessDecision decision_from(const PdpAnswer& answer, const char* source) {
   return out;
 }
 
+// The answer of the PDP to a question with context.usage (ProcurAuth 6.12): a true answer must carry context.usage.units. Without it,
+// the answer is false, with no reason and no ceiling.
+PdpAnswer use_answer_of(PdpAnswer answer) {
+  if (answer.decision && !answer.usage_units) {
+    answer.decision = false;
+    answer.reason = PdpReason::None;
+    answer.unknown_subject = false;
+    answer.retry_after.reset();
+    answer.limits.clear();
+  }
+  return answer;
+}
+
 AccessDecision failed_decision() {
   AccessDecision out;
   out.failed = true;
@@ -272,6 +293,22 @@ PdpClient::PdpClient(PdpOptions options, std::unique_ptr<PdpTransport> transport
   endpoints_.evaluations = options_.base_path + kEvaluationsPath;
 }
 
+std::string PdpClient::use_request_body(const std::string& subject, const AccessQuestion& question) {
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("subject");
+  write_entity(w, "user", subject);
+  w.Key("action");
+  write_action(w, question.action);
+  w.Key("resource");
+  write_resource(w, question.resource);
+  w.Key("context");
+  write_context(w, question.match, true);
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
 std::string PdpClient::request_body(const std::string& subject, const std::vector<AccessQuestion>& questions) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -330,6 +367,12 @@ std::string PdpClient::cache_key(const std::string& subject, const AccessQuestio
   key.append(path).push_back('\x1f');
   key.append(match);
   return key;
+}
+
+std::string PdpClient::use_cache_key(const std::string& subject, const AccessQuestion& question) const {
+  // The entries of the uses have their own key space (ProcurAuth 10.1). A subject has no control character, so the field U cannot be the
+  // start of the key of another answer: that key has four fields, this one has five.
+  return "U\x1f" + cache_key(subject, question);
 }
 
 size_t PdpClient::cache_entry_bytes(const std::string& key, const PdpAnswer& answer) {
@@ -654,9 +697,9 @@ std::vector<std::pair<std::string, std::string>> PdpClient::request_headers(cons
 }
 
 std::string PdpClient::check_result(const PdpHttpResult& result, std::chrono::steady_clock::duration elapsed, const PdpCallContext& context,
-                                    const std::string& path) {
+                                    const std::string& path, std::chrono::milliseconds timeout) {
   if (!result.error.empty()) return "no answer: " + result.error;
-  if (elapsed > options_.timeout) return "the answer came after the timeout";
+  if (elapsed > timeout) return "the answer came after the timeout";
   if (result.status == 401 || result.status == 403) {
     // The PDP refuses the credential of this server: an operator fault, not a denial of a person.
     log_event(LogLevel::Error, "access.pdp_credential_refused", {{"request_id", context.request_id}, {"path", path}, {"status", result.status}});
@@ -722,7 +765,7 @@ bool PdpClient::ask_chunk(const std::string& subject, const std::vector<AccessQu
   call.status = result.status;
 
   std::vector<PdpAnswer> decisions;
-  call.error = check_result(result, elapsed, context, call.path);
+  call.error = check_result(result, elapsed, context, call.path, options_.timeout);
   if (call.error.empty() && !parse_answer(result.body, asked.size(), &decisions)) call.error = "the answer is not a valid AuthZEN answer";
 
   const bool answered = result.error.empty();
@@ -813,6 +856,104 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
     if (!out[i].error_message.empty()) fields.emplace_back("error_message", out[i].error_message);
     log_event(LogLevel::Info, "access.decision", fields);
   }
+  return out;
+}
+
+AccessDecision PdpClient::decide_use(const std::string& subject, const AccessQuestion& question, const PdpCallContext& context) {
+  const auto log_use = [&](const AccessDecision& decision) {
+    std::vector<LogField> fields = {{"request_id", context.request_id},
+                                    {"subject", subject},
+                                    {"action", question.action},
+                                    {"resource", access_resource_path(question.resource)},
+                                    {"match", access_match_name(question.match)},
+                                    {"usage", true},
+                                    {"decision", decision.allowed},
+                                    {"source", decision.source},
+                                    {"reason", pdp_reason_name(decision.reason)},
+                                    {"failed", decision.failed},
+                                    {"units", decision.usage_units.value_or(0)}};
+    if (decision.retry_after) fields.emplace_back("retry_after", *decision.retry_after);
+    if (decision.usage_invalid) fields.emplace_back("usage_invalid", true);
+    log_event(LogLevel::Info, "access.decision", fields);
+  };
+  // ProcurAuth 6.11: context.usage and the match "subtree" never go together. This is a fault of the caller: fail closed, send nothing.
+  if (question.match != AccessMatch::Node) {
+    AccessDecision refused = failed_decision();
+    log_use(refused);
+    return refused;
+  }
+
+  const std::string key = use_cache_key(subject, question);
+  if (options_.cache_ttl.count() > 0) {
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = cache_.find(std::string_view(key));
+    if (it != cache_.end() && it->second->expires > now) {
+      AccessDecision kept = decision_from(it->second->answer, "cache");
+      if (kept.retry_after) {
+        // The kept budget_exceeded gives the time that remains, never more than the first retry_after (ProcurAuth 10.1).
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(it->second->expires - now).count();
+        kept.retry_after = std::max<uint64_t>(1, std::min<uint64_t>(*kept.retry_after, static_cast<uint64_t>((left + 999) / 1000)));
+      }
+      log_use(kept);
+      return kept;
+    }
+  }
+
+  PdpEndpoints known;
+  if (options_.discovery) {
+    if (!ensure_metadata(context, &known)) {
+      log_event(LogLevel::Warn, "access.pdp_failed",
+                {{"request_id", context.request_id}, {"path", ""}, {"status", 0}, {"error", "the metadata of the PDP is not available"},
+                 {"evaluations", uint64_t{1}}});
+      AccessDecision failed = failed_decision();
+      log_use(failed);
+      return failed;
+    }
+  } else {
+    known = endpoints();
+  }
+
+  // The wait is longer than the longest time that the PDP takes to answer a question with context.usage (6.9, 10.6).
+  const std::chrono::milliseconds timeout = usage_timeout();
+  PdpCall call;
+  call.path = known.evaluation;
+  call.evaluations = 1;
+  const std::vector<std::pair<std::string, std::string>> headers = request_headers(context, &call);
+  call.start_unix_nano = otlp_now_unix_nano();
+  const auto started = std::chrono::steady_clock::now();
+  // post_once: this request is never sent again by the transport (10.6).
+  const PdpHttpResult result = transport_->post_once(call.path, use_request_body(subject, question), headers, timeout);
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  call.end_unix_nano = otlp_now_unix_nano();
+  call.status = result.status;
+
+  std::vector<PdpAnswer> decisions;
+  call.error = check_result(result, elapsed, context, call.path, timeout);
+  if (call.error.empty() && !parse_answer(result.body, 1, &decisions)) call.error = "the answer is not a valid AuthZEN answer";
+
+  AccessDecision out;
+  if (call.error.empty()) {
+    const PdpAnswer answer = use_answer_of(decisions.front());
+    out = decision_from(answer, "pdp");
+    out.usage_invalid = decisions.front().decision && !answer.decision;
+    // ProcurAuth 10.1: a true answer with units above 0 is never kept (cache_store checks it too). Keep only the two answers that the rules
+    // allow: a true answer with units 0 and a false answer with budget_exceeded.
+    const bool keepable = (answer.decision && answer.usage_units && *answer.usage_units == 0) ||
+                          (!answer.decision && answer.reason == PdpReason::BudgetExceeded && answer.retry_after);
+    if (keepable) {
+      const auto at = std::chrono::steady_clock::now();
+      std::lock_guard<std::mutex> lock(mu_);
+      cache_store(key, answer, at);
+    }
+  } else {
+    // Fail closed, and never again: the PDP may have counted the use. The route answers 503 (ProcurAuth 10.6, 10.3).
+    out = failed_decision();
+    log_event(LogLevel::Warn, "access.pdp_failed",
+              {{"request_id", context.request_id}, {"path", call.path}, {"status", call.status}, {"error", call.error}, {"evaluations", uint64_t{1}}});
+  }
+  if (on_call_) on_call_(call);
+  log_use(out);
   return out;
 }
 
@@ -922,7 +1063,7 @@ PdpSearchPage PdpClient::search_resources_page(const std::string& subject, const
   const auto elapsed = std::chrono::steady_clock::now() - started;
   call.end_unix_nano = otlp_now_unix_nano();
   call.status = result.status;
-  call.error = check_result(result, elapsed, context, call.path);
+  call.error = check_result(result, elapsed, context, call.path, options_.timeout);
   if (call.error.empty() && !parse_search_answer(result.body, resource_type, &page)) call.error = "the answer is not a valid AuthZEN search answer";
   if (!call.error.empty()) {
     page = PdpSearchPage{};

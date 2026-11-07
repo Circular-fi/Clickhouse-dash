@@ -42,11 +42,14 @@ inline constexpr int kRpcMethodNotFound = -32601;
 inline constexpr int kRpcInvalidParams = -32602;
 inline constexpr int kRpcInternalError = -32603;
 inline constexpr int kRpcForbidden = -32001;         // HTTP 403 of the identity mode: a request other than tools/call that the PDP refuses (binding 5.1b)
+inline constexpr int kRpcRateLimited = -31429;      // HTTP 429 of the identity mode: a request other than tools/call with budget_exceeded (binding 5.4)
 inline constexpr int kRpcHeaderMismatch = -32020;    // HTTP 400: a header does not agree with the message
 inline constexpr int kRpcUnsupportedVersion = -32022;  // HTTP 400: data.supported lists the versions
 
 // The fixed messages of the refusals of the service. They copy no value of the request (binding 5.6).
 inline constexpr const char* kMcpForbiddenMessage = "forbidden";
+inline constexpr const char* kMcpRateLimitedMessage = "rate_limited";
+inline constexpr const char* kMcpBudgetMessage = "The budget of this action is spent.";
 inline constexpr const char* kMcpUnavailableMessage = "the access check is not available";
 inline constexpr const char* kMcpUnknownToolMessage = "Unknown tool";
 inline constexpr const char* kMcpUnknownMethodMessage = "method not found";
@@ -74,6 +77,8 @@ struct McpCallInfo {
   McpCeilings ceilings;
   // The identity mode, for list_hosts: the hosts that the person can see. Not set: every host that MCP reaches.
   std::optional<std::vector<std::string>> visible_hosts;
+  // McpToolBackend::tool_permitted gives BudgetExceeded with the seconds of retry_after (a whole number from 1).
+  std::optional<uint64_t> retry_after;
 };
 
 struct McpServerInfo {
@@ -99,8 +104,11 @@ struct McpToolOutcome {
 McpToolOutcome mcp_tool_error(const std::string& code, const std::string& message, const std::string& untrusted_detail = std::string());
 // The message of a tool error, from its code only. ChDash writes it: it never holds the text of ClickHouse.
 std::string mcp_error_message(const std::string& code);
-// A failure that a retry can repair: timeout, unavailable, api_unavailable.
+// A failure that a retry can repair: timeout, unavailable, api_unavailable, budget_exceeded.
 bool mcp_error_retryable(const std::string& code);
+// The tool error of a spent budget (binding 5.3): {"error": {"code": "budget_exceeded", "message", "retryable": true, "retry_after"}}.
+// The message is fixed. The result copies no value of the request.
+McpToolOutcome mcp_budget_exceeded_error(uint64_t retry_after);
 
 class McpToolBackend {
 public:
@@ -136,9 +144,11 @@ public:
     return McpAccess::Allowed;
   }
 // A request with no tool (initialize, ping, server/discover, a notification, and any other method): the identity mode asks the action
-// mcp.session on the service (binding 3.6a). Denied gives HTTP 403 with -32001, Failed gives HTTP 503 with -32603. By default, allowed.
-  virtual McpAccess session_permitted(const McpKey& key) {
+// mcp.session on the service (binding 3.6a). Denied gives HTTP 403 with -32001, Failed gives HTTP 503 with -32603, BudgetExceeded gives
+// HTTP 429 with -31429 and *retry_after (binding 5.4). By default, allowed.
+  virtual McpAccess session_permitted(const McpKey& key, uint64_t* retry_after) {
     (void)key;
+    (void)retry_after;
     return McpAccess::Allowed;
   }
 };
@@ -156,6 +166,8 @@ struct McpRpcResult {
   bool tool_called = false;
   McpToolOutcome outcome;
   int rpc_error = 0;
+// HTTP 429 of the identity mode (binding 5.4): the seconds of the header Retry-After. Not set for another result.
+  std::optional<uint64_t> retry_after;
 // The clientInfo of the client, at most 256 bytes each. It comes from initialize (legacy).
 // Or it comes from _meta["io.modelcontextprotocol/clientInfo"] (2026-07-28).
 // The server uses it for the usage of the key (mcp_usage.hpp) and for the call log.

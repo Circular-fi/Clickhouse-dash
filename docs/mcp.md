@@ -459,9 +459,9 @@ The identity mode adds no field to a message of MCP.
 
 | Request | Action | Resource | Answer when the PDP says `false` |
 | --- | --- | --- | --- |
-| `initialize`, `ping`, `server/discover`, a notification, any other method | `mcp.session` | The service | HTTP 403 and `-32001` (a notification has no body) |
+| `initialize`, `ping`, `server/discover`, a notification, any other method | `mcp.session`, with `context.usage` ([Budgets](#budgets)) | The service | HTTP 403 and `-32001` (a notification has no body) |
 | `tools/list` | One question for each action of the tools, with the match `subtree` | The service | The tools of a `false` action are not listed |
-| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)) | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
+| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)). `run_query` and the tools of `mcp.session` ask with `context.usage` ([Budgets](#budgets)). | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
 
 - `tools/list` sends one batch with one item for each action, not for each tool. Tools with the same action share one item. The order of the tools does not change. A tool whose action the configuration does not publish is not listed.
 - `tools/call` asks the PDP for the resource of the call. The argument `host` names the host. The argument `database` (or `params.database` and `body.database` of an API tool) names the database of the host. A `host` that ChDash does not know goes to the service, so the PDP never gets a host name that the client chose.
@@ -492,12 +492,44 @@ In this mode, ChDash never copies a value of the request into a message. Each me
 | --- | --- |
 | No token, or a token that is not valid | HTTP 401, empty body, `WWW-Authenticate` |
 | The rate limit of the subject | HTTP 429, empty body, `Retry-After` |
+| `budget_exceeded` for `tools/call` | HTTP 200 and a tool error with the code `budget_exceeded` ([Budgets](#budgets)) |
+| `budget_exceeded` for a request with no tool | HTTP 429, `Retry-After`, `-31429`, the message `rate_limited` ([Budgets](#budgets)) |
 | `false` for a tool, or an unknown tool | HTTP 200, `-32602`, the message `Unknown tool` |
 | `false` for a request with no tool | HTTP 403, `-32001`, the message `forbidden`. A request with no `id` has an empty body |
 | The PDP gives no valid answer | HTTP 503, `-32603`, the message `the access check is not available`. A request with no `id` has an empty body |
 | A true answer with a ceiling that ChDash cannot apply | The refusal of a `false` answer ([Ceilings](#ceilings)) |
 
-A PDP that is down never looks like a denial. A `tools/list` that cannot be decided gets HTTP 503, not an empty list. A `false` answer with the reason `budget_exceeded` is a refusal for now, because ChDash does not ask the budgets of the actions yet. ChDash never sends the reason of the PDP to the client.
+A PDP that is down never looks like a denial. A `tools/list` that cannot be decided gets HTTP 503, not an empty list. ChDash never sends the reason of the PDP to the client. The code `budget_exceeded` of a tool error is the one exception (binding 5.3).
+
+### Budgets
+
+The action document declares the budget `requests` on `mcp.session`, and the budget `queries` on `query.run.read` ([access.md](access.md#budgets)). In the mode `identity`, a use of an action that lists a budget sends one question with `context.usage` equal to `{"units": 1}` (binding 3.4, 3.6a, protocol 6.4):
+
+| Request | Use |
+| --- | --- |
+| `initialize`, `ping`, `server/discover`, a notification, any other method with no tool | One use of `mcp.session`: one unit of `requests`. |
+| `tools/call` of `list_hosts`, `mcp_analysis_my_limits` or `mcp_analysis_my_usage` | One use of `mcp.session`: one unit of `requests`. |
+| `tools/call` of `run_query` with a host | One use of `query.run.read` on the host: one unit of `queries`. |
+| `tools/call` of another tool | No use. The question has no `context.usage`. This includes `explain_query`, which runs no query, and the API tools. |
+| `tools/call` of `run_query` without `host` | No use. The tool gives `host_required` and runs nothing. |
+| `tools/list` | No use. Its questions have the match `subtree`. |
+
+A use sends no question without `context.usage` before it. The question is one Access Evaluation request, and it never goes again after a timeout or a lost answer (protocol 10.6). The answers:
+
+| Answer of the PDP | `tools/call` | A request with no tool |
+| --- | --- | --- |
+| `true` with `context.usage.units` | The tool runs with the ceilings of this answer. | The request runs. |
+| `true` without `context.usage.units` | HTTP 200 and `-32602` (a `false` answer with no reason). | HTTP 403 and `-32001`. |
+| `false` with `budget_exceeded` and `retry_after` | HTTP 200 and a tool error. The tool does not run. | HTTP 429 with `Retry-After`, `-31429` and `data.retry_after`. |
+| No valid answer | HTTP 503 and `-32603`. | HTTP 503 and `-32603`. |
+
+The tool error of a spent budget has the code `budget_exceeded`, `retryable` true, `retry_after` and a fixed message. `content[0].text` holds the same JSON as `structuredContent`:
+
+```json
+{"error":{"code":"budget_exceeded","message":"The budget of this action is spent.","retryable":true,"retry_after":12}}
+```
+
+A notification that the budget refuses gets HTTP 429 with `Retry-After` and an empty body, because it has no `id`. The mode `keys` takes no unit: its tools ask the PDP for the creator of the key, and the creator is not the subject of the use.
 
 ### Ceilings
 
@@ -562,8 +594,9 @@ ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from
 | 3.6a, 5.1b | Done. ChDash asks `mcp.session` for each request with no tool. |
 | 4.1 to 4.3 | Done. One batch, one item for each action, match `subtree`. |
 | 5.1, 5.5, 5.6 | Done. The messages are fixed. |
-| 5.3, 5.4 (`budget_exceeded`) | Not done. ChDash does not ask the budgets. |
-| 3.4, 3.5, 3.5a (`context.usage`) | Not done. ChDash declares no budget. |
+| 5.3, 5.4 (`budget_exceeded`) | Done. A tool error on `tools/call`, HTTP 429 with `-31429` on another request ([Budgets](#budgets)). |
+| 3.4, 3.6a (`context.usage`) | Done for `run_query`, the tools of `mcp.session` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
+| 3.5, 3.5a | Not applicable. ChDash has no call that asks the client for input, and no tool that waits for an approval. |
 | 7.3 | Done. The mode ignores the standalone keys. |
 | 7.4 | Done in both modes. The 401 and the 429 have an empty body. |
 

@@ -269,6 +269,92 @@ def test_the_declared_ceilings_of_the_action_of_a_tool_bound_the_call():
     assert response.status_code == 200 and response.json()["error"]["code"] == -32602, response.text
 
 
+# ---- the budgets: binding 3.4, 3.6a, 5.3, 5.4 (cases U18, U23, U92, U93, U95) --------------------------------------------------
+
+
+def usage_questions(action: str | None = None) -> list[dict]:
+    """The questions that the PDP got with context.usage, for one action or for every action."""
+    return [e for e in evaluations() if "usage" in e["context"] and (action is None or e["action"]["name"] == action)]
+
+
+@needs_identity
+def test_u18_the_tool_that_runs_sql_is_one_use_and_the_other_tools_are_not():
+    answer(default=True)
+    response = call_tool("run_query", {"host": "local", "sql": "SELECT 1"})
+    assert response.status_code == 200 and response.json()["result"]["isError"] is False, response.text
+    # One question with usage 1 for the action of the tool, on the host of the call, and no question without usage before it.
+    runs = [e for e in evaluations() if e["action"]["name"] == "query.run.read"]
+    assert len(runs) == 1 and runs[0]["context"] == {"usage": {"units": 1}}, runs
+    assert runs[0]["resource"]["type"] == "host" and runs[0]["resource"]["id"] == "local"
+    # tools/list, a tool of the Explorer, explain_query and a call without a host are no use: no question with usage.
+    pdp("/control/reset", {})
+    time.sleep(CACHE_TTL + 0.2)
+    answer(default=True)
+    assert rpc("tools/list").status_code == 200
+    assert call_tool("list_databases", {"host": "local"}).status_code == 200
+    assert call_tool("explain_query", {"host": "local", "sql": "SELECT 1"}).status_code == 200
+    assert call_tool("run_query", {"sql": "SELECT 1"}).status_code == 200  # host_required: nothing runs
+    assert usage_questions() == [], usage_questions()
+
+
+@needs_identity
+def test_u23_u93_a_spent_budget_gives_a_tool_error_on_a_call_and_429_on_another_request():
+    answer(default=True, usage={"query.run.read": {"exceeded": 12}, "mcp.session": {"exceeded": 12}})
+    response = call_tool("run_query", {"host": "local", "sql": "SELECT 1"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "error" not in body and body["result"]["resultType"] == "complete" and body["result"]["isError"] is True
+    error = body["result"]["structuredContent"]["error"]
+    assert error["code"] == "budget_exceeded" and error["retryable"] is True and error["retry_after"] == 12 and error["message"]
+    text = body["result"]["content"][0]["text"]
+    assert text.startswith('{"error":{') and '"retry_after":12' in text and " " not in text.split('"message":"')[0]
+    assert json_loads(text) == body["result"]["structuredContent"]
+    # A request with no tool: HTTP 429 with Retry-After, the code -31429 and data.retry_after.
+    response = rpc("ping")
+    assert response.status_code == 429 and response.headers["Retry-After"] == "12", response.text
+    assert response.json() == {"jsonrpc": "2.0", "id": 7, "error": {"code": -31429, "message": "rate_limited", "data": {"retry_after": 12}}}
+    # The reason of the PDP never reaches the client.
+    assert "budget_exceeded" not in rpc("ping").text
+
+
+@needs_identity
+def test_u92_a_true_answer_without_units_is_a_refusal_and_asks_nothing_more():
+    answer(default=True, usage={"query.run.read": {"omit_units": True}, "mcp.session": {"omit_units": True}})
+    response = call_tool("run_query", {"host": "local", "sql": "SELECT 1"})
+    assert response.status_code == 200 and response.json()["error"]["code"] == -32602 and "result" not in response.json()
+    assert len(usage_questions("query.run.read")) == 1
+    response = rpc("ping")
+    assert response.status_code == 403 and response.json()["error"]["code"] == -32001
+
+
+@needs_identity
+def test_u95_a_request_with_no_tool_is_one_use_of_mcp_session():
+    answer(default=True)
+    assert rpc("ping").status_code == 200
+    asked = usage_questions("mcp.session")
+    assert len(asked) == 1 and asked[0]["context"] == {"usage": {"units": 1}} and asked[0]["resource"] == {"type": "service", "id": AUDIENCE}
+    # A tool of the action mcp.session (list_hosts) is a use of its action too.
+    assert call_tool("list_hosts", {}).status_code == 200
+    assert len(usage_questions("mcp.session")) == 2
+
+
+@needs_identity
+def test_u68_a_lost_answer_gives_503_and_the_question_is_never_sent_again():
+    for rules in ({"status": 500}, {"drop": True}, {"delay_ms": 2000}):
+        pdp("/control/reset", {})
+        answer(default=True, usage={"query.run.read": rules})
+        response = call_tool("run_query", {"host": "local", "sql": "SELECT 1"})
+        assert response.status_code == 503 and response.json()["error"]["code"] == -32603, (rules, response.text)
+        time.sleep(0.3)
+        assert len(usage_questions("query.run.read")) == 1, (rules, usage_questions())
+
+
+def json_loads(text: str):
+    import json
+
+    return json.loads(text)
+
+
 # ---- the page API ----------------------------------------------------------------------------------------------------------
 
 
