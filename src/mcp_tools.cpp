@@ -5,6 +5,9 @@
 #include "mcp_tool_support.hpp"
 #include "mcp_tools_units.hpp"
 
+#include <algorithm>
+#include <optional>
+
 namespace chdash {
 
 std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, unsigned reads) {
@@ -28,7 +31,24 @@ McpToolOutcome McpTools::call_tool(const McpKey& key, const std::string& tool, c
 McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
                                        const McpCallInfo& info) {
   using namespace mcp_tools;
-  Ctx ctx = make_ctx(key, config_, db_, tool);
+  // The identity mode: the ceilings of the actions of the tool lower the limits of the call (ProcurAuth 7.5). A ceiling only lowers a
+  // value: the call never gets more than the key and the configuration give.
+  std::optional<McpKey> limited_key;
+  std::optional<McpToolsConfig> limited_config;
+  if (info.ceilings.any()) {
+    limited_key = key;
+    limited_config = config_;
+    const McpCeilings& c = info.ceilings;
+    if (c.max_rows) limited_key->max_rows = mcp_apply_ceiling(limited_key->max_rows.value_or(*c.max_rows), c.max_rows);
+    if (c.max_duration_seconds) {
+      limited_key->timeout_seconds = mcp_apply_ceiling(limited_key->timeout_seconds.value_or(*c.max_duration_seconds), c.max_duration_seconds);
+    }
+    limited_config->max_rows_to_read = mcp_apply_ceiling(limited_config->max_rows_to_read, c.max_rows_read, nullptr, true);
+    limited_config->max_memory_bytes = mcp_apply_ceiling(limited_config->max_memory_bytes, c.max_memory_bytes);
+    limited_config->max_result_bytes = mcp_apply_ceiling(limited_config->max_result_bytes, c.max_result_bytes);
+  }
+  Ctx ctx = make_ctx(limited_key ? *limited_key : key, limited_config ? *limited_config : config_, db_, tool);
+  ctx.visible_hosts = info.visible_hosts;
   // The agent of the call goes into the log_comment of each statement (api_mcp.cpp, ClickHouseMcpDatabase).
   for (McpDbLimits* limits : {&ctx.user_limits, &ctx.schema_limits, &ctx.system_limits, &ctx.system_schema_limits}) limits->agent_caller = info.agent_caller;
   ctx.api = api_;
@@ -37,8 +57,8 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
   McpToolOutcome outcome;
   try {
     std::string json;
-    const McpToolInfo* info = mcp_find_tool(tool);
-    if (info && info->api) json = tool_api(ctx, *info, arguments);
+    const McpToolInfo* described = mcp_find_tool(tool);
+    if (described && described->api) json = tool_api(ctx, *described, arguments);
     else if (tool == "list_hosts") json = tool_list_hosts(ctx, arguments);
     else if (tool == "list_databases") json = tool_list_databases(ctx, arguments);
     else if (tool == "list_tables") json = tool_list_tables(ctx, arguments);

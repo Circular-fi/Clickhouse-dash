@@ -17,7 +17,13 @@ std::string tool_list_hosts(Ctx& ctx, const rapidjson::Value& args) {
   w.StartObject();
   w.Key("hosts");
   w.StartArray();
-  const auto names = key_hosts(ctx.key, ctx.config);
+  auto names = key_hosts(ctx.key, ctx.config);
+  // The identity mode lists the hosts that the person can see (the PDP decided, McpCallInfo::visible_hosts).
+  if (ctx.visible_hosts) {
+    names.erase(std::remove_if(names.begin(), names.end(),
+                               [&](const std::string& name) { return std::find(ctx.visible_hosts->begin(), ctx.visible_hosts->end(), name) == ctx.visible_hosts->end(); }),
+                names.end());
+  }
   for (const auto& name : names) {
     std::string label = name;
     for (const auto& host : ctx.config.hosts) {

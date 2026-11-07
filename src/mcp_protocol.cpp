@@ -146,7 +146,18 @@ std::string discover_result(const McpServerInfo& info) {
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-std::string tools_list_result(const McpKey& key, McpToolBackend& backend) {
+// The identity mode has no key that names one host: the host is always an argument (binding 3.2, docs/mcp.md, "The identity mode").
+std::string identity_schema(const char* schema) {
+  static const std::string optional = "Optional when the key has one host; see list_hosts.";
+  std::string out = schema;
+  const size_t at = out.find(optional);
+  if (at != std::string::npos) out.replace(at, optional.size(), "Required: the name of one host; see list_hosts.");
+  return out;
+}
+
+// The result is empty when the PDP gave no valid answer (the identity mode): tools/list then gets HTTP 503.
+std::optional<std::string> tools_list_result(const McpKey& key, McpToolBackend& backend) {
+  const bool identity = mcp_key_is_identity(key);
   rapidjson::StringBuffer sb;
   Writer w(sb);
   w.StartObject();
@@ -155,10 +166,13 @@ std::string tools_list_result(const McpKey& key, McpToolBackend& backend) {
   // This lists the tools that the key holds and that the configuration offers.
   // The tools of the analysis of the usage are omitted while the usage is off.
   // The access of humans can take more tools from a key of the page (McpToolBackend::permitted_tools).
-  for (const auto& name : backend.permitted_tools(key, mcp_effective_tools(key.tools, key.databases, backend.availability()))) {
+  const auto permitted = backend.permitted_tools(key, mcp_effective_tools(key.tools, key.databases, backend.availability()));
+  if (!permitted) return std::nullopt;
+  for (const auto& name : *permitted) {
     const McpToolInfo* info = mcp_find_tool(name);
     if (!info) continue;
-    const char* schema = mcp_tool_input_schema(name);
+    const std::string schema_text = identity ? identity_schema(mcp_tool_input_schema(name)) : std::string(mcp_tool_input_schema(name));
+    const char* schema = schema_text.c_str();
     w.StartObject();
     w.Key("name"); put(w, info->name);
     w.Key("title"); put(w, info->title);
@@ -622,8 +636,27 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     return error;
   };
 
+  // The identity mode asks the PDP for each request with no tool (binding 3.6a): the action mcp.session on the service. A refusal
+  // before the service knows the id has no body (binding 5.6a). A fixed message never holds a value of the request (binding 5.6).
+  const bool identity = mcp_key_is_identity(key);
+  const auto refuse_session = [&](McpAccess access, const rapidjson::Value* error_id) {
+    const bool failed = access == McpAccess::Failed;
+    McpRpcResult refused = error_id ? fail(error_id, failed ? kRpcInternalError : kRpcForbidden, failed ? kMcpUnavailableMessage : kMcpForbiddenMessage,
+                                           failed ? 503 : 403)
+                                    : McpRpcResult();
+    if (!error_id) {
+      refused.http_status = failed ? 503 : 403;
+      refused.rpc_error = failed ? kRpcInternalError : kRpcForbidden;
+      refused.method = shown;
+      refused.trace = trace;
+    }
+    return refused;
+  };
+
   if (!id) {
-    McpRpcResult accepted;  // a notification
+    // A notification.
+    if (const McpAccess access = backend.session_permitted(key); access != McpAccess::Allowed) return refuse_session(access, nullptr);
+    McpRpcResult accepted;
     accepted.http_status = 202;
     accepted.method = shown;
     accepted.trace = trace;
@@ -648,6 +681,10 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     if (!meta_version->IsString()) return fail(id, kRpcUnsupportedVersion, "Unsupported protocol version", 400, unsupported_data(""));
     const std::string asked(meta_version->GetString(), meta_version->GetStringLength());
     if (contains(mcp_legacy_protocol_versions(), asked)) {
+      // A header that names another version than _meta is a mismatch (binding 1.3, 9.1 U25), as for the version 2026-07-28.
+      if (headers.has_protocol_version && headers.protocol_version != asked) {
+        return fail(id, kRpcHeaderMismatch, "Header mismatch: MCP-Protocol-Version", 400);
+      }
       request_version = asked;  // a legacy version in _meta: legacy semantics
     } else if (asked != kMcpModernProtocolVersion) {
       return fail(id, kRpcUnsupportedVersion, "Unsupported protocol version", 400, unsupported_data(echoable_version(asked)));
@@ -681,8 +718,8 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
   result.modern = modern;
   result.protocol_version = request_version;
   result.trace = trace;
-  const auto finish_fail = [&](int code, const std::string& message) {
-    McpRpcResult error = fail(id, code, message);
+  const auto finish_fail = [&](int code, const std::string& message, int http_status = 200) {
+    McpRpcResult error = fail(id, code, message, http_status);
     error.modern = modern;
     error.protocol_version = request_version;
     return error;
@@ -699,11 +736,22 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     if (const auto it = meta->FindMember("io.modelcontextprotocol/clientInfo"); it != meta->MemberEnd() && it->value.IsObject()) read_client(it->value);
   }
 
+  if (name != "tools/list" && name != "tools/call") {
+    if (const McpAccess access = backend.session_permitted(key); access != McpAccess::Allowed) {
+      McpRpcResult refused = refuse_session(access, id);
+      refused.modern = modern;
+      refused.protocol_version = request_version;
+      refused.client_name = result.client_name;
+      refused.client_version = result.client_version;
+      return refused;
+    }
+  }
   if (modern && name == "server/discover") {
     result.body = result_body(*id, discover_result(info));
     return result;
   }
-  if (!modern && name == "ping") {
+  // The binding lists ping among the methods of a request with no tool (3.6a): the identity mode answers it for the revision 2026-07-28 too.
+  if ((!modern || identity) && name == "ping") {
     result.body = result_body(*id, "{}");
     return result;
   }
@@ -723,7 +771,14 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     return result;
   }
   if (name == "tools/list") {
-    result.body = result_body(*id, with_result_type(tools_list_result(key, backend), modern));
+    const auto listed = tools_list_result(key, backend);
+    if (!listed) {
+      McpRpcResult refused = finish_fail(kRpcInternalError, kMcpUnavailableMessage, 503);
+      refused.client_name = result.client_name;
+      refused.client_version = result.client_version;
+      return refused;
+    }
+    result.body = result_body(*id, with_result_type(*listed, modern));
     return result;
   }
   if (name == "tools/call") {
@@ -735,29 +790,44 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     // A tool that the key does not have gets the answer for a tool that does not exist (contract 3.6).
     // The answer is -32602, with the same message.
     if (tool_info) result.tool = tool_name;
+    // The arguments name the resource of the call (binding 3.2). A call whose arguments are not an object is refused after the check.
+    static const rapidjson::Value no_arguments(rapidjson::kObjectType);
+    const rapidjson::Value* arguments = &no_arguments;
+    bool bad_arguments = false;
+    if (const auto it = params->FindMember("arguments"); it != params->MemberEnd() && !it->value.IsNull()) {
+      if (it->value.IsObject()) arguments = &it->value;
+      else bad_arguments = true;
+    }
     // A tool that the access of humans takes from the key gets the same answer (McpToolBackend::tool_permitted).
-    if (!tool_info || !mcp_scope_tool_allowed(key.tools, key.databases, tool_name) || !backend.tool_permitted(key, *tool_info)) {
-      McpRpcResult refused = finish_fail(kRpcInvalidParams, "Unknown tool: " + tool_name.substr(0, kMaxMethodShownBytes));
+    // A call of the identity mode fills the ceilings and the hosts of `call`.
+    McpCallInfo call;
+    call.agent_caller = trace.caller;
+    McpAccess access = McpAccess::Denied;
+    if (tool_info && mcp_scope_tool_allowed(key.tools, key.databases, tool_name)) access = backend.tool_permitted(key, *tool_info, *arguments, &call);
+    if (access == McpAccess::Failed) {
+      McpRpcResult refused = finish_fail(kRpcInternalError, kMcpUnavailableMessage, 503);
       refused.tool = result.tool;
       refused.client_name = result.client_name;
       refused.client_version = result.client_version;
       return refused;
     }
-
-    static const rapidjson::Value no_arguments(rapidjson::kObjectType);
-    const rapidjson::Value* arguments = &no_arguments;
-    if (const auto it = params->FindMember("arguments"); it != params->MemberEnd() && !it->value.IsNull()) {
-      if (!it->value.IsObject()) return finish_fail(kRpcInvalidParams, "arguments must be an object");
-      arguments = &it->value;
+    if (access != McpAccess::Allowed) {
+      // The identity mode copies nothing of the request into a message (binding 5.6).
+      const std::string message = identity ? std::string(kMcpUnknownToolMessage)
+                                           : std::string(kMcpUnknownToolMessage) + ": " + tool_name.substr(0, kMaxMethodShownBytes);
+      McpRpcResult refused = finish_fail(kRpcInvalidParams, message);
+      refused.tool = result.tool;
+      refused.client_name = result.client_name;
+      refused.client_version = result.client_version;
+      return refused;
     }
+    if (bad_arguments) return finish_fail(kRpcInvalidParams, "arguments must be an object");
     result.tool_called = true;
     // The configuration must offer the tool.
     // While the usage is off, a tool that the usage needs is `not_enabled` for the key that holds it.
     if (const std::string off = mcp_tool_unavailable_reason(*tool_info, backend.availability()); !off.empty()) {
       result.outcome = mcp_tool_error("not_enabled", off);
     } else {
-      McpCallInfo call;
-      call.agent_caller = trace.caller;
       try {
         result.outcome = backend.call_tool_for(key, tool_name, *arguments, now, call);
       } catch (const std::exception& error) {
@@ -775,7 +845,7 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     result.body = tool_call_body(*id, result.outcome, structured, modern);
     return result;
   }
-  return finish_fail(kRpcMethodNotFound, "method not found: " + name);
+  return finish_fail(kRpcMethodNotFound, identity ? std::string(kMcpUnknownMethodMessage) : "method not found: " + name);
 }
 
 } // namespace chdash

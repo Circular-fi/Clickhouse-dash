@@ -100,8 +100,10 @@ void Server::install_http_hooks() {
 
   // Handle the errors that cpp-httplib answers without a body.
   // Examples are no route, a body that is too large and a bad request line. These errors have the same JSON shape as every other error.
-  http_.set_error_handler([](const httplib::Request&, httplib::Response& res) {
-    if (!res.body.empty() || res.content_provider_) return httplib::Server::HandlerResponse::Unhandled;
+  http_.set_error_handler([](const httplib::Request& req, httplib::Response& res) {
+    // The MCP endpoint refuses a request before its message with an empty body (MCP binding 5.2, 5.6a, 7.4): the status and the headers
+    // are the answer. Each other refusal of this endpoint has a body already.
+    if (!res.body.empty() || res.content_provider_ || req.path == "/mcp") return httplib::Server::HandlerResponse::Unhandled;
     refuse(res, res.status, status_code_name(res.status), httplib::status_message(res.status));
     return httplib::Server::HandlerResponse::Handled;
   });

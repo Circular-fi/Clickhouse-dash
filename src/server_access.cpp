@@ -1,6 +1,6 @@
 // The access of humans (docs/access.md, contract 11): the identity token of each request of the pages and of the API, the
 // decision of the PDP for the action of each route, readonly = 1 for a run without query.run.write, and the decisions of a page.
-// The MCP endpoint is not here: it has its keys (docs/mcp.md).
+// The MCP endpoint checks its caller in api_mcp.cpp: its keys, or the identity token in the identity mode (docs/mcp.md).
 
 #include "server.hpp"
 
@@ -152,6 +152,7 @@ AccessFeatures Server::access_features() const {
   features.observability = cfg_.traces_on() || cfg_.logs_on() || cfg_.metrics_on();
   features.mcp = cfg_.mcp.enabled;
   features.mcp_keys_write = cfg_.mcp.enabled && cfg_.mcp.keys_mode != McpKeysMode::Static;
+  features.mcp_session = cfg_.mcp.enabled && cfg_.mcp.identity_auth();
   return features;
 }
 
@@ -242,24 +243,37 @@ void Server::init_access() {
       }
     }
   }
+  // The decisions of a subject that is not the subject of the request: the creator of an MCP key of the page, and the subject of an MCP
+  // request in the identity mode. Each decision keeps AccessDecision::failed: a failure of the PDP is not a denial (ProcurAuth 10.3).
+  // `can_apply` false: the path applies no ceiling, so a true answer with a ceiling is false (ProcurAuth 7.5).
+  const auto decide_for = [this](bool can_apply) {
+    return [this, can_apply](const std::string& subject, const std::vector<AccessQuestion>& questions) {
+      PdpCallContext context;
+      context.request_id = current_request_context().request_id;
+      std::vector<AccessDecision> decisions = pdp_->decide(subject, questions, context);
+      access_enforce_ceilings(context.request_id, questions, &decisions, access_features(), can_apply);
+      return decisions;
+    };
+  };
   // The MCP keys of the page never have more than their creator (docs/mcp.md, "Keys and the access of humans"). The state of a key is
   // kept for pdp.cache_ttl, as the answers of the PDP are.
   if (mcp_keys_) {
     mcp_creator_ = std::make_unique<McpCreatorAccess>(
-        settings.audience, std::chrono::milliseconds(settings.pdp_cache_ttl_ms),
-        [this](const std::string& subject, const std::vector<AccessQuestion>& questions) {
-          PdpCallContext context;
-          context.request_id = current_request_context().request_id;
-          // Each decision keeps AccessDecision::failed: a failure of the PDP is not a denial (ProcurAuth 10.3).
-          std::vector<AccessDecision> decisions = pdp_->decide(subject, questions, context);
-          // The tools of MCP apply no ceiling yet: a true answer with a ceiling is false (ProcurAuth 7.5).
-          access_enforce_ceilings(context.request_id, questions, &decisions, access_features(), false);
-          return decisions;
-        },
+        // The MCP keys of the page apply no ceiling: a true answer with a ceiling is false (ProcurAuth 7.5).
+        settings.audience, std::chrono::milliseconds(settings.pdp_cache_ttl_ms), decide_for(false),
         [] {
           return static_cast<int64_t>(
               std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
         });
+  }
+  // The identity mode of POST /mcp: the PDP decides each request for the subject of the identity token.
+  if (mcp_keys_ && cfg_.mcp.identity_auth()) {
+    std::vector<std::string> hosts;
+    for (const auto& host : cfg_.hosts) {
+      if (!host.mcp_uri.empty()) hosts.push_back(host.id);
+    }
+    // The tools of the identity mode apply the ceilings that the document declares for their actions (mcp_host_limits).
+    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, std::move(hosts), access_features(), decide_for(true));
   }
 }
 

@@ -543,7 +543,7 @@ void test_actions_document() {
     CHECK(std::strlen(action["description"].GetString()) > 0);
   }
   const std::vector<std::string> expected = {"query.run.read", "query.run.write", "query.export", "library.read", "library.write", "explorer.read",
-                                             "system.read", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"};
+                                             "system.read", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "mcp.session"};
   CHECK_EQ(types.size(), expected.size());
   for (const auto& name : expected) CHECK(types.count(name) == 1);
   CHECK(types.count("access") == 0 && types.count("system.kill_query") == 0);
@@ -557,7 +557,7 @@ void test_actions_document() {
   const std::vector<std::string> service = {"service"};
   for (const auto& name : {"query.run.read", "query.run.write", "explorer.read"}) CHECK(types[name] == three);
   for (const auto& name : {"query.export", "system.read", "observability.read"}) CHECK(types[name] == host);
-  for (const auto& name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(types[name] == service);
+  for (const auto& name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "mcp.session"}) CHECK(types[name] == service);
   // The table of the code agrees with the document.
   for (const AccessAction& action : access_actions()) CHECK(!action.database || action.host);
   CHECK(access_action("explorer.read") != nullptr && access_action("access") == nullptr);
@@ -575,18 +575,28 @@ std::set<std::string> published_names(const AccessFeatures& features) {
 
 void test_actions_of_the_features_that_are_on() {
   const std::set<std::string> always = {"query.run.read", "query.run.write", "query.export"};
-  // Every feature on: the 11 actions.
-  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(11));
+  // Every feature on: the 12 actions.
+  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(12));
   // Every feature off: the query, the run and the export only.
   AccessFeatures off;
-  off.query_library = off.query_library_writable = off.explorer = off.system = off.observability = off.mcp = off.mcp_keys_write = false;
+  off.query_library = off.query_library_writable = off.explorer = off.system = off.observability = off.mcp = off.mcp_keys_write = off.mcp_session = false;
   CHECK(published_names(off) == always);
   // MCP off: no MCP action, whatever the other MCP fields say.
   AccessFeatures mcp_off;
   mcp_off.mcp = false;
   const auto without_mcp = published_names(mcp_off);
   CHECK_EQ(without_mcp.size(), size_t(8));
-  for (const auto& name : {"mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(without_mcp.count(name) == 0);
+  for (const auto& name : {"mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "mcp.session"}) CHECK(without_mcp.count(name) == 0);
+  // The action mcp.session is published only when MCP takes the identity token (mcp.auth_mode = "identity").
+  AccessFeatures mcp_keys_mode;
+  mcp_keys_mode.mcp_session = false;
+  const auto keys_mode = published_names(mcp_keys_mode);
+  CHECK_EQ(keys_mode.size(), size_t(11));
+  CHECK(keys_mode.count("mcp.session") == 0 && keys_mode.count("mcp.keys.read") == 1);
+  CHECK(published_names(AccessFeatures{}).count("mcp.session") == 1);
+  AccessFeatures session_without_mcp;
+  session_without_mcp.mcp = false;
+  CHECK(published_names(session_without_mcp).count("mcp.session") == 0);
   // MCP on with the keys in static mode: the keys and their usage can be read, and the page makes no key.
   AccessFeatures mcp_static;
   mcp_static.mcp_keys_write = false;
@@ -621,7 +631,7 @@ void test_actions_of_the_features_that_are_on() {
   for (const auto& q : access_navigation_questions("db", hosts, "analytics", explorer_off)) CHECK(std::string(q.action) != "explorer.read");
   // The summary of GET /api/version lists the published actions.
   CHECK_EQ(access_action_summary({}, {}, mcp_off).size(), size_t(8));
-  CHECK_EQ(access_action_summary({}, {}).size(), size_t(11));
+  CHECK_EQ(access_action_summary({}, {}).size(), size_t(12));
 }
 
 std::string rule_text(const char* method, const char* path) {
@@ -1305,7 +1315,7 @@ void test_navigation_pages() {
   size_t service_actions = 0;
   size_t host_actions = 0;
   for (const auto& action : access_actions()) (action.host ? host_actions : service_actions) += 1;
-  CHECK_EQ(service_actions, size_t(5));
+  CHECK_EQ(service_actions, size_t(6));
   CHECK_EQ(host_actions, size_t(6));
   const auto questions = access_navigation_questions("db", hosts, "chdash_ui");
   CHECK_EQ(questions.size(), service_actions + 2 * host_actions + 2);

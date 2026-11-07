@@ -350,8 +350,8 @@ def check_mcp(port: int) -> str:
     code, _, body = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
     if code != 401:
         raise Failure(f"/mcp without a key: status {code}, expected 401")
-    if json.loads(body).get("error", {}).get("code") != -32001:
-        raise Failure(f"/mcp without a key: the body is not the JSON-RPC error -32001: {body[:120]!r}")
+    if body:
+        raise Failure(f"/mcp without a key: the body is not empty (MCP binding 5.2): {body[:120]!r}")
     code, _, body = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
                          {"Authorization": f"Bearer {SMOKE_KEY}"})
     if code != 200 or b"list_hosts" not in body:

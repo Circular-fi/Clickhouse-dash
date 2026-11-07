@@ -645,6 +645,22 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   McpSettings& out = cfg.mcp;
   validate_blocks(*mcp, "mcp", {"key", "mcp_key", "keys", "usage"});
   config::apply_block(cfg, *mcp, "mcp", "mcp");
+  // The identity mode takes the caller from the identity token. The keys of ChDash do not count, so a file that sets one of them
+  // contradicts the mode (docs/mcp.md, "The identity mode").
+  if (out.identity_auth()) {
+    const auto contradiction = [](const std::string& what) {
+      return std::runtime_error("mcp.auth_mode = \"identity\" and " + what + " contradict each other: the identity mode ignores the keys of ChDash. Remove " + what +
+                                ", or use mcp.auth_mode = \"keys\"");
+    };
+    for (const char* name : {"storage_file", "manage_from_ui", "auth_header"}) {
+      if (mcp->attrs.count(name)) throw contradiction(std::string("mcp.") + name);
+    }
+    for (const char* name : {"mcp_key", "key", "keys"}) {
+      if (mcp->blocks.count(name)) throw contradiction(std::string("the mcp.") + name + " block");
+    }
+    out.keys_mode = McpKeysMode::Static;
+    out.manage_from_ui = false;
+  }
   // The mode of the keys (keys { mode }), or its older form manage_from_ui. The two together contradict each other.
   const bool manage_given = mcp->attrs.count("manage_from_ui") != 0;
   if (const auto* keys = optional_block(*mcp, "keys", "mcp")) {
@@ -713,15 +729,17 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   out.instance = out.usage.instance.empty() ? mcp_usage_host_name() : out.usage.instance;
   if (!out.enabled) return;
 
-  // 1. Check that a place exists to read keys from.
-  if (out.keys_mode == McpKeysMode::Static && out.keys.empty()) {
-    throw std::runtime_error("mcp.keys.mode = \"static\" needs at least one mcp_key block");
-  }
-  if (out.keys_mode == McpKeysMode::Dynamic && out.storage_file.empty()) {
-    throw std::runtime_error("mcp.keys.mode = \"dynamic\" needs mcp.storage_file: the page keeps its keys there");
-  }
-  if (out.storage_file.empty() && out.keys.empty()) {
-    throw std::runtime_error("mcp.enabled needs mcp.storage_file or at least one mcp_key block");
+  // 1. Check that a place exists to read keys from. The identity mode has no key of ChDash.
+  if (!out.identity_auth()) {
+    if (out.keys_mode == McpKeysMode::Static && out.keys.empty()) {
+      throw std::runtime_error("mcp.keys.mode = \"static\" needs at least one mcp_key block");
+    }
+    if (out.keys_mode == McpKeysMode::Dynamic && out.storage_file.empty()) {
+      throw std::runtime_error("mcp.keys.mode = \"dynamic\" needs mcp.storage_file: the page keeps its keys there");
+    }
+    if (out.storage_file.empty() && out.keys.empty()) {
+      throw std::runtime_error("mcp.enabled needs mcp.storage_file or at least one mcp_key block");
+    }
   }
   // 2. A ClickHouse identity for MCP.
   if (context.hosts.empty()) {
@@ -1232,6 +1250,11 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   load_hosts(cfg, root, source);
   load_mcp(cfg, root, source);
   load_access(cfg, root, source);
+  // The identity mode reads the identity token and asks the PDP: it needs the authzen mode.
+  if (cfg.mcp.identity_auth() && !cfg.access.enforced()) {
+    throw std::runtime_error("mcp.auth_mode = \"identity\" and access.mode = \"open\" contradict each other: the identity mode reads the identity token and "
+                             "asks the PDP, and the open mode does neither. Use access.mode = \"authzen\", or mcp.auth_mode = \"keys\"");
+  }
   load_telemetry(cfg, root, source);
 }
 

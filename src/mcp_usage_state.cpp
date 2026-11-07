@@ -323,8 +323,12 @@ Usage::Entry& entry_of(Usage::State& state, std::string_view key, const char* ro
 
 void apply_key(Usage::State& state, const McpUsageKeyRow& row, size_t max_keys) {
   if (!mcp_valid_key_id(row.key)) bad("a key row has an id that is not the id of a key");
-  if (!mcp_valid_key_name(row.name)) bad("a key row has a name that is not the name of a key");
-  if (row.source != "config" && row.source != "ui") bad("a key row has a source that is not config or ui");
+  // A subject of the identity mode (mcp.auth_mode = "identity") has the subject as its name, as printable ASCII.
+  const bool identity = row.source == kMcpSourceIdentity;
+  if (identity ? (row.name.empty() || !is_clean(row.name, kMcpNameMaxBytes)) : !mcp_valid_key_name(row.name)) {
+    bad("a key row has a name that is not the name of a key");
+  }
+  if (row.source != "config" && row.source != "ui" && !identity) bad("a key row has a source that is not config, ui or identity");
   if (row.host.size() > kHostBytes) bad("a key row has a host that is too long");
   if (row.first_used < 0 || row.last_used < 0 || row.deleted_at < 0) bad("a key row has a time that is negative");
   if (state.entries.size() >= max_keys) bad("more than " + std::to_string(max_keys) + " keys");

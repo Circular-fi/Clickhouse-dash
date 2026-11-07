@@ -82,6 +82,8 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
     ctx.host = *asked;
     return;
   }
+  // The identity mode: the resource of the call is the host that the call names (binding 3.2). No default host.
+  if (mcp_key_is_identity(ctx.key)) fail("host_required", "pass host, the name of one host; call list_hosts");
   if (names.size() == 1) {
     ctx.host = names.front();
     return;

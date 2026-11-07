@@ -45,6 +45,7 @@ struct AccessFeatures {
   bool observability = true;           // the traces, the logs or the metrics are on for one host: observability.read
   bool mcp = true;                     // the MCP endpoint is on: mcp.keys.read and mcp.usage.read
   bool mcp_keys_write = true;          // MCP is on and the page may make keys (mcp.keys.mode is not "static"): mcp.keys.write
+  bool mcp_session = true;             // MCP is on and takes the identity token (mcp.auth_mode = "identity"): mcp.session
 };
 
 // True when the action is published with these features. The actions of the query, the run and the export are always published.
@@ -72,7 +73,8 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
 
 // What a route needs.
 enum class AccessRuleKind {
-  // No identity token: the probes, the metrics, the list of actions, and the MCP endpoint (it has its keys).
+  // No identity token: the probes, the metrics, the list of actions, and the MCP endpoint (the mode of its keys; the identity mode
+  // reads the token itself, before the message).
   Exempt,
   // A valid identity token and no action: the page shells, the files, the hosts, and the routes of a capability that a
   // checked request gave (the stream and the cancel of a run).

@@ -2,7 +2,7 @@
 
 ChDash has a built-in MCP server. An AI client reads ClickHouse data through ChDash. The client can be Claude Desktop, Claude Code, an IDE or your own agent. An external MCP server is not necessary. The client uses an access key. Each key has its own rights: one host, tools and data.
 
-MCP is off by default. Add an `mcp {}` block to the configuration to enable it.
+MCP is off by default. Add an `mcp {}` block to the configuration to enable it. The setting `mcp.auth_mode` chooses how the endpoint knows its caller: the keys of ChDash (the default) or the identity token of the portal (refer to [The identity mode](#the-identity-mode)).
 
 The MCP server follows sections 1 to 8 of the MCP server contract (`mcp-server-contract/SPEC.md`, version 1). This document describes how ChDash applies each rule. ChDash has no tool with an effect, no job and no access gateway. Sections 9, 10 and 11 of the contract do not apply to the MCP endpoint.
 
@@ -67,6 +67,7 @@ clickhouse {
 | `storage_file` | none | The JSON file of the keys that you make on the MCP page. The directory must exist. ChDash creates the file at the first write. Without this file, you cannot make keys on the page. |
 | `keys` | none | A block with one attribute, `mode`. The mode sets which keys apply. Refer to [The `keys` block](#the-keys-block). |
 | `manage_from_ui` | `true` | Deprecated. Use `keys { mode }` instead. `false` is the mode `static`. `true` is the mode `hybrid`. ChDash reads this attribute for one release and writes a warning. If `keys` is also set, ChDash stops at start. |
+| `auth_mode` | `"keys"` | `keys`: the caller is a key of ChDash. `identity`: the caller is the subject of the identity token, and the PDP decides each request. The keys of ChDash do not count then. `identity` needs `access.mode = "authzen"`. Refer to [The identity mode](#the-identity-mode). |
 | `usage` | none | A block that enables the usage of the keys. The usage is disabled by default. Refer to [The `usage` block](#the-usage-block). |
 | `auth_header` | `"Authorization"` | The request header that carries the key. `Authorization` takes `Bearer <key>`. Use another name when a proxy in front of ChDash already uses `Authorization`, for example `X-ChDash-Key`. That header takes the key alone, or `Bearer <key>`. The name contains only letters, digits and hyphens. It must not be a header that the request needs (`Content-Type`, `Host`, `Origin`, `Accept`, `Cookie`, `Mcp-Session-Id` and others). The MCP page shows the name in its commands. |
 | `max_rows` | `1000` | Rows in one result (1 to 1,000,000). |
@@ -207,6 +208,7 @@ ChDash stops with `config error: ...` in these cases. The message names the key 
 | 8 | `mcp.usage.enabled` is true, and one of these cases applies. `dir` is not set, does not exist, is not a directory, or cannot hold new files. Or `instance` is not a valid name. When `instance` is empty, the host name must be a valid name. Otherwise, set `instance`. Or the file of this instance (`<instance>.jsonl.zst`) is the key file or the file of a query library, is a link, or is not a usage file of this ChDash. A usage file is not valid when it is not zstd, when a line is not valid, when it has another `version`, or when its header names another instance. ChDash never rewrites an invalid file. Delete it, and the usage of this instance starts again. A directory that anyone can write in, without the sticky bit, gives a warning in the log (`mcp.usage_dir_writable_by_all`), not an error. |
 | 9 | `keys.mode` is not `static`, `dynamic` or `hybrid`. Or the mode is `dynamic`, and the file has an `mcp_key` block. Or the file has both `manage_from_ui` and `keys`. |
 | 10 | A label on a block that is not `mcp_key`. Or an `mcp_key` block without a label. Or a `subject` that is not valid. Or an `expires` that is not an RFC 3339 time. |
+| 11 | `auth_mode` is not `keys` or `identity`. Or `auth_mode` is `identity`, and `access.mode` is `open`. Or `auth_mode` is `identity`, and the file has an `mcp_key` block, a `key` block, `mcp.keys`, `storage_file`, `manage_from_ui` or `auth_header`. The message names both keys. |
 
 ChDash also refuses a token that is not an `mcp_` token or a UUID version 4. It also refuses a bad name, a bad pattern in `databases` and a limit above the global value. An `mcp {}` block with `enabled = false` still checks its shape (case 7).
 
@@ -423,6 +425,142 @@ The `keys.mode` setting sets which sources apply (refer to [The `keys` block](#t
 - ChDash writes the file in an atomic way. It writes a temporary file, runs `fsync`, and then runs `rename`. The mode is 0600. If the write fails, ChDash restores its memory. The API answers 500 `storage_error`.
 - If the file does not exist, ChDash creates it on the first write. If the file is not valid, ChDash stops at start and never rewrites it.
 - `last_used_at` comes from the usage of the key (refer to [Usage of a key](#usage-of-a-key)). It uses the data of all the instances that share the usage. Its value is `null` when the usage is disabled. The key file never holds this value.
+
+## The identity mode
+
+The setting `mcp.auth_mode` sets how `POST /mcp` knows the caller. It has two values.
+
+| Value | The caller | Use |
+| --- | --- | --- |
+| `keys` (default) | A key of ChDash: an `mcp_key` block or a key of the page. | A ChDash without the portal. No existing deployment changes. |
+| `identity` | The identity token of the access gateway. The subject of the token is a person or a key of the portal (`key:...`). | A ChDash behind the portal. The PDP decides each request. |
+
+Never use the two modes on one endpoint. In the mode `identity`, only the token counts. ChDash does not read the header `mcp.auth_header` and does not check an `mcp_` text. A key of the portal has 53 characters, and a key of ChDash has 47. The keys of ChDash stay out of the path of the portal.
+
+### Start of the mode
+
+The mode `identity` needs `access.mode = "authzen"`. ChDash stops at start in these cases. The message names both keys.
+
+- `mcp.auth_mode = "identity"` and `access.mode = "open"`.
+- `mcp.auth_mode = "identity"` and one of these keys is in the file: an `mcp_key` block, a `key` block, `mcp.keys`, `mcp.storage_file`, `mcp.manage_from_ui` or `mcp.auth_header`. These keys do nothing in this mode.
+
+The mode `identity` needs no key of ChDash. The check "a place to read keys from" does not apply. A value of `mcp.auth_mode` that is not `keys` or `identity` stops the start.
+
+### What ChDash does for each request
+
+1. The Origin check comes first (refer to [Origin check](#origin-check)).
+2. ChDash reads the identity token in the header `access.identity.header`, the header of the pages. It checks the token as it does for the pages ([access.md](access.md#identity-token)). A request with no token, with a token that is not valid or with two copies of the header gets status 401. The body is empty, and the answer has `WWW-Authenticate`. ChDash sends the 401 before it reads the message, so it never reads the `id`.
+3. The rate limit applies to each subject. The value is `mcp.rate_limit_per_minute`.
+4. ChDash reads the message. The subject of each question to the PDP is the `sub` of the token. ChDash reads no meaning from the subject. It can be a person or a key of the portal.
+
+The identity mode adds no field to a message of MCP.
+
+### The questions to the PDP
+
+| Request | Action | Resource | Answer when the PDP says `false` |
+| --- | --- | --- | --- |
+| `initialize`, `ping`, `server/discover`, a notification, any other method | `mcp.session` | The service | HTTP 403 and `-32001` (a notification has no body) |
+| `tools/list` | One question for each action of the tools, with the match `subtree` | The service | The tools of a `false` action are not listed |
+| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)) | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
+
+- `tools/list` sends one batch with one item for each action, not for each tool. Tools with the same action share one item. The order of the tools does not change. A tool whose action the configuration does not publish is not listed.
+- `tools/call` asks the PDP for the resource of the call. The argument `host` names the host. The argument `database` (or `params.database` and `body.database` of an API tool) names the database of the host. A `host` that ChDash does not know goes to the service, so the PDP never gets a host name that the client chose.
+- A call without `host` asks the action on the service with the match `subtree`. Then the tool gives `host_required` and reads nothing. In this mode, every tool that takes a host needs the argument `host`. A call never takes the only host of the configuration by default.
+- `list_hosts` lists only the hosts that the person can see. ChDash asks the questions of the navigation for the subject ([access.md](access.md#hidden-hosts)).
+- ChDash keeps the answers of the PDP for `pdp.cache_ttl`, as it does for the pages.
+
+### The map of the tools
+
+| Tool | Action |
+| --- | --- |
+| `list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage` | `mcp.session` (service) |
+| `list_databases`, `list_tables`, `describe_table`, `query_table` | `explorer.read` (host, or database) |
+| `list_services`, `search_traces`, `get_trace`, `search_logs`, `list_metrics`, `query_metric` | `observability.read` (host) |
+| `run_query`, `explain_query` | `query.run.read` (host) |
+| `mcp_analysis_all_usage` | `mcp.usage.read` (service) |
+| An API tool | The action of its route, as in the table of the pages ([access.md](access.md#actions)) |
+
+The tools `list_hosts`, `mcp_analysis_my_limits` and `mcp_analysis_my_usage` use no action of the pages. They show only the service and the subject itself, so they use `mcp.session`. The PDP can grant `mcp.session` to each person who may use MCP.
+
+The action `mcp.session` is in the document of the actions when MCP is on and `mcp.auth_mode` is `identity`. In the mode `keys`, the document does not list it.
+
+### Refusals
+
+In this mode, ChDash never copies a value of the request into a message. Each message is fixed.
+
+| Case | Answer |
+| --- | --- |
+| No token, or a token that is not valid | HTTP 401, empty body, `WWW-Authenticate` |
+| The rate limit of the subject | HTTP 429, empty body, `Retry-After` |
+| `false` for a tool, or an unknown tool | HTTP 200, `-32602`, the message `Unknown tool` |
+| `false` for a request with no tool | HTTP 403, `-32001`, the message `forbidden`. A request with no `id` has an empty body |
+| The PDP gives no valid answer | HTTP 503, `-32603`, the message `the access check is not available`. A request with no `id` has an empty body |
+| A true answer with a ceiling that ChDash cannot apply | The refusal of a `false` answer ([Ceilings](#ceilings)) |
+
+A PDP that is down never looks like a denial. A `tools/list` that cannot be decided gets HTTP 503, not an empty list. A `false` answer with the reason `budget_exceeded` is a refusal for now, because ChDash does not ask the budgets of the actions yet. ChDash never sends the reason of the PDP to the client.
+
+### Ceilings
+
+A true answer can have `limits` (ProcurAuth 7.3). For a tool call, ChDash takes the lowest value of each ceiling of the actions that the tool uses. The ceiling lowers the limit of the call. It never raises the limit.
+
+| Ceiling | Limit of the call |
+| --- | --- |
+| `max_rows` | Rows in the result |
+| `max_duration` (seconds) | Time of the call |
+| `max_rows_read` | `max_rows_to_read` |
+| `max_memory` (bytes) | `max_memory_usage` |
+| `max_result_size` (bytes) | Bytes in the result |
+
+A ceiling with another name, or with a value below 1, cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`. The ceilings that the PDP can send for an action are the ceilings that ChDash declares for it ([access.md](access.md#decisions)).
+
+### What is lost
+
+The identity mode has no key of ChDash. These things exist only in the keys of ChDash, so they do not exist in this mode:
+
+- The list of tools of a key. The PDP decides each tool by its action.
+- The scope of the data: the patterns of databases and tables, and the wildcard. The PDP can grant `explorer.read` on a host or on a database, never on a table. The tools see the tables that the ClickHouse MCP user can read.
+- The limits of a key (`max_rows`, `timeout_seconds` and `rate_limit_per_minute` of a key). The global values of the `mcp` block apply, and the ceilings of the PDP lower them.
+- The default host of a key.
+- `include_cost` of `mcp_analysis_my_usage`. It reads the cost of the host of a key, and a subject has no such host. The tool gives `invalid_argument`.
+- The Keys page. ChDash has no key to show, because the keys live in the portal. The routes that make, delete or adopt a key answer 403 `manage_disabled`.
+
+### The usage in the identity mode
+
+The usage ([Usage of a key](#usage-of-a-key)) groups the requests by subject. Each subject has an entry with the `source` `identity`:
+
+- The `id` is `sub_` and 24 hexadecimal digits of the SHA-256 of the subject. It is safe text for a file, a query id and a log.
+- The `name` is the subject, as printable ASCII, cut to 32 characters. The call log (`mcp.call`) has the whole subject in `subject`.
+- ChDash never marks a subject as deleted. The entry stays until the retention removes it.
+- A state holds 10,000 entries at most. Past this count, a new subject is not counted. This limit protects the file of the usage.
+- `mcp_analysis_my_usage` shows the usage of the subject of the request.
+- The statements of a call have the id of the subject in `log_comment` and in the `query_id`, as the statements of a key do.
+
+The rate limit keeps one bucket for each subject. When the table has 65,536 buckets, ChDash removes the buckets that a minute of rest filled again.
+
+### Migration to the keys of the portal
+
+1. Set `access.mode = "authzen"` and the `identity` and `pdp` blocks ([access.md](access.md)). The portal must grant `mcp.session` and the actions of the tools to its people and its keys.
+2. Set `mcp.auth_mode = "identity"`. Remove the `mcp_key` blocks, `mcp.storage_file`, `mcp.keys` and `mcp.auth_header`. ChDash stops at start while they stay in the file.
+3. Make a key of the portal for each agent. The agent sends the key to the edge of the portal. The edge sends the identity token to ChDash.
+4. Make the calls name the `host`. A call without it gets `host_required`.
+5. Restart ChDash. The old keys of ChDash do not work any more. ChDash does not read the key file. You can delete it.
+
+To go back, set `mcp.auth_mode = "keys"` and put the keys back. The usage of the subjects stays in the usage files until the retention removes it.
+
+### Conformance to the binding
+
+ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from the points in the table.
+
+| Paragraph | State |
+| --- | --- |
+| 3.3, 3.3a, 5.2, 5.6a | Done. ChDash checks the token before the message. The 401 has an empty body. |
+| 3.6a, 5.1b | Done. ChDash asks `mcp.session` for each request with no tool. |
+| 4.1 to 4.3 | Done. One batch, one item for each action, match `subtree`. |
+| 5.1, 5.5, 5.6 | Done. The messages are fixed. |
+| 5.3, 5.4 (`budget_exceeded`) | Not done. ChDash does not ask the budgets. |
+| 3.4, 3.5, 3.5a (`context.usage`) | Not done. ChDash declares no budget. |
+| 7.3 | Done. The mode ignores the standalone keys. |
+| 7.4 | Done in both modes. The 401 and the 429 have an empty body. |
 
 ## Tools
 
@@ -867,7 +1005,7 @@ A request without the version in `_meta` is a legacy request (contract 2.6). A v
 | `tools/call` | Runs one tool. |
 | `server/discover`, any other method | JSON-RPC error `-32601`. |
 
-An `MCP-Protocol-Version` header with a version that ChDash does not support gets status 400 and `-32022`. The header `2026-07-28` without the version in `_meta` gets status 400 and `-32020`.
+An `MCP-Protocol-Version` header with a version that ChDash does not support gets status 400 and `-32022`. The header `2026-07-28` without the version in `_meta` gets status 400 and `-32020`. A legacy version in `_meta` and an `MCP-Protocol-Version` header with another version also get status 400 and `-32020`: the header and `_meta` must name one version.
 
 ### The two generations
 
@@ -880,14 +1018,16 @@ An `MCP-Protocol-Version` header with a version that ChDash does not support get
 | 200 | A JSON-RPC answer. A failed tool still gets status 200, with `isError: true`. |
 | 202 | A notification or a response. |
 | 400 | A bad JSON-RPC message (`-32700`, `-32600`), a header that does not agree with the message (`-32020`), or a version that ChDash does not support (`-32022`). The body is JSON-RPC. |
-| 401 | There is no key, or the key is unknown or expired. The body is `{"jsonrpc": "2.0", "id": null, "error": {"code": -32001, "message": "unauthorized"}}`. It is the same in each case. The answer has `WWW-Authenticate: Bearer realm="chdash"` when the header is `Authorization`. |
+| 401 | There is no key, or the key is unknown or expired. In the mode `identity`: there is no identity token, or it is not valid. The body is empty in each case, so the answer does not hold the `id`. The answer has `WWW-Authenticate: Bearer realm="chdash"` when the header is `Authorization` (the mode `keys`), and always in the mode `identity`. |
 | 403 | The `Origin` header is not in `allowed_origins`. The body is `{"error_code": "origin_not_allowed", "message", "retryable"}`. |
+| 403 | In the mode `identity`: the PDP says `false` for a request that has no tool. The body is the JSON-RPC error `-32001` with the message `forbidden`. It is empty when the request has no `id`. |
 | 405 | `GET`, `DELETE`, `PUT` or `PATCH`. The answer has `Allow: POST`. |
 | 413 | The body is larger than 2 times `max_sql_bytes` plus 16 KiB. |
 | 415 | The `Content-Type` is not `application/json`. |
-| 429 | The key sent more requests than its rate limit permits. The body is `{"jsonrpc": "2.0", "id": null, "error": {"code": -32002, "message": "rate_limited"}}`. The answer has `Retry-After`, in seconds. |
+| 429 | The key (or the subject) sent more requests than its rate limit permits. The body is empty. The answer has `Retry-After`, in seconds. |
+| 503 | In the mode `identity`: the PDP gives no valid answer. The body is the JSON-RPC error `-32603` with a fixed message. It is empty when the request has no `id`. |
 
-Every answer has `Cache-Control: no-store`. The answers 405, 413 and 415 have the body of every ChDash error: `{"error_code": "<code>", "message": "...", "retryable": ...}` ([operations.md](operations.md#errors)). ChDash checks a request in this order: Origin, key, rate limit, content type, body size, and then the message (contract 2.8). When ChDash refuses a request before it reads the body, it closes the connection.
+Every answer has `Cache-Control: no-store`. The answers 405, 413 and 415 have the body of every ChDash error: `{"error_code": "<code>", "message": "...", "retryable": ...}` ([operations.md](operations.md#errors)). ChDash checks a request in this order: Origin, key (or the identity token), rate limit, content type, body size, and then the message (contract 2.8). When ChDash refuses a request before it reads the body, it closes the connection.
 
 ChDash has no list of client addresses (`allowed_client_cidrs`). Limit the network or the reverse proxy instead.
 
@@ -901,7 +1041,7 @@ With the default empty list, ChDash refuses every browser origin. This includes 
 
 Each key has a token bucket in memory (contract 3.9). The bucket holds `rate_limit_per_minute` requests. It fills evenly in one minute. A key can have a lower limit of its own (`limits.rate_limit_per_minute`). All requests count, also a `ping` or a `tools/list`.
 
-Above the limit, the answer is status 429 with `Retry-After` and the JSON-RPC error `-32002`. Each ChDash (an instance) keeps its own bucket, so a key that reaches two instances has two buckets. A key reads what is left of its own bucket with `mcp_analysis_my_limits` (refer to [The analysis tools](#the-analysis-tools)). A read of the bucket takes a token, as any call does. It takes no more.
+Above the limit, the answer is status 429 with `Retry-After` and an empty body (the binding asks for no body before ChDash reads the message). Each ChDash (an instance) keeps its own bucket, so a key that reaches two instances has two buckets. A key reads what is left of its own bucket with `mcp_analysis_my_limits` (refer to [The analysis tools](#the-analysis-tools)). A read of the bucket takes a token, as any call does. It takes no more.
 
 ChDash does not limit the requests that have no valid key. Contract 3.9 asks for a limit of 10 a minute for each client address. Put such a limit in the reverse proxy.
 
@@ -1310,7 +1450,8 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 
   Give System, Traces, Logs and Metrics only to keys that can see the whole server and all its telemetry. Only the SQL tools go to keys with `databases = ["*"]`.
 - The MCP page cannot show a secret again, because ChDash does not keep it. Anyone who has `mcp.keys.write` (everyone in the open mode) can still make and delete keys.
-- `POST /mcp` needs no identity token of the access of humans. It keeps its keys. The API tools call the routes in the process, and these calls ask no PDP ([access.md](access.md#the-mcp-endpoint)).
+- In the mode `keys`, `POST /mcp` needs no identity token of the access of humans. It keeps its keys. In the mode `identity`, it needs the token, and it ignores the keys ([The identity mode](#the-identity-mode)). Use the mode `identity` only behind the portal: the portal must replace the identity header, and only the portal may reach ChDash.
+- In the mode `keys`, `POST /mcp` needs no identity token of the access of humans. It keeps its keys. The API tools call the routes in the process, and these calls ask no PDP ([access.md](access.md#the-mcp-endpoint)).
 - ChDash checks the SQL of `run_query` with a splitter. The splitter is a guard rail. It is not a parser of ClickHouse. `readonly` and the grants are the boundary. With a profile at `readonly = 2`, the refusal of `SETTINGS` by the splitter keeps the limits of the key. Give that profile `CONST` constraints on the limits that matter to you if you want ClickHouse to hold them too.
 - The scope of a key is a list of table names. Free SQL can read any table that the ClickHouse user can read. This is why only keys with `databases = ["*"]` get free SQL. Give such keys only to people that you trust with all the data of the MCP user.
 - `mcp_analysis_all_usage` shows the names, ids and hosts of all the keys. It also shows their clients (name, version, `User-Agent`), their activity and the names of the instances. It has two locks: `mcp.usage.all_keys`, and the name of the tool in the `tools` of the key (`["*"]` does not include it).
@@ -1375,6 +1516,7 @@ The first specification of this feature had gaps. This list records what ChDash 
   The response is written once into one buffer and moved to the answer. The copies of the result in memory are the JSON of the tool and the body of the response. The limit of the size of a result is `mcp.max_result_bytes` (1 MiB by default).
 
   An administrator who wants a smaller body lowers this limit.
+- **The messages of the identity mode.** In the mode `identity`, a tool that is refused or unknown gets the message `Unknown tool` with no name, and an unknown method gets `method not found` with no name. The mode `keys` keeps the name in the message, as before (the binding asks for no copy of the request in a message, and ChDash applies it in the new mode only).
 - **Not permitted or unknown tool.** A tool that the key does not have gets the JSON-RPC error `-32602`. A name that does not exist gets the same error (`Unknown tool: <name>`). The answer has status 200 (contract 3.6). A key cannot tell a tool that it lacks from a tool that does not exist.
 - **Out of the scope.** A host, a database or a table out of the scope of a key gets `not_found`. This is the code and the message of a resource that does not exist (contract 3.7). A list leaves it out. For example, `list_tables` of a database out of the scope is empty.
 - **The block of the keys.** The keys are in the `mcp` block (`mcp { keys { } mcp_key "name" { } }`). The examples of the contract put them at the top of the file. In ChDash, MCP is one part of the server. The names, the structure and the meaning are those of the contract (0.5).

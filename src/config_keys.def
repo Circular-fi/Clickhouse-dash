@@ -202,6 +202,7 @@ CFG_STRING("observability.metrics", "table_prefix", c.otel_defaults.metrics.tabl
 
 // ---- mcp ----------------------------------------------------------------------------------------------------------------
 CFG_BOOL("mcp", "enabled", c.mcp.enabled, "false", "Serve the MCP endpoint, POST /mcp.")
+CFG_ENUM("mcp", "auth_mode", c.mcp.auth_mode, "keys", "keys|identity", "How POST /mcp knows the caller. keys: the keys of ChDash (the mcp_key blocks and the keys of the page), as in older versions. identity: the identity token of the access gateway, in the header access.identity.header. The subject of the token is a person or a key of the portal. The PDP decides each request, and the keys of ChDash do not count. identity needs access.mode = \"authzen\". It stops the start when the file has an mcp_key block, mcp.storage_file, mcp.keys, mcp.manage_from_ui or mcp.auth_header. Use identity only behind the portal.")
 CFG_STRING("mcp", "storage_file", c.mcp.storage_file, "", "The JSON file of the keys that are made on the MCP page.")
 CFG_BOOL("mcp", "manage_from_ui", c.mcp.manage_from_ui, "true", "Deprecated: use keys.mode. false is the static mode, true the hybrid mode. It stops the start when keys.mode is also in the file.")
 CFG_BOOL("mcp.usage", "enabled", c.mcp.usage.enabled, "false", "Count what each key does (requests, errors, clients, time, rows, bytes) and keep it. Off: nothing is counted, the routes of the usage answer 404 not_enabled, and the Keys table has no Used column.")

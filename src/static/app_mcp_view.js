@@ -191,6 +191,7 @@ function clientTabs(url, name, secret, idBase, header = "Authorization") {
 
 function manageReason(meta) {
   if (!meta || !meta.enabled) return "MCP is off.";
+  if (meta.authMode === "identity") return "ChDash has no key of its own here: the keys live in the portal (mcp.auth_mode is identity).";
   if (!meta.manageFromUi) return "Keys are read-only: keys.mode is static in the config.";
   if (!meta.storageConfigured) return "Keys cannot be created here: mcp.storage_file is not set in the config.";
   return meta.canManage ? "" : "Keys cannot be changed from this page.";

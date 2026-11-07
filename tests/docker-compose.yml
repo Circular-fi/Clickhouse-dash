@@ -361,6 +361,38 @@ services:
       retries: 120
       start_period: 2s
 
+  chdash_mcp_identity:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-mcp-identity
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+      access_pdp:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/mcp.identity.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/livez | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
   chdash_qlib:
     profiles: ["test"]
     image: chdash-tests-source:local
@@ -603,6 +635,8 @@ services:
         condition: service_healthy
       chdash_access:
         condition: service_healthy
+      chdash_mcp_identity:
+        condition: service_healthy
       access_pdp:
         condition: service_healthy
       access_otlp_receiver:
@@ -640,6 +674,7 @@ services:
       TELEMETRY_BASE_URL: http://chdash_mcp_telemetry:8080
       OTLP_RECEIVER_URL: http://otlp_receiver:4318
       ACCESS_BASE_URL: http://chdash_access:8080
+      MCP_IDENTITY_BASE_URL: http://chdash_mcp_identity:8080
       ACCESS_PDP_URL: http://access_pdp:8181
       ACCESS_OTLP_URL: http://access_otlp_receiver:4318
       SYSTEM_DISABLED_BASE_URL: http://chdash_system_disabled:8080

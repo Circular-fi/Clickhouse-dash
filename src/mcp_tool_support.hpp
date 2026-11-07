@@ -66,11 +66,14 @@ struct Ctx {
   McpDbLimits system_limits;
   McpDbLimits system_schema_limits;
   uint64_t rows_out = 0;
+  // The identity mode, for list_hosts: the hosts that the person can see. Not set: every host that the key reaches.
+  std::optional<std::vector<std::string>> visible_hosts;
 };
 
 // The hosts that the key may use.
 std::vector<std::string> key_hosts(const McpKey& key, const McpToolsConfig& config);
 // The host of the call is the argument `host`, or the only host that the key has. The function fails with not_found, no_host or host_required.
+// A key of the identity mode names no host: the argument is required, and a call never takes the only host of the configuration.
 void resolve_host(Ctx& ctx, const rapidjson::Value& args);
 // `tool` names the statements of the call. The name gives their query_id (mcp_cost.hpp).
 Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, const std::string& tool = {});

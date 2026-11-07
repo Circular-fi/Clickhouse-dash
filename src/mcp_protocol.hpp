@@ -12,6 +12,7 @@
 //   The methods are server/discover, tools/list and tools/call. There is no initialize and no ping.
 // - legacy (2025-11-25, 2025-06-18, and the older 2025-03-26 and 2024-11-05): initialize, ping, tools/list, tools/call.
 
+#include "mcp_access.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_trace.hpp"
@@ -19,6 +20,7 @@
 #include <rapidjson/document.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,14 +41,16 @@ inline constexpr int kRpcInvalidRequest = -32600;
 inline constexpr int kRpcMethodNotFound = -32601;
 inline constexpr int kRpcInvalidParams = -32602;
 inline constexpr int kRpcInternalError = -32603;
-inline constexpr int kRpcUnauthorized = -32001;      // HTTP 401: no key, an unknown key or an expired key
-inline constexpr int kRpcRateLimited = -32002;       // HTTP 429
+inline constexpr int kRpcForbidden = -32001;         // HTTP 403 of the identity mode: a request other than tools/call that the PDP refuses (binding 5.1b)
 inline constexpr int kRpcHeaderMismatch = -32020;    // HTTP 400: a header does not agree with the message
 inline constexpr int kRpcUnsupportedVersion = -32022;  // HTTP 400: data.supported lists the versions
 
-// The constant bodies of the refusals before the message (contract 2.7).
-inline constexpr const char* kMcpUnauthorizedBody = R"({"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"unauthorized"}})";
-inline constexpr const char* kMcpRateLimitedBody = R"({"jsonrpc":"2.0","id":null,"error":{"code":-32002,"message":"rate_limited"}})";
+// The fixed messages of the refusals of the service. They copy no value of the request (binding 5.6).
+inline constexpr const char* kMcpForbiddenMessage = "forbidden";
+inline constexpr const char* kMcpUnavailableMessage = "the access check is not available";
+inline constexpr const char* kMcpUnknownToolMessage = "Unknown tool";
+inline constexpr const char* kMcpUnknownMethodMessage = "method not found";
+// The 401 and the 429 of the endpoint before its message have an empty body, in the two modes (binding 5.2, 5.6a, 7.4).
 
 // The HTTP headers that the protocol compares with the message (2026-07-28). This struct also holds the trace context of the headers.
 struct McpRequestHeaders {
@@ -65,6 +69,11 @@ struct McpRequestHeaders {
 // The tools use it for the log_comment of the ClickHouse statements. It is never a permission.
 struct McpCallInfo {
   std::string agent_caller;
+  // The identity mode: the lowest ceilings of the actions that the tool uses (McpToolBackend::tool_permitted). A call never gets more
+  // than the configuration gives, and a ceiling can only lower a limit.
+  McpCeilings ceilings;
+  // The identity mode, for list_hosts: the hosts that the person can see. Not set: every host that MCP reaches.
+  std::optional<std::vector<std::string>> visible_hosts;
 };
 
 struct McpServerInfo {
@@ -109,18 +118,28 @@ public:
     (void)info;
     return call_tool(key, tool, arguments, now);
   }
-// The access of humans can take tools from a key of the page (docs/mcp.md, "Keys and the access of humans").
-// tools/list shows only the tools of `tools` that this function keeps. By default, it keeps all of them.
-  virtual std::vector<std::string> permitted_tools(const McpKey& key, std::vector<std::string> tools) {
+// The access of humans can take tools from a key of the page (docs/mcp.md, "Keys and the access of humans"), and the identity mode asks
+// the PDP for the subject of the request. tools/list shows only the tools of `tools` that this function keeps. By default, it keeps
+// all of them. The result is nullopt when the PDP gave no valid answer: tools/list then gets HTTP 503 (binding 5.5).
+  virtual std::optional<std::vector<std::string>> permitted_tools(const McpKey& key, std::vector<std::string> tools) {
     (void)key;
     return tools;
   }
-// tools/call calls a tool that the key holds only when this function gives true. Otherwise the call gets the answer for a tool
-// that does not exist (-32602), as tools/list does not show it. By default, every tool is permitted.
-  virtual bool tool_permitted(const McpKey& key, const McpToolInfo& tool) {
+// tools/call calls a tool that the key holds only when this function gives Allowed. Denied gives the answer for a tool that does not
+// exist (-32602), as tools/list does not show it. Failed gives HTTP 503 with -32603 (binding 5.5). By default, every tool is allowed.
+// `arguments` is the object of the call: it names the resource of the call (binding 3.2). For Allowed, `call` receives the ceilings.
+  virtual McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) {
     (void)key;
     (void)tool;
-    return true;
+    (void)arguments;
+    (void)call;
+    return McpAccess::Allowed;
+  }
+// A request with no tool (initialize, ping, server/discover, a notification, and any other method): the identity mode asks the action
+// mcp.session on the service (binding 3.6a). Denied gives HTTP 403 with -32001, Failed gives HTTP 503 with -32603. By default, allowed.
+  virtual McpAccess session_permitted(const McpKey& key) {
+    (void)key;
+    return McpAccess::Allowed;
   }
 };
 

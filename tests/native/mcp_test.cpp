@@ -25,6 +25,7 @@
 #include "mcp_keys.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
+#include "mcp_subject_access.hpp"
 #include "host_util.hpp"
 #include "mcp_sql.hpp"
 #include "request_context.hpp"
@@ -5604,13 +5605,13 @@ void test_creator_access() {
 void test_protocol_permitted_tools() {
   struct Narrowed : FakeBackend {
     std::vector<std::string> asked;
-    std::vector<std::string> permitted_tools(const McpKey&, std::vector<std::string> tools) override {
+    std::optional<std::vector<std::string>> permitted_tools(const McpKey&, std::vector<std::string> tools) override {
       tools.erase(std::remove(tools.begin(), tools.end(), "system_overview"), tools.end());
       return tools;
     }
-    bool tool_permitted(const McpKey&, const McpToolInfo& tool) override {
+    McpAccess tool_permitted(const McpKey&, const McpToolInfo& tool, const rapidjson::Value&, McpCallInfo*) override {
       asked.push_back(tool.name);
-      return std::string(tool.name) != "system_overview";
+      return std::string(tool.name) != "system_overview" ? McpAccess::Allowed : McpAccess::Denied;
     }
   };
   Narrowed backend;
@@ -6101,6 +6102,556 @@ rapidjson::Document call(McpTools& tools, const McpKey& key, const std::string& 
     return inner;
   }
   return doc;
+}
+
+// ---- the identity mode of POST /mcp (mcp_subject_access.hpp; docs/mcp.md, "The identity mode") ----
+
+// A PDP of the tests with the prefix rule of the grants (access_grants.hpp). A subject has grants "<action>@<path>". An action can have
+// ceilings, which every true answer of this action carries.
+struct IdentityPdp {
+  std::map<std::string, std::vector<std::string>> grants;
+  std::map<std::string, PdpLimits> limits;
+  bool fails = false;
+  std::vector<std::pair<std::string, std::vector<AccessQuestion>>> asked;  // the subject and the questions of each call
+};
+
+McpSubjectAccess::Decide identity_decide(IdentityPdp& pdp, const chdash_test::GrantRules& rules) {
+  return [&pdp, &rules](const std::string& subject, const std::vector<AccessQuestion>& questions) {
+    pdp.asked.emplace_back(subject, questions);
+    std::vector<AccessDecision> out;
+    for (const auto& q : questions) {
+      AccessDecision d;
+      d.source = pdp.fails ? "error" : "pdp";
+      d.failed = pdp.fails;
+      const auto grants = pdp.grants.find(subject);
+      d.allowed = !pdp.fails && grants != pdp.grants.end() &&
+                  rules.decide(grants->second, q.action, q.resource, q.match == AccessMatch::Subtree).decision;
+      if (d.allowed && pdp.limits.count(q.action)) d.limits = pdp.limits[q.action];
+      out.push_back(d);
+    }
+    return out;
+  };
+}
+
+rapidjson::Document args_of(const std::string& json) {
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  return doc;
+}
+
+std::string question_text(const AccessQuestion& q) {
+  return q.action + "@" + access_resource_path(q.resource) + (q.match == AccessMatch::Subtree ? "~" : "");
+}
+
+void test_identity_key_and_ceilings() {
+  // The virtual key: safe id, the subject as the name, no store.
+  const McpKey key = mcp_identity_key("key:9b1c04e2aa71f0c3");
+  CHECK(mcp_key_is_identity(key));
+  CHECK_EQ(key.id.size(), size_t(28));
+  CHECK_EQ(key.id.substr(0, 4), std::string("sub_"));
+  CHECK(mcp_valid_key_id(key.id));
+  CHECK_EQ(key.name, std::string("key:9b1c04e2aa71f0c3"));
+  CHECK_EQ(key.subject, std::string("key:9b1c04e2aa71f0c3"));
+  CHECK_EQ(mcp_identity_key("key:9b1c04e2aa71f0c3").id, key.id);
+  CHECK(mcp_identity_key("alice").id != key.id);
+  CHECK(mcp_scope_tool_allowed(key.tools, key.databases, "run_query"));
+  CHECK(mcp_scope_tool_allowed(key.tools, key.databases, "mcp_analysis_all_usage"));
+  // A subject with control characters and a long subject give a clean name that fits the usage file.
+  const McpKey odd = mcp_identity_key(std::string("a\x01b\xc3\xa9") + std::string(300, 'x'));
+  CHECK(odd.name.size() <= kMcpNameMaxBytes);
+  CHECK(odd.name.find('\x01') == std::string::npos);
+  CHECK(!mcp_key_is_identity(a_key({"*"}, {"*"})));
+
+  // The ceilings: five names, the lowest value, a name that MCP cannot apply, a value below 1.
+  McpCeilings c;
+  std::string refused;
+  CHECK(mcp_ceilings_of({{"max_rows", 5}, {"max_duration", 3}, {"max_rows_read", 100}, {"max_memory", 1 << 20}, {"max_result_size", 2048}}, &c, &refused));
+  CHECK(c.max_rows && *c.max_rows == 5 && c.max_duration_seconds && *c.max_duration_seconds == 3);
+  CHECK(c.max_rows_read && *c.max_rows_read == 100 && c.max_memory_bytes && *c.max_memory_bytes == (1 << 20));
+  CHECK(c.max_result_bytes && *c.max_result_bytes == 2048);
+  CHECK(c.any());
+  CHECK(!McpCeilings().any());
+  CHECK(!mcp_ceilings_of({{"max_read_size", 5}}, &c, &refused));
+  CHECK_EQ(refused, std::string("max_read_size"));
+  CHECK(!mcp_ceilings_of({{"max_rows", 0}}, &c, &refused));
+  CHECK_EQ(refused, std::string("max_rows"));
+  CHECK(!mcp_ceilings_of({{"max_conformance_unknown", 5}}, &c, &refused));
+  CHECK(mcp_ceilings_of({{"max_rows", std::numeric_limits<uint64_t>::max()}}, &c, &refused));
+  CHECK(c.max_rows && *c.max_rows == std::numeric_limits<int64_t>::max());
+  CHECK(mcp_ceilings_of({}, &c, &refused) && !c.any());
+  McpCeilings low;
+  low.max_rows = 10;
+  McpCeilings lower;
+  lower.max_rows = 4;
+  lower.max_duration_seconds = 9;
+  low.lower(lower);
+  CHECK(*low.max_rows == 4 && *low.max_duration_seconds == 9);
+  lower.max_rows = 40;
+  low.lower(lower);
+  CHECK(*low.max_rows == 4);
+  // mcp_apply_ceiling: only a lower value counts.
+  bool binds = false;
+  CHECK_EQ(mcp_apply_ceiling(100, std::optional<int64_t>(5), &binds), int64_t(5));
+  CHECK(binds);
+  CHECK_EQ(mcp_apply_ceiling(3, std::optional<int64_t>(5), &binds), int64_t(3));
+  CHECK(!binds);
+  CHECK_EQ(mcp_apply_ceiling(7, std::nullopt, &binds), int64_t(7));
+  CHECK(!binds);
+  CHECK_EQ(mcp_apply_ceiling(0, std::optional<int64_t>(8), &binds, true), int64_t(8));
+  CHECK(binds);
+  CHECK_EQ(mcp_apply_ceiling(0, std::optional<int64_t>(8)), int64_t(0));
+}
+
+void test_identity_access() {
+  IdentityPdp pdp;
+  const chdash_test::GrantRules rules("db");
+  AccessFeatures features;
+  McpSubjectAccess access("db", {"prod", "stage"}, features, identity_decide(pdp, rules));
+  const rapidjson::Document none = args_of("{}");
+
+  // mcp.session: one question on the service.
+  pdp.grants["alice"] = {"mcp.session@service:db"};
+  CHECK(access.session("alice") == McpAccess::Allowed);
+  CHECK_EQ(pdp.asked.back().second.size(), size_t(1));
+  CHECK_EQ(question_text(pdp.asked.back().second.front()), std::string("mcp.session@service:db"));
+  CHECK_EQ(pdp.asked.back().first, std::string("alice"));
+  CHECK(access.session("bob") == McpAccess::Denied);
+  pdp.fails = true;
+  CHECK(access.session("alice") == McpAccess::Failed);
+  pdp.fails = false;
+
+  // tools/list: one item for each action, the service, the match subtree, no usage.
+  pdp.grants["alice"] = {"mcp.session@service:db", "explorer.read@service:db/host:prod"};
+  const McpKey key = mcp_identity_key("alice");
+  std::vector<std::string> tools = mcp_effective_tools(key.tools, key.databases, McpToolAvailability::everything());
+  const size_t before = pdp.asked.size();
+  const auto listed = access.list("alice", tools);
+  CHECK(listed.has_value());
+  CHECK_EQ(pdp.asked.size(), before + 1);  // one batch
+  std::set<std::string> actions;
+  for (const auto& q : pdp.asked.back().second) {
+    CHECK_EQ(q.resource.type, std::string("service"));
+    CHECK(q.match == AccessMatch::Subtree);
+    CHECK(actions.insert(q.action).second);  // one item for each action
+  }
+  CHECK(actions.count("explorer.read") && actions.count("mcp.session") && actions.count("query.run.read") && actions.count("system.read"));
+  const auto has = [&](const char* name) { return std::find(listed->begin(), listed->end(), name) != listed->end(); };
+  CHECK(has("list_databases") && has("describe_table") && has("explorer_catalog"));  // explorer.read (a grant below the service counts)
+  CHECK(has("list_hosts") && has("mcp_analysis_my_limits"));                          // mcp.session
+  CHECK(!has("run_query") && !has("system_overview") && !has("mcp_analysis_all_usage"));
+  // The order of the catalog stays.
+  CHECK(std::is_sorted(listed->begin(), listed->end(), [&](const std::string& a, const std::string& b) {
+    return std::find(tools.begin(), tools.end(), a) < std::find(tools.begin(), tools.end(), b);
+  }));
+  // A failure of the PDP is not an empty list.
+  pdp.fails = true;
+  CHECK(!access.list("alice", tools).has_value());
+  pdp.fails = false;
+  // A feature that is off has no action: its tools are not listed, and the PDP is not asked for the action.
+  {
+    AccessFeatures no_observability;
+    no_observability.observability = false;
+    McpSubjectAccess narrow("db", {"prod"}, no_observability, identity_decide(pdp, rules));
+    pdp.grants["alice"] = {"observability.read@service:db", "explorer.read@service:db"};
+    const auto some = narrow.list("alice", tools);
+    CHECK(std::find(some->begin(), some->end(), "search_traces") == some->end());
+    for (const auto& q : pdp.asked.back().second) CHECK(q.action != "observability.read");
+    CHECK(!narrow.call_question(*mcp_find_tool("search_traces"), args_of(R"({"host":"prod"})")).has_value());
+  }
+
+  // tools/call: the resource comes from the arguments.
+  const auto text = [&](const char* tool, const char* json) {
+    const auto q = access.call_question(*mcp_find_tool(tool), args_of(json));
+    return q ? question_text(*q) : std::string("none");
+  };
+  CHECK_EQ(text("list_databases", R"({"host":"prod"})"), std::string("explorer.read@service:db/host:prod"));
+  CHECK_EQ(text("describe_table", R"({"host":"prod","database":"test2","table":"orders"})"), std::string("explorer.read@service:db/host:prod/database:test2"));
+  CHECK_EQ(text("list_tables", R"({"host":"prod","database":"a b"})"), std::string("explorer.read@service:db/host:prod/database:a%20b"));
+  // A database that no grant can name goes to the host.
+  CHECK_EQ(text("describe_table", R"({"host":"prod","database":""})"), std::string("explorer.read@service:db/host:prod"));
+  // An API tool: the database is in params (GET) or in body (POST) when the rule of the route reads it.
+  CHECK_EQ(text("explorer_catalog", R"({"host":"stage","params":{"database":"d1"}})"), std::string("explorer.read@service:db/host:stage/database:d1"));
+  CHECK_EQ(text("explorer_table_data", R"({"host":"prod","body":{"database":"d2","table":"t"}})"), std::string("explorer.read@service:db/host:prod/database:d2"));
+  CHECK_EQ(text("explorer_functions", R"({"host":"prod","params":{"database":"d1"}})"), std::string("explorer.read@service:db/host:prod/database:d1"));
+  CHECK_EQ(text("system_overview", R"({"host":"prod","params":{"database":"d1"}})"), std::string("system.read@service:db/host:prod"));
+  CHECK_EQ(text("run_query", R"({"host":"prod","sql":"select 1"})"), std::string("query.run.read@service:db/host:prod"));
+  CHECK_EQ(text("search_traces", R"({"host":"prod"})"), std::string("observability.read@service:db/host:prod"));
+  // No host: the service with the match subtree. The tool then gives host_required. A value that is not text counts as no host.
+  CHECK_EQ(text("list_databases", "{}"), std::string("explorer.read@service:db~"));
+  CHECK_EQ(text("list_databases", R"({"host":5})"), std::string("explorer.read@service:db~"));
+  CHECK_EQ(text("list_databases", R"({"host":""})"), std::string("explorer.read@service:db~"));
+  // A host that MCP does not reach: the service, the match node. The PDP never gets the name.
+  CHECK_EQ(text("list_databases", R"({"host":"attacker-chose-this"})"), std::string("explorer.read@service:db"));
+  // The tools with no action of the pages use mcp.session, and mcp.usage.read stays on the service.
+  CHECK_EQ(text("list_hosts", "{}"), std::string("mcp.session@service:db"));
+  CHECK_EQ(text("mcp_analysis_my_usage", "{}"), std::string("mcp.session@service:db"));
+  CHECK_EQ(text("mcp_analysis_all_usage", "{}"), std::string("mcp.usage.read@service:db"));
+  CHECK_EQ(std::string(mcp_tool_identity_action(*mcp_find_tool("list_hosts"))), std::string("mcp.session"));
+  CHECK_EQ(std::string(mcp_tool_identity_action(*mcp_find_tool("run_query"))), std::string("query.run.read"));
+
+  // A call: allowed, denied, failed.
+  pdp.grants["alice"] = {"explorer.read@service:db/host:prod/database:test2", "mcp.session@service:db"};
+  McpCallInfo info;
+  CHECK(access.call("alice", *mcp_find_tool("describe_table"), args_of(R"({"host":"prod","database":"test2","table":"t"})"), &info) == McpAccess::Allowed);
+  CHECK(!info.ceilings.any());
+  CHECK(access.call("alice", *mcp_find_tool("describe_table"), args_of(R"({"host":"prod","database":"other","table":"t"})"), &info) == McpAccess::Denied);
+  CHECK(access.call("alice", *mcp_find_tool("list_databases"), args_of(R"({"host":"prod"})"), &info) == McpAccess::Denied);
+  // The match subtree for a call without a host: the grant on one database lets the tool say host_required, and it reads nothing.
+  CHECK(access.call("alice", *mcp_find_tool("list_databases"), none, &info) == McpAccess::Allowed);
+  CHECK(access.call("bob", *mcp_find_tool("list_hosts"), none, &info) == McpAccess::Denied);
+  pdp.fails = true;
+  CHECK(access.call("alice", *mcp_find_tool("list_hosts"), none, &info) == McpAccess::Failed);
+  pdp.fails = false;
+
+  // Ceilings: the lowest values go to the call. An unknown ceiling or a value below 1 makes the call a denial.
+  pdp.grants["carol"] = {"explorer.read@service:db"};
+  pdp.limits["explorer.read"] = {{"max_rows", 7}, {"max_duration", 3}};
+  McpCallInfo carol;
+  CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &carol) == McpAccess::Allowed);
+  CHECK(carol.ceilings.max_rows && *carol.ceilings.max_rows == 7 && carol.ceilings.max_duration_seconds && *carol.ceilings.max_duration_seconds == 3);
+  pdp.limits["explorer.read"] = {{"max_read_size", 1000}};
+  McpCallInfo refused;
+  CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &refused) == McpAccess::Denied);
+  CHECK(!refused.ceilings.any());
+  pdp.limits["explorer.read"] = {{"max_rows", 0}};
+  CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &refused) == McpAccess::Denied);
+  pdp.limits.clear();
+
+  // list_hosts: the hosts that the person can see (the navigation questions for the subject).
+  pdp.grants["dave"] = {"mcp.session@service:db", "explorer.read@service:db/host:stage/database:d1"};
+  McpCallInfo dave;
+  CHECK(access.call("dave", *mcp_find_tool("list_hosts"), none, &dave) == McpAccess::Allowed);
+  CHECK(dave.visible_hosts.has_value());
+  CHECK(*dave.visible_hosts == (std::vector<std::string>{"stage"}));
+  pdp.grants["erin"] = {"mcp.session@service:db", "explorer.read@service:db"};
+  McpCallInfo erin;
+  CHECK(access.call("erin", *mcp_find_tool("list_hosts"), none, &erin) == McpAccess::Allowed);
+  CHECK(*erin.visible_hosts == (std::vector<std::string>{"prod", "stage"}));
+  pdp.grants["frank"] = {"mcp.session@service:db"};
+  McpCallInfo frank;
+  CHECK(access.call("frank", *mcp_find_tool("list_hosts"), none, &frank) == McpAccess::Allowed);
+  CHECK(frank.visible_hosts->empty());
+  CHECK(!erin.ceilings.any());
+}
+
+// The protocol in the identity mode, with the backend of the subject and a fake PDP (conformance cases U25 to U31, U85 to U99).
+void test_identity_protocol() {
+  struct Spy : FakeBackend {
+    McpCeilings ceilings;
+    std::optional<std::vector<std::string>> visible;
+    McpToolOutcome call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
+                                 const McpCallInfo& info) override {
+      ceilings = info.ceilings;
+      visible = info.visible_hosts;
+      return FakeBackend::call_tool_for(key, tool, arguments, now, info);
+    }
+  };
+  IdentityPdp pdp;
+  const chdash_test::GrantRules rules("db");
+  McpSubjectAccess access("db", {"prod", "stage"}, AccessFeatures{}, identity_decide(pdp, rules));
+  Spy inner;
+  McpSubjectTools backend(inner, access);
+  McpServerInfo info;
+  const McpKey key = mcp_identity_key("alice");
+  const int64_t now = 1'800'000'000;
+  const std::string meta = R"({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})";
+  const auto handle = [&](const std::string& body, const McpRequestHeaders& headers) {
+    return mcp_handle_message(body, key, backend, info, now, headers);
+  };
+  const auto list_names = [&](const McpRpcResult& r) {
+    std::vector<std::string> names;
+    const auto doc = parse(r.body);
+    for (const auto& tool : doc["result"]["tools"].GetArray()) names.emplace_back(tool["name"].GetString());
+    return names;
+  };
+
+  // U29, U31: a ping, a server/discover and a notification ask mcp.session. false gives 403 and -32001, with the fixed body.
+  pdp.grants["alice"] = {"explorer.read@service:db/host:prod"};
+  {
+    const auto r = handle(rpc("ping", meta, "7"), modern_headers("ping"));
+    CHECK_EQ(r.http_status, 403);
+    CHECK_EQ(r.rpc_error, kRpcForbidden);
+    CHECK_EQ(r.body, std::string(R"({"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"forbidden"}})"));
+    CHECK_EQ(pdp.asked.back().second.size(), size_t(1));
+    CHECK_EQ(question_text(pdp.asked.back().second.front()), std::string("mcp.session@service:db"));
+    const auto discover = handle(rpc("server/discover", meta, "7"), modern_headers("server/discover"));
+    CHECK_EQ(discover.http_status, 403);
+    CHECK_EQ(discover.body, r.body);
+    const auto note = handle(R"({"jsonrpc":"2.0","method":"notifications/initialized"})", McpRequestHeaders{});
+    CHECK_EQ(note.http_status, 403);
+    CHECK(note.body.empty());  // a refusal before the id is known has no body (binding 5.6a)
+    const auto legacy = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"2025-11-25"})"), key, backend, info, now, "");
+    CHECK_EQ(legacy.http_status, 403);
+    // Any other method asks the session first: the answer does not tell whether the method exists.
+    CHECK_EQ(handle(rpc("resources/list", meta, "7"), modern_headers("resources/list")).http_status, 403);
+  }
+  // With the grant, ping answers in the two generations (U98), and the notification gets 202.
+  pdp.grants["alice"] = {"mcp.session@service:db"};
+  {
+    const auto modern = handle(rpc("ping", meta, "7"), modern_headers("ping"));
+    CHECK_EQ(modern.http_status, 200);
+    CHECK(parse(modern.body)["result"].IsObject());
+    CHECK_EQ(mcp_handle_message(rpc("ping"), key, backend, info, now, "").http_status, 200);
+    CHECK_EQ(handle(R"({"jsonrpc":"2.0","method":"notifications/initialized"})", McpRequestHeaders{}).http_status, 202);
+    CHECK_EQ(handle(rpc("server/discover", meta, "7"), modern_headers("server/discover")).http_status, 200);
+    // An unknown method: the message has no name of the request (binding 5.6).
+    const auto unknown = handle(rpc("INJECTED-MARKER-7f3a", meta, "7"), modern_headers("INJECTED-MARKER-7f3a"));
+    CHECK_EQ(unknown.rpc_error, kRpcMethodNotFound);
+    CHECK(unknown.body.find("INJECTED-MARKER-7f3a") == std::string::npos);
+  }
+  // U91, U28: no valid answer is 503 and -32603, for a ping, for tools/list and for tools/call. Never a 403.
+  pdp.fails = true;
+  {
+    const auto ping = handle(rpc("ping", meta, "7"), modern_headers("ping"));
+    CHECK_EQ(ping.http_status, 503);
+    CHECK_EQ(ping.rpc_error, kRpcInternalError);
+    CHECK_EQ(parse(ping.body)["id"].GetInt(), 7);
+    CHECK_EQ(handle(R"({"jsonrpc":"2.0","method":"notifications/initialized"})", McpRequestHeaders{}).http_status, 503);
+    const auto list = handle(rpc("tools/list", meta, "7"), modern_headers("tools/list"));
+    CHECK_EQ(list.http_status, 503);
+    CHECK_EQ(list.rpc_error, kRpcInternalError);
+    const auto call = handle(rpc("tools/call", R"({"name":"list_databases","arguments":{"host":"prod"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})", "7"),
+                             modern_headers("tools/call", "list_databases"));
+    CHECK_EQ(call.http_status, 503);
+    CHECK_EQ(call.rpc_error, kRpcInternalError);
+    CHECK(inner.calls.empty());
+  }
+  pdp.fails = false;
+
+  // U26, U88, U89, U90, U94: tools/list, a refused tool and an unknown tool.
+  pdp.grants["alice"] = {"mcp.session@service:db", "explorer.read@service:db/host:prod"};
+  {
+    const auto list = handle(rpc("tools/list", meta, "7"), modern_headers("tools/list"));
+    CHECK_EQ(list.http_status, 200);
+    const auto names = list_names(list);
+    CHECK(std::find(names.begin(), names.end(), "list_databases") != names.end());
+    CHECK(std::find(names.begin(), names.end(), "run_query") == names.end());
+    // The host is required: the schema says it (binding 3.2).
+    CHECK(list.body.find("Optional when the key has one host") == std::string::npos);
+    CHECK(list.body.find("Required: the name of one host") != std::string::npos);
+    const auto refused = handle(rpc("tools/call", R"({"name":"run_query","arguments":{"host":"prod","sql":"select 1"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})", "7"),
+                                modern_headers("tools/call", "run_query"));
+    CHECK_EQ(refused.http_status, 200);
+    CHECK_EQ(refused.rpc_error, kRpcInvalidParams);
+    CHECK_EQ(std::string(parse(refused.body)["error"]["message"].GetString()), std::string("Unknown tool"));
+    const std::string marker = "INJECTED-MARKER-7f3a";
+    const auto unknown = handle(rpc("tools/call", "{\"name\":\"" + marker + "\",\"arguments\":{\"x\":\"" + marker + "\"},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\"}}", "7"),
+                                modern_headers("tools/call", marker));
+    CHECK_EQ(unknown.rpc_error, kRpcInvalidParams);
+    CHECK(unknown.body.find(marker) == std::string::npos);
+    CHECK_EQ(std::string(parse(unknown.body)["error"]["message"].GetString()), std::string("Unknown tool"));
+    // Arguments that are not an object get the same answer when the tool is refused.
+    const auto odd = handle(rpc("tools/call", R"({"name":"run_query","arguments":5,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})", "7"),
+                            modern_headers("tools/call", "run_query"));
+    CHECK_EQ(std::string(parse(odd.body)["error"]["message"].GetString()), std::string("Unknown tool"));
+    CHECK(inner.calls.empty());
+  }
+  // A call that is allowed runs; the ceilings of the answer reach the tool. list_hosts gets the visible hosts.
+  pdp.limits["explorer.read"] = {{"max_rows", 7}};
+  {
+    const auto ok = handle(rpc("tools/call", R"({"name":"list_databases","arguments":{"host":"prod"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})", "7"),
+                           modern_headers("tools/call", "list_databases"));
+    CHECK_EQ(ok.http_status, 200);
+    CHECK(parse(ok.body).HasMember("result"));
+    CHECK(inner.ceilings.max_rows && *inner.ceilings.max_rows == 7);
+    CHECK_EQ(pdp.asked.back().first, std::string("alice"));
+    pdp.limits["explorer.read"] = {{"max_conformance_unknown", 5}};
+    const auto no = handle(rpc("tools/call", R"({"name":"list_databases","arguments":{"host":"prod"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})", "7"),
+                           modern_headers("tools/call", "list_databases"));
+    CHECK_EQ(no.rpc_error, kRpcInvalidParams);  // U92: a ceiling that the service cannot apply is a refusal
+    pdp.limits.clear();
+    const auto hosts = handle(rpc("tools/call", R"({"name":"list_hosts","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})", "7"),
+                              modern_headers("tools/call", "list_hosts"));
+    CHECK_EQ(hosts.http_status, 200);
+    CHECK(inner.visible.has_value() && *inner.visible == (std::vector<std::string>{"prod"}));
+  }
+
+  // U25 (F10): the header 2026-07-28 and a legacy version in _meta give 400 and -32020, in the two modes.
+  {
+    const std::string legacy_meta = R"({"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-11-25"}})";
+    const auto r = handle(rpc("ping", legacy_meta, "7"), modern_headers("ping"));
+    CHECK_EQ(r.http_status, 400);
+    CHECK_EQ(r.rpc_error, kRpcHeaderMismatch);
+    FakeBackend plain;
+    const McpKey own = a_key({"*"}, {"*"});
+    const auto in_keys = mcp_handle_message(rpc("ping", legacy_meta, "7"), own, plain, info, now, modern_headers("ping"));
+    CHECK_EQ(in_keys.http_status, 400);
+    CHECK_EQ(in_keys.rpc_error, kRpcHeaderMismatch);
+    // The same version in the header and in _meta is a legacy request.
+    McpRequestHeaders same;
+    same.has_protocol_version = true;
+    same.protocol_version = "2025-11-25";
+    CHECK_EQ(mcp_handle_message(rpc("ping", legacy_meta, "7"), own, plain, info, now, same).http_status, 200);
+    // Another legacy version in the header is a mismatch too.
+    same.protocol_version = "2025-06-18";
+    CHECK_EQ(mcp_handle_message(rpc("ping", legacy_meta, "7"), own, plain, info, now, same).rpc_error, kRpcHeaderMismatch);
+    // The mode "keys" keeps its answers: a ping of the version 2026-07-28 is not a method, and the message names the method.
+    const auto unknown_ping = mcp_handle_message(rpc("ping", meta, "7"), own, plain, info, now, modern_headers("ping"));
+    CHECK_EQ(unknown_ping.rpc_error, kRpcMethodNotFound);
+    CHECK(contains(parse(unknown_ping.body)["error"]["message"].GetString(), "ping"));
+  }
+}
+
+// The tools in the identity mode: the host is an argument, the ceilings lower the limits, list_hosts shows the visible hosts.
+void test_identity_tools() {
+  FakeDb db;
+  McpToolsConfig config = tools_config();
+  config.hosts = {{"prod", "Production"}};
+  McpTools tools(config, db);
+  const McpKey key = mcp_identity_key("alice");
+  McpKey own = a_key({"*"}, {"*"});
+  own.hosts = {"*"};
+  // One host in the configuration: a key of ChDash takes it by default, the identity mode never does (conformance case U87).
+  McpToolOutcome o;
+  auto doc = call(tools, own, "list_databases", "{}", &o);
+  CHECK(!o.is_error);
+  doc = call(tools, key, "list_databases", "{}", &o);
+  CHECK(o.is_error);
+  CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("host_required"));
+  CHECK(db.calls.size() == 1);  // only the call of the key of ChDash
+  doc = call(tools, key, "list_databases", R"({"host":"nope"})", &o);
+  CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_found"));
+  doc = call(tools, key, "list_databases", R"({"host":"prod"})", &o);
+  CHECK(!o.is_error);
+  // include_cost needs the host of a key.
+  doc = call(tools, key, "mcp_analysis_my_usage", R"({"include_cost":true})", &o);
+  CHECK(o.is_error);
+
+  // The ceilings lower the limits, never raise them.
+  rapidjson::Document sql = args_of(R"({"host":"prod","sql":"select 1"})");
+  McpCallInfo info;
+  info.ceilings.max_rows = 2;
+  info.ceilings.max_duration_seconds = 3;
+  info.ceilings.max_rows_read = 500;
+  info.ceilings.max_memory_bytes = 4096;
+  info.ceilings.max_result_bytes = 2048;
+  db.calls.clear();
+  tools.call_tool_for(key, "run_query", sql, 0, info);
+  CHECK(!db.calls.empty());
+  CHECK_EQ(db.calls.back().limits.max_rows, int64_t(2));
+  CHECK_EQ(db.calls.back().limits.timeout_seconds, int64_t(3));
+  CHECK_EQ(db.calls.back().limits.max_rows_to_read, int64_t(500));  // the ceiling is lower than the configuration
+  CHECK_EQ(db.calls.back().limits.max_memory_bytes, int64_t(4096));
+  CHECK_EQ(db.calls.back().limits.max_bytes, int64_t(2048));
+  info.ceilings = McpCeilings();
+  info.ceilings.max_rows = 5000;  // above the configuration (1000): no effect
+  info.ceilings.max_duration_seconds = 99999;
+  tools.call_tool_for(key, "run_query", sql, 0, info);
+  CHECK_EQ(db.calls.back().limits.max_rows, int64_t(1000));
+  CHECK_EQ(db.calls.back().limits.timeout_seconds, int64_t(30));
+  // No ceiling: the limits of the configuration.
+  tools.call_tool_for(key, "run_query", sql, 0, McpCallInfo{});
+  CHECK_EQ(db.calls.back().limits.max_rows, int64_t(1000));
+
+  // list_hosts shows the hosts that the PDP made visible.
+  McpToolsConfig two = tools_config();
+  McpTools both(two, db);
+  const rapidjson::Document nothing = args_of("{}");
+  McpCallInfo visible;
+  visible.visible_hosts = std::vector<std::string>{"stage"};
+  const McpToolOutcome listed = both.call_tool_for(key, "list_hosts", nothing, 0, visible);
+  const auto hosts = parse(listed.json);
+  CHECK_EQ(hosts["hosts"].Size(), 1u);
+  CHECK_EQ(std::string(hosts["hosts"][0]["name"].GetString()), std::string("stage"));
+  const auto all_hosts = parse(both.call_tool_for(key, "list_hosts", nothing, 0, McpCallInfo{}).json);
+  CHECK_EQ(all_hosts["hosts"].Size(), 2u);
+}
+
+// The usage of the identity mode: one entry for each subject, kept in the file, never deleted, and bounded.
+void test_identity_usage(const std::string& dir) {
+  const int64_t now = 1'800'007'200;
+  const McpKey key = mcp_identity_key("key:9b1c04e2aa71f0c3");
+  const auto count = [&](McpUsage& usage, const McpKey& who, int64_t at, const std::string& tool) {
+    McpUsageEvent event;
+    event.key_id = who.id;
+    event.key_name = who.name;
+    event.key_host = "";
+    event.key_source = who.source;
+    event.at = at;
+    event.kind = McpUsageKind::ToolCall;
+    event.tool = tool;
+    event.status = "ok";
+    event.user_agent = "agent/1";
+    usage.record(event);
+  };
+  {
+    McpUsage usage(usage_options(dir, "ident"), now);
+    usage.sync_live_keys({}, now);
+    count(usage, key, now + 1, "list_hosts");
+    count(usage, key, now + 2, "list_hosts");
+    CHECK_EQ(usage.identity_keys().size(), size_t(1));
+    CHECK_EQ(usage.identity_keys().front().id, key.id);
+    CHECK_EQ(usage.identity_keys().front().source, std::string(kMcpSourceIdentity));
+    CHECK(usage.save(now + 10));
+  }
+  // A new process reads the file (the name and the source of a subject are valid) and counts on. No key store deletes the subject.
+  McpUsage again(usage_options(dir, "ident"), now + 20);
+  again.sync_live_keys({}, now + 20);
+  CHECK_EQ(again.identity_keys().size(), size_t(1));
+  count(again, key, now + 30, "list_hosts");
+  const McpUsageKeyRef ref = mcp_usage_key_ref(key);
+  CHECK(ref.host.empty());
+  rapidjson::StringBuffer sb;
+  McpJsonWriter w(sb);
+  CHECK(again.write_detail(w, key.id, &ref, *mcp_usage_window("24h", 90, now + 40), now + 40));
+  const auto detail = parse(sb.GetString());
+  CHECK_EQ(detail["totals"]["requests"].GetUint64(), uint64_t(3));
+  CHECK_EQ(std::string(detail["source"].GetString()), std::string(kMcpSourceIdentity));
+  // The listing has the subject as a live key, not as "elsewhere".
+  rapidjson::StringBuffer list_sb;
+  McpJsonWriter list_w(list_sb);
+  again.write_list(list_w, again.identity_keys(), *mcp_usage_window("24h", 90, now + 40), now + 40);
+  const auto listed = parse(list_sb.GetString());
+  bool found = false;
+  for (const auto& row : listed["keys"].GetArray()) {
+    if (std::string(row["id"].GetString()) == key.id) {
+      found = true;
+      CHECK(!row["elsewhere"].GetBool());
+    }
+  }
+  CHECK(found);
+}
+
+// The usage of subjects is bounded: a new subject past the largest count is not counted, so the file stays valid.
+void test_identity_usage_bound() {
+  McpUsageOptions options;
+  options.instance = "bound";
+  McpUsage usage(options, 1'800'000'000);
+  const int64_t now = 1'800'000'100;
+  for (size_t i = 0; i < kMcpUsageMaxEntries + 5; ++i) {
+    const McpKey who = mcp_identity_key("subject-" + std::to_string(i));
+    McpUsageEvent event;
+    event.key_id = who.id;
+    event.key_name = who.name;
+    event.key_source = who.source;
+    event.at = now;
+    event.kind = McpUsageKind::Request;
+    event.method = "ping";
+    event.status = "ok";
+    usage.record(event);
+  }
+  CHECK_EQ(usage.identity_keys().size(), kMcpUsageMaxEntries);
+  // A subject that has an entry is still counted.
+  const McpKey first = mcp_identity_key("subject-0");
+  McpUsageEvent event;
+  event.key_id = first.id;
+  event.key_name = first.name;
+  event.key_source = first.source;
+  event.at = now + 1;
+  event.kind = McpUsageKind::Request;
+  event.method = "ping";
+  event.status = "ok";
+  usage.record(event);
+  CHECK_EQ(usage.identity_keys().size(), kMcpUsageMaxEntries);
+}
+
+void test_identity_mode(const std::string& dir) {
+  test_identity_key_and_ceilings();
+  test_identity_access();
+  test_identity_protocol();
+  test_identity_tools();
+  test_identity_usage(dir);
+  test_identity_usage_bound();
 }
 
 // A ClickHouse error can quote a value of a table (contract 5.2). The error result keeps that text out of its message: the text is in
@@ -8425,6 +8976,7 @@ int main() {
   test_observability();
   test_api_tools();
   test_analysis_tools();
+  test_identity_mode(make_temp_dir());
   test_tool_support();
   test_tool_errors_frame_the_text_of_clickhouse();
   test_config(dir);

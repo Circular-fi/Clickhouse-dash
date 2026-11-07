@@ -30,6 +30,7 @@
 #include "mcp_cost.hpp"
 #include "mcp_creator_access.hpp"
 #include "mcp_keys.hpp"
+#include "mcp_subject_access.hpp"
 #include "mcp_tools.hpp"
 #include "mcp_usage.hpp"
 #include "otel_caches.hpp"
@@ -127,6 +128,10 @@ struct McpUsageSettings {
   // It is off by default. Every limit is a global cap. A key can only lower a limit.
 struct McpSettings {
   bool enabled = false;
+  // How POST /mcp knows the caller: "keys" (the keys of ChDash, the default) or "identity" (the identity token of the access gateway,
+  // with the PDP as the only authority). Never both on one endpoint.
+  std::string auth_mode = "keys";
+  bool identity_auth() const { return auth_mode == "identity"; }
   // The JSON file of the keys that are made on the MCP page. An empty value means no keys from the UI.
   std::string storage_file;
   // The older form of keys.mode (deprecated). false is the static mode, and true is the hybrid mode.
@@ -798,6 +803,8 @@ private:
   std::unique_ptr<PdpClient> pdp_;
   // The access of humans for the MCP keys of the page (mcp_creator_access.hpp). Set in the authzen mode when MCP is on.
   std::unique_ptr<McpCreatorAccess> mcp_creator_;
+  // The access of the identity mode of POST /mcp (mcp_subject_access.hpp). Set when mcp.auth_mode = "identity" (it needs the authzen mode).
+  std::unique_ptr<McpSubjectAccess> mcp_subject_;
   // The OTLP export of the spans and of the call log of MCP. The pointer is null when telemetry.enabled is false.
   // A request only puts its items in the queue of the exporter.
   // The destructor sends the items that wait, within the time of the stop.
