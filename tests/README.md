@@ -395,7 +395,7 @@ The exporter itself has C++ unit tests. They cover the queue, the batches, the d
 
 ### Access of humans
 
-`backend-functional/test_access.py` checks the access of humans (`docs/access.md`; the cases U02 to U10 of section 11 of the MCP server contract). It checks the identity token. The cases are: no token, a wrong signature, a wrong `iss`, `aud`, `exp` or life value, a token in a cookie or a query parameter, and two copies of the header. It checks the list of actions and the AuthZEN requests that the PDP receives. It checks `403` on a `false` decision, on an error and on a timeout of the PDP.
+`backend-functional/test_access.py` checks the access of humans (`docs/access.md`). The names of the tests say what they check. A comment above a test gives the ProcurAuth case id when the behaviour is the same. It checks the identity token. The cases are: no token, a wrong signature, a wrong `iss`, `aud`, `exp` or life value, a token in a cookie or a query parameter, and two copies of the header. It checks the list of actions and the AuthZEN requests that the PDP receives. It checks `403` on a `false` decision, on an error and on a timeout of the PDP.
 
 The test also checks the cache of the decisions and `readonly = 1` for a run without `query.run.write`. It checks a decision for one database in the Explorer. It checks the hosts: the instance has two hosts (`local` and `other`). A grant on one host shows and allows that host only. A grant on one database of one host allows that database only. The one-level grant of 1.0.8 covers nothing, and `readonly = 1` follows the host of the run. A grant on one database shows its host (the match `subtree`), and each operation still asks with `node`. It checks the one batch of `/api/version`, the MCP endpoint that keeps its keys, and the CLIENT span of a call to the PDP. It signs the tokens with the test keys of `config/secrets/access-identity-keys.pem`. The signing code is `backend-functional/identity_tokens.py`, which is pure Python.
 
@@ -405,7 +405,7 @@ The test also checks the cache of the decisions and `readonly = 1` for a run wit
 | `MCP_IDENTITY_BASE_URL` | `config/mcp.identity.hcl` (compose service `chdash_mcp_identity`): `mcp.auth_mode = "identity"`, two hosts, the fake PDP of `ACCESS_PDP_URL`, a cache of 1 s |
 | `ACCESS_PDP_URL` | the fake PDP (compose service `access_pdp`, `otel-fixture/fake_pdp.py`): it keeps each request that it receives (`GET /control/received`) and answers what a test asks (`POST /control/answer`: a default, actions to deny or allow, and `deny_subjects`, the subjects that it does not know). An entry `action@host:local` covers the host `local` and each database of it: the prefix rule of the grants (contract 11.4). With the match `subtree`, an entry below the resource also gives `true` (addendum 1) |
 | `ACCESS_OTLP_URL` | the fake OTLP receiver of that instance (compose service `access_otlp_receiver`) |
-| `ACCESS_LOGS_CMD` | optional: a command that prints the log of `chdash_access`, for the decision records (U10) |
+| `ACCESS_LOGS_CMD` | optional: a command that prints the log of `chdash_access`, for the decision records |
 
 The units below it have C++ unit tests. `native/access_test.cpp` (CMake option `CHDASH_BUILD_ACCESS_TESTS`, target `chdash_access_test`) covers them. It tests the signatures against the vectors of the RFCs and the PEM keys. It tests the identity token, the rule of each route, and the client of the PDP on a fake transport. `harness/test_native_unit_tests.py` runs it when `ACCESS_TEST_BINARY` names it. `native/config_test.cpp` tests the errors of the `access` block.
 
@@ -424,6 +424,12 @@ The formatted text of a query shape (`src/system_query_format.cpp`) is tested. T
 `harness/test_native_unit_tests.py` runs them when `SYSTEM_MONITOR_TEST_BINARY` names the built binary. `frontend/specs/system.spec.js` tests the page in the browser.
 
 `test_system.py` is in the official backend phase (`run-all-tests.py`). It also checks `normalized_formatted` of a shape on a real ClickHouse. The cases are a SELECT with its `AS` column, a syntax error, a text that is too large, and an INSERT. The statements of the formatter are counted in `system.query_log`. Therefore, the test checks that a second request of the shape does not ask again. The two instance-dependent groups skip there.
+
+### Conformance of ProcurAuth
+
+`conformance/run.sh` runs the conformance runner of ProcurAuth (`access-conformance`, role `pep`) against a `chdash` binary. It needs only Docker. The script starts ClickHouse and ChDash (`config/access.conformance.hcl`) in a Docker network. Then it runs the runner with `conformance/profile.json`. It prints the result of each case.
+
+The list `conformance/expected.txt` names the failed cases that are known, each with its reason. The exit code is 1 only for a failed case that the list does not name. The GitHub workflow `conformance.yml` runs the script on request and on a pull request that changes the access code. Refer to [docs/conformance.md](../docs/conformance.md).
 
 ### Query library
 

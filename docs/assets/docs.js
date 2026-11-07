@@ -12,6 +12,7 @@
       ["configuration-reference", "Configuration keys"],
       ["operations", "Operations"],
       ["access", "Access of humans"],
+      ["conformance", "Conformance with ProcurAuth"],
     ]],
     ["Query", [
       ["query-analysis", "Profiling and analysis"],

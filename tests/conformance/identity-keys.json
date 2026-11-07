@@ -1,0 +1,17 @@
+{
+  "keys": [
+    {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "kid": "edge-ed25519",
+      "x": "P7xgCMzIVQtPtGQyW22ST5y0a6o2maegbk8O2wk1BjY"
+    },
+    {
+      "kty": "EC",
+      "crv": "P-256",
+      "kid": "edge-es256",
+      "x": "AHgxA-H8IxXDnL_EWtMsJerNI8A5zktrSWFfDdQKvvs",
+      "y": "EU2vi_FYqjZBRssJETd5njXhVTd8vVeBT3w31m_lVV4"
+    }
+  ]
+}

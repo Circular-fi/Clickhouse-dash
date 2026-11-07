@@ -1,0 +1,69 @@
+{
+  "pep": {
+    "service": "chdash",
+    "token": {
+      "header": "X-Identity-Token",
+      "iss": "https://edge.conformance.test",
+      "max_age_seconds": 300,
+      "skew_seconds": 30,
+      "keys": [
+        {
+          "alg": "Ed25519",
+          "kid": "edge-ed25519",
+          "file": "test-edge-ed25519.pem"
+        },
+        {
+          "alg": "ES256",
+          "kid": "edge-es256",
+          "file": "test-edge-es256.pem"
+        }
+      ]
+    },
+    "pdp": {
+      "listen": "0.0.0.0:8181",
+      "credential_file": "pdp-token"
+    },
+    "answer_cache": false,
+    "options_type": "host",
+    "operations": {
+      "use_plain": {
+        "method": "GET",
+        "path": "/api/explorer/functions?host_id=conf",
+        "action": "explorer.read",
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ]
+      },
+      "use_ceiling": {
+        "method": "GET",
+        "path": "/api/explorer/functions?host_id=conf",
+        "action": "explorer.read",
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "ceiling": "max_rows",
+        "ceiling_value": 100
+      },
+      "use_service": {
+        "method": "GET",
+        "path": "/api/query-library?host_id=conf",
+        "action": "library.read"
+      }
+    }
+  },
+  "timeouts": {
+    "request_seconds": 20,
+    "case_seconds": 60,
+    "settle_ms": 100
+  }
+}

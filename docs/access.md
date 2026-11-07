@@ -2,7 +2,9 @@
 
 This document uses ASD-STE100 Simplified Technical English.
 
-ChDash obeys section 11 of the MCP server contract (`mcp-server-contract/SPEC.md`, "Access of humans (AuthZEN)"). This section applies to the pages and to the API of ChDash. It does not apply to the MCP endpoint `POST /mcp`: the agents use the keys of the `mcp` block ([mcp.md](mcp.md)).
+ChDash is a service of ProcurAuth, a profile of AuthZEN 1.0 (`procurauth-protocol.md`). ProcurAuth defines the resources (section 4), the action document and the route of the options (section 5), the limits and the ceilings (sections 6 and 7), the identity token (section 9), the duties of a PEP (section 10) and the reasons (section 11). The tool `access-conformance` of ProcurAuth tests the behaviour of ChDash as a PEP ([conformance.md](conformance.md)).
+
+The rules of the pages (the navigation and the hidden hosts) are the choice of ChDash. They follow section 11 of the MCP server contract (`mcp-server-contract/SPEC.md`, "Access of humans (AuthZEN)"). This document applies to the pages and to the API of ChDash. It does not apply to the MCP endpoint `POST /mcp`: the agents use the keys of the `mcp` block ([mcp.md](mcp.md)).
 
 ## Principle
 
@@ -191,7 +193,7 @@ When you remove or rename an action, or change its resource types, write the cha
 
 ## Resources and hosts
 
-ChDash 1.1.0 and later put each resource in a tree under the service (contract 11.4, decision of 2026-10-18):
+ChDash 1.1.0 and later put each resource in a tree under the service (ProcurAuth 4.1 and 4.3):
 
 ```text
 service (identity.audience)
@@ -223,7 +225,7 @@ The PDP keeps the grants (for example the portal). A grant has the form `<action
 
 ### Match
 
-The match tells the PDP which grants apply to a question (addendum 1 of the format, contract 11.5):
+The match tells the PDP which grants apply to a question (ProcurAuth 4.4):
 
 | Match | A grant applies when its path is | ChDash uses it for |
 |---|---|---|
@@ -305,7 +307,7 @@ Rules:
 
 - A grant of one level on a database (`<action> on service:<id>/database:<name>`) covered that database on every host. Its chain does not follow the tree any more, so it covers nothing. Give the grant again on the database of one host: `<action> on service:<id>/host:<host>/database:<name>`.
 - A grant on the service does not change.
-- The PDP must read `properties.ancestors`, the match of the `context` and the top-level `resource_types` of the list of actions (contract 11.4 and 11.5). Update the PDP before you update ChDash. A PDP of the 1.0.8 format does not know the hosts: with it, only the grants on the service give the same decisions.
+- The PDP must read `properties.ancestors`, the match of the `context` and the top-level `resource_types` of the list of actions (ProcurAuth 4.1, 4.4 and 5.2). Update the PDP before you update ChDash. A PDP of the 1.0.8 format does not know the hosts: with it, only the grants on the service give the same decisions.
 
 ## Decisions
 
@@ -551,13 +553,17 @@ The code of the signatures does not use OpenSSL. ChDash verifies the signatures 
 
 ## Tests
 
-| Contract case | Test |
+The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run it with `tests/conformance/run.sh` ([conformance.md](conformance.md)). The tests of ChDash below test the choices of ChDash and the routes that the cases do not reach.
+
+| Behaviour | Test |
 |---|---|
-| U01 (no `access` block) | `tests/native/config_test.cpp` (`test_access_block`), and `test_u01_...` of `tests/backend-functional/test_access.py` when `MCP_STARTUP_CMD` is set |
-| U02 to U09 | `tests/backend-functional/test_access.py`, against the compose services `chdash_access` (`tests/config/access.authzen.hcl`) and `access_pdp` (the fake PDP, `tests/otel-fixture/fake_pdp.py`) |
-| U10 (the log) | `test_u10_...` of `test_access.py` when `ACCESS_LOGS_CMD` prints the log of `chdash_access` |
-| MCP binding U18, U23, U25 to U31 and U85 to U99 (the mode `identity`) | `tests/native/mcp_test.cpp` (`test_identity_mode`), and the identity tests of `tests/backend-functional/test_mcp.py` against `chdash_access` |
-| U11 (the reason `unknown_subject`) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
+| A configuration without an `access` block does not start | `tests/native/config_test.cpp` (`test_access_block`), and `test_a_configuration_without_an_access_block_does_not_start` of `tests/backend-functional/test_access.py` when `MCP_STARTUP_CMD` is set |
+| The identity token (status `401`) | `test_a_request_without_a_token_gets_401`, `test_a_token_that_is_not_valid_gets_401` and `test_a_token_outside_the_identity_header_gets_401` of `test_access.py`, against the compose services `chdash_access` (`tests/config/access.authzen.hcl`) and `access_pdp` (the fake PDP, `tests/otel-fixture/fake_pdp.py`) |
+| The action document and its path | `test_the_actions_are_published_without_a_token` and `test_the_former_path_of_the_document_has_no_route` of `test_access.py` |
+| The questions, the decisions and the failures of the PDP | `test_the_pdp_receives_the_subject_the_action_and_the_host`, `test_a_false_decision_gives_403_with_the_action_and_a_true_one_200`, `test_no_answer_or_an_error_of_the_pdp_gives_503` and `test_a_change_of_the_answer_applies_after_cache_ttl_at_most` of `test_access.py` |
+| The log of the decisions | `test_the_log_has_each_decision` of `test_access.py` when `ACCESS_LOGS_CMD` prints the log of `chdash_access` |
+| The identity mode of MCP (MCP binding, cases U18, U23, U25 to U31 and U85 to U99) | `tests/native/mcp_test.cpp` (`test_identity_mode`), and `tests/backend-functional/test_mcp_identity.py` against the compose service `chdash_mcp_identity` (`tests/config/mcp.identity.hcl`) |
+| The reason `unknown_subject` (ProcurAuth 11.1) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).
 
