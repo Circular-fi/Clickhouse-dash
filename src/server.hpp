@@ -518,9 +518,10 @@ private:
   // with Retry-After, or 503). The ceilings of the answer lower the ceilings of the stream (access_ceilings).
   bool access_use_export(httplib::Response& res, const std::string& host_id);
   // The use of a run of SQL (ProcurAuth 6.4, 10.1; docs/access.md, "Budgets"): the route has AccessRule::spend, so its check asked nothing.
-  // The handler calls this function once it has the SQL and before it starts the run. The function classifies the SQL, asks the other
-  // run action without context.usage, then asks the action of the use with context.usage. It sets readonly and the ceilings. Return
-  // false after the function writes the refusal (403, 429 with Retry-After, or 503). Return true when no check applies.
+  // The handler calls this function once it has the SQL and before it starts the run. The function classifies the SQL, asks the action
+  // of the use with context.usage, then the other run action without it (access_run_use gives the order and the second try). It sets
+  // readonly and the ceilings. Return false after the function writes the refusal (403, 429 with Retry-After, or 503). Return true when
+  // no check applies.
   bool access_use_run(httplib::Response& res, const std::string& host_id, const std::vector<std::string>& sql_texts);
   // One question with context.usage for the subject of this request, for an action that the document lists with a budget (else one
   // question without it). A true answer with a ceiling that ChDash cannot apply is false. *pdp_true (when not null) receives the answer of

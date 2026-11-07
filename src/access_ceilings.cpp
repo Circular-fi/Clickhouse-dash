@@ -203,29 +203,39 @@ AccessRunUse access_run_use(SqlStatementClass sql_class, const std::function<Acc
   const std::string second = read_class ? "query.run.write" : "query.run.read";
   out.action = first;
 
-  const AccessDecision other = ask(second);
-  if (other.failed) {
-    out.refusal = other;
+  // 1. The action of the use, with context.usage. A run needs one of the two run actions: the other action is no required permission
+  // (ProcurAuth 5.5a), so no question without context.usage comes before this one (10.1).
+  bool first_true = false;
+  const AccessDecision first_decision = ask_use(first, &first_true);
+  AccessDecision second_decision;
+  if (first_decision.allowed) {
+    // 2. The other action, without context.usage (6.6). It tells readonly and the ceilings of the other class. The unit is taken already:
+    // a failure here gives 503, and the unit stays counted.
+    second_decision = ask(second);
+    if (second_decision.failed) {
+      out.refusal = second_decision;
+      out.action = second;
+      return out;
+    }
+  } else {
+    // A plain false: no budget_exceeded, no failure, no true answer that was turned false or that had no units. Nothing was counted, so
+    // the PEP chooses the other action for the use, in its order of preference (10.1). It never does so after an answer that took a unit.
+    const bool plain_false = !first_decision.failed && !first_decision.usage_invalid && !first_true && first_decision.reason != PdpReason::BudgetExceeded;
+    if (!plain_false) {
+      out.refusal = first_decision;
+      return out;
+    }
+    bool second_true = false;
+    second_decision = ask_use(second, &second_true);
+    if (!second_decision.allowed) {
+      out.refusal = access_refusal_of({second_decision, first_decision});
+      if (second_decision.failed || second_decision.reason == PdpReason::BudgetExceeded) out.action = second;
+      return out;
+    }
     out.action = second;
-    return out;
   }
-  bool pdp_true = false;
-  const AccessDecision first_decision = ask_use(first, &pdp_true);
-  AccessDecision second_decision = other;
-  AccessDecision used = first_decision;
-  const bool plain_false = !first_decision.allowed && !first_decision.failed && !first_decision.usage_invalid && !pdp_true &&
-                           first_decision.reason != PdpReason::BudgetExceeded;
-  if (plain_false && other.allowed) {
-    out.action = second;
-    used = ask_use(second, &pdp_true);
-    second_decision = used;
-  }
-  if (!used.allowed) {
-    out.refusal = access_refusal_of({used, first_decision, other});
-    return out;
-  }
-  // The decision of each action is final here: the action of the use has its answer with context.usage (its ceilings), the other one has
-  // the answer without it (or, after the second try, the first one is false).
+  // The decision of each action is final: the action of the use has its answer with context.usage (its ceilings), the other one has the
+  // answer without it, or a plain false (after the second try, the first action).
   const AccessDecision& read = read_class ? first_decision : second_decision;
   const AccessDecision& write = read_class ? second_decision : first_decision;
   out.allowed = true;

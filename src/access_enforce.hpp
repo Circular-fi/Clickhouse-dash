@@ -22,13 +22,16 @@ void access_enforce_ceilings(const std::string& request_id, const std::vector<Ac
                              std::vector<AccessDecision>* decisions, const AccessFeatures& features, bool can_apply);
 
 // The use of a run of SQL (ProcurAuth 6.4, 10.1; docs/access.md, "Budgets"), as pure logic over the two functions that ask the PDP. A person
-// can hold query.run.read, query.run.write or both. The class of the SQL gives the action of the use: query.run.read for a read, else
-// query.run.write (a write, or an SQL that the code does not know). The other action is the other permission of the operation.
-//   1. `ask(second)`: the other action, without context.usage. A failed answer refuses the run (503) before any question takes a unit.
-//   2. `ask_use(first)`: the action of the use, with context.usage. It takes the unit.
-//   3. Only when the answer of step 2 is a plain false (no budget_exceeded, no failure, no true answer that was turned false, no true
-//      answer without units) and the other action is true: `ask_use(second)`. The PEP chooses the action of the use in its order of
-//      preference (10.1). It never asks the second action after an answer that took a unit.
+// can hold query.run.read, query.run.write or both, and one of them is enough. The class of the SQL gives the action of the use:
+// query.run.read for a read, else query.run.write (a write, or an SQL that the code does not know). The other action is not a required
+// permission: it gives readonly and the ceilings of the other class.
+//   1. `ask_use(first)`: the action of the use, with context.usage. It takes the unit. No question without usage comes before it: the case
+//      U04 of the ProcurAuth runner answers only the question with usage, and 10.1 forbids the same question without it.
+//   2. When it is true: `ask(second)`, the other action without context.usage. A failure gives 503 (the unit stays counted).
+//   3. When it is a plain false (no budget_exceeded, no failure, no true answer that was turned false, no true answer without units):
+//      `ask_use(second)`. The PEP chooses the action of the use in its order of preference (10.1). It never asks the second action after
+//      an answer that took a unit.
+//   4. Any other answer refuses the run: budget_exceeded gives 429, a failure 503, a denial 403.
 // `ask_use` gives *pdp_true = true when the PDP answered true (it took the unit), also when the server then turned the answer false
 // because of a ceiling that it cannot apply (7.5).
 struct AccessRunUse {

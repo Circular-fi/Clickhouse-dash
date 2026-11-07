@@ -2103,8 +2103,9 @@ AccessDecision run_budget(uint64_t retry_after) {
 }
 
 void test_run_use() {
-  // A read, the person has both actions: the other action (write) is asked without usage, the action of the use (read) with usage, one
-  // time. The ceilings of each action come from its own answer; the answer of the use gives the ceilings of the use.
+  // A read, the person has both actions: the action of the use (read) is asked with usage, one time, and nothing before it. Then the other
+  // action (write) is asked without usage. The ceilings of each action come from its own answer; the answer of the use gives the ceilings
+  // of the use.
   RunScript s;
   s.plain["query.run.write"] = run_true({{"max_rows", 7}});
   s.use["query.run.read"] = run_true({{"max_rows", 50}}, 1);
@@ -2136,55 +2137,62 @@ void test_run_use() {
   }
 
   // The person who holds only the other action: a plain false of the first use, then the other action with usage (10.1, in the order of
-  // preference). Two questions with usage, never more; the first took nothing.
+  // preference). Two questions with usage, never more; the first took nothing. No question without usage is needed.
   s = RunScript{};
-  s.plain["query.run.write"] = run_true({{"max_rows", 3}});
   s.use["query.run.read"] = run_false();
   s.use["query.run.write"] = run_true({{"max_rows", 4}}, 1);
   out = s.run(SqlStatementClass::Read);
   CHECK(out.allowed && out.action == "query.run.write" && !out.read_only && !out.ceilings.has_read && out.ceilings.has_write);
-  CHECK((s.use_asked == std::vector<std::string>{"query.run.read", "query.run.write"}));
+  CHECK((s.use_asked == std::vector<std::string>{"query.run.read", "query.run.write"}) && s.plain_asked.empty());
   CHECK_EQ(out.ceilings.write.max_rows, uint64_t(4));
 
-  // The other action is false: no second question with usage; the refusal is a 403.
+  // Neither action is true: two questions with usage, and the refusal is a 403 that names the first action.
   s = RunScript{};
-  s.plain["query.run.write"] = run_false();
   s.use["query.run.read"] = run_false();
+  s.use["query.run.write"] = run_false();
   out = s.run(SqlStatementClass::Read);
   CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Denied && out.action == "query.run.read");
-  CHECK_EQ(s.use_asked.size(), size_t(1));
+  CHECK_EQ(s.use_asked.size(), size_t(2));
+  CHECK(s.plain_asked.empty());
+  // The second try gives budget_exceeded or a failure: the refusal is the one of the second answer.
+  s.use["query.run.write"] = run_budget(8);
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::BudgetExceeded && out.refusal.retry_after == uint64_t(8) && out.action == "query.run.write");
+  s.use["query.run.write"] = run_failed();
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed);
 
-  // budget_exceeded: 429 with the retry_after of the PDP; the other action is never asked with usage.
+  // budget_exceeded: 429 with the retry_after of the PDP; nothing else is asked (the case U04 of the runner has no other answer).
   s = RunScript{};
-  s.plain["query.run.write"] = run_true();
   s.use["query.run.read"] = run_budget(12);
   out = s.run(SqlStatementClass::Read);
   CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::BudgetExceeded && out.refusal.retry_after == uint64_t(12));
-  CHECK_EQ(s.use_asked.size(), size_t(1));
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.empty());
 
   // A failure of the use: 503, and nothing else is asked.
   s = RunScript{};
-  s.plain["query.run.write"] = run_true();
   s.use["query.run.read"] = run_failed();
   out = s.run(SqlStatementClass::Read);
   CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed);
-  CHECK_EQ(s.use_asked.size(), size_t(1));
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.empty());
 
-  // A failure of the other action: 503 before any question takes a unit.
+  // A failure of the other action, after the use took its unit: 503. The unit stays counted.
   s = RunScript{};
   s.plain["query.run.write"] = run_failed();
   s.use["query.run.read"] = run_true({}, 1);
   out = s.run(SqlStatementClass::Read);
-  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed && s.use_asked.empty());
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed && out.action == "query.run.write");
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.size() == 1);
 
-  // A true answer without units (the client gives false with usage_invalid): 403, and the person who holds the other action does not try it.
+  // A true answer without units (the client gives false with usage_invalid): 403, and the other action is not tried.
   s = RunScript{};
   s.plain["query.run.write"] = run_true();
   AccessDecision invalid = run_false();
   invalid.usage_invalid = true;
   s.use["query.run.read"] = invalid;
   out = s.run(SqlStatementClass::Read);
-  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Denied && s.use_asked.size() == 1);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Denied);
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.empty());
 
   // A true answer that the server turned false because of a ceiling that it cannot apply: the PDP took the unit, so no second question.
   s = RunScript{};
@@ -2192,7 +2200,7 @@ void test_run_use() {
   s.use["query.run.read"] = run_false();
   s.pdp_true["query.run.read"] = true;
   out = s.run(SqlStatementClass::Read);
-  CHECK(!out.allowed && s.use_asked.size() == 1);
+  CHECK(!out.allowed && s.use_asked.size() == 1 && s.plain_asked.empty());
 }
 
 void test_options_parser() {

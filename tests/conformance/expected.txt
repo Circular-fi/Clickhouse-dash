@@ -12,3 +12,5 @@ U89 # A request that the case writes has no header Mcp-Method: ChDash answers 40
 U91 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
 U94 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
 U98 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U23 # The step of the ping has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5). The step of the tool error passes.
+U95 # The request of the ping has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
