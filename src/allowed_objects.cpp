@@ -55,6 +55,8 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bo
 
 // CHECK GRANT on a connection. Returns nullopt when no row could be read.
 std::optional<bool> select_check_grant(ChExecutor& db, const std::string& expression) {
+  // A check of the ACL is a statement of ChDash, not of a person: the ceilings of the grant never apply (ch_query.hpp, ChInternalScope).
+  ChInternalScope internal;
   bool seen = false;
   bool granted = false;
   db.select("CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
@@ -165,6 +167,8 @@ private:
   // Anything else is a transport error. The connection is not given back to the pool.
   template <typename Fn>
   auto guarded(Fn&& fn) -> decltype(fn()) {
+    // Every statement of the ACL discovery is internal: the ceilings of the grant never apply (ch_query.hpp, ChInternalScope).
+    ChInternalScope internal;
     try {
       return fn();
     } catch (const clickhouse::ServerException& error) {

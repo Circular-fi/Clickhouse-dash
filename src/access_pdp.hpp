@@ -125,6 +125,9 @@ struct AccessDecision {
   // context.error of the item (PdpAnswer::error_status). For the logs only: a client never gets it.
   std::optional<int64_t> error_status;
   std::string error_message;
+  // The name of the first ceiling that made a true answer false because this path cannot apply it (access_enforce_ceilings, ProcurAuth 7.5).
+  // It is empty for any other decision. It is for the logs and for the precise refusal of the keys of MCP. It never leaves the server.
+  std::string ceiling_refused;
 };
 
 // How a route answers a decision (ProcurAuth 10.3).

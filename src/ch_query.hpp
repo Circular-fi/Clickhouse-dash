@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -66,6 +67,20 @@ struct ChStatementRecord {
 // WITH gives SELECT. DESC gives DESCRIBE.
 // The value is "" when the word is not one of the known statements.
 std::string ch_statement_operation(std::string_view sql);
+
+// The bounds of a statement that a ceiling of a grant can lower (apply_ceilings). ChQueryLimits::before_ceilings keeps the value that
+// these fields had before the first ceiling lowered them.
+struct ChQueryBounds {
+  int64_t max_execution_time_s = 0;
+  std::string timeout_overflow_mode;
+  uint64_t max_memory_usage = 0;
+  uint64_t max_rows_to_read = 0;
+  uint64_t max_bytes_to_read = 0;
+  std::string read_overflow_mode;
+  uint64_t max_result_rows = 0;
+  uint64_t max_result_bytes = 0;
+  std::string result_overflow_mode;
+};
 
 // The bounds and the label of the statements of one scope.
 // A value of 0 or an empty value means that ChDash does not set it.
@@ -100,6 +115,12 @@ struct ChQueryLimits {
   // rows of the result and the time of the statement, and it ends with ChCeilingExceeded past a ceiling. A SETTINGS clause in the SQL of
   // the statement, and a profile with readonly = 1, thus never loosen a ceiling.
   AccessCeilings ceilings;
+  // The bounds of this scope before the first ceiling lowered them. apply_ceilings keeps them, so that an internal statement can go back
+  // to them (ChInternalScope). It is empty when no ceiling applies.
+  std::optional<ChQueryBounds> before_ceilings;
+  // True for the statements that ChDash writes for its own work and not as a data statement of a person (ChInternalScope). The ceilings of a
+  // grant never apply to such a statement: apply_ceilings does nothing for it, and its scope holds no ceiling.
+  bool internal = false;
   // The scope gives each statement a new query_id (ch_statement_query_id).
   // The statements of an MCP call are named for their key and their tool (mcp_cost.hpp).
   // An empty value means that ClickHouse names each statement.
@@ -132,6 +153,27 @@ class ChQueryScope {
   ChQueryScope* previous_ = nullptr;
   std::chrono::steady_clock::time_point last_check_{};
   bool canceled_ = false;
+};
+
+// The limits of an internal statement (ChQueryLimits::internal): the limits `limits` without the ceilings of the grant. The bounds go back to
+// the value that they had before the ceilings (before_ceilings). The deadline, the cancel function, the label and the readonly mode stay.
+// This function is pure. The native tests check it without a server.
+ChQueryLimits ch_internal_limits(ChQueryLimits limits);
+
+// The statements of this thread are internal while the object lives: they ignore the ceilings of the grant. Use it for each statement that
+// ChDash writes for its own work: the discovery of the ACL (CHECK GRANT, SHOW, zero-row probes), the probes of the capabilities of the
+// server, the reads of the schema for the editor, the lookup of query_log and the flush of the logs. Do not use it for a statement of a
+// person (the Query page, an export) or for a statement that a page runs to show data: the ceilings bound these. Scopes nest, and the
+// object ends the internal scope when it goes out of scope. The internal scope goes back to the bounds of before_ceilings. A scope that
+// changes a bound after apply_ceilings, and then runs an internal statement, must reset before_ceilings (see handle_export_stream).
+class ChInternalScope {
+ public:
+  ChInternalScope();
+  ChInternalScope(const ChInternalScope&) = delete;
+  ChInternalScope& operator=(const ChInternalScope&) = delete;
+
+ private:
+  std::optional<ChQueryScope> scope_;
 };
 
 // The caller of the scope went away. Its statements stop.

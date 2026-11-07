@@ -458,6 +458,18 @@ def test_a_person_with_read_and_write_gets_the_ceilings_of_the_class_of_the_sql(
 
 
 @needs_access
+def test_a_low_explorer_ceiling_does_not_stop_the_acl_discovery():
+    # The discovery of the ACL (CHECK GRANT, SHOW, zero-row probes) is a statement of ChDash, not of the person: no ceiling applies to it
+    # (docs/access.md, "Statements that a ceiling bounds"). A low ceiling can end a data statement of the page, but it never gives 503
+    # acl_discovery_failed. refresh=1 makes ChDash discover again, so the answer does not come from the cache.
+    answer(limits={"explorer.read": {"max_rows": 1, "max_rows_read": 1}})
+    response = call("GET", "/api/explorer/catalog?host_id=local&refresh=1")
+    assert "acl_discovery_failed" not in response.text, response.text[:300]
+    response = call("GET", "/api/explorer/table?host_id=local&database=system&table=one&refresh=1")
+    assert "acl_discovery_failed" not in response.text, response.text[:300]
+
+
+@needs_access
 def test_the_stream_of_an_export_asks_the_host_of_the_job():
     # The body of the stream holds the token only. A person with grants on the host "local" only (none on the service or on "other") has
     # an export that works: the stream asks the host of the job, not the service.

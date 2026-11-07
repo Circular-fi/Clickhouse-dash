@@ -468,7 +468,9 @@ private:
   bool access_allows(httplib::Response& res, const char* action, const std::string& host_id, const std::string& database);
   // Return true when the subject of this request passes every question. Else write the refusal of the first failed question (503),
   // or else of the first refused question (403 or 429), and return false. Return true when no check applies.
-  bool access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions);
+  // `for_key` true: the questions guard the creation of an MCP key of ChDash. A key cannot apply a ceiling, so a true answer with a ceiling
+  // gives 403 `key_ceiling_unsupported` (not retryable) and the key is not made.
+  bool access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions, bool for_key = false);
   // Write the 403 of a refused action (docs/access.md, "Enforcement").
   static void access_forbidden(httplib::Response& res, const std::string& action);
   // Write the 503 of a decision that the PDP did not give (pdp_unavailable, retryable).

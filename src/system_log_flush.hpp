@@ -50,6 +50,8 @@ public:
     const auto started = std::chrono::steady_clock::now();
     lk.unlock();
     std::string failure;
+    // The flush is a statement of ChDash, not of a person: the ceilings of the grant never apply.
+    ChInternalScope internal;
     try {
       ch_execute(client, "SYSTEM FLUSH LOGS " + logs);
     } catch (const std::exception& e) {

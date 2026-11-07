@@ -516,7 +516,13 @@ The tools of the data, of the SQL and of the observability send these settings w
 
 The PDP can send for an action only the ceilings that the document declares for that action ([access.md](access.md#actions-that-list-ceilings)). For example, `explorer.read` declares `max_rows`, `max_rows_read`, `max_duration` and `max_memory`, and `mcp.session` declares none. A ceiling that the action does not declare, a name that ChDash does not know, or a value below 1 cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`.
 
-In the mode `keys`, the key of the page applies no ceiling. A `true` answer for the creator of the key with a ceiling is `false` for the key.
+In the mode `keys`, the key of the page applies no ceiling. A `true` answer for the creator of the key with a ceiling is `false` for the key. This refusal is final. A retry gives the same answer, so it is never a `503`. These rules apply:
+
+- A person whose answer for an action of the tools has a ceiling cannot make a key that uses that action. `POST /api/mcp/keys` and the adoption answer `403` with the code `key_ceiling_unsupported`, `retryable` false and the action. No key is made.
+- A key whose creator got a ceiling later loses the tools of that action in `tools/list`. A call of such a tool gets HTTP `403` with `-32001` and the fixed message `forbidden: the grant of the creator of this key has a limit that a key cannot apply. Use the identity mode of MCP`. The message has no value of the request or of the grant.
+- The log has the line `access.ceiling_unenforceable` and the line `mcp.tool_refused` with the field `ceiling`. A failure of the PDP is a different case: it keeps the answer for an unknown tool.
+
+To give a person a ceiling, use the mode `identity` of MCP. This mode applies the ceilings.
 
 ### What is lost
 
@@ -1397,6 +1403,7 @@ The reads that show a secret or what a key reaches have the first rule too. `POS
 | --- | --- | --- |
 | 400 | `validation` | With `field` and `reason`: `required`, `type`, `invalid`, `too_long`, `unknown_host`, `too_many` (more than one host), `mcp_user_unavailable`, `unknown_tool`, `needs_all_data`, `not_grantable`, `duplicate`, `range`, `unknown_field` or `invalid_json`. |
 | 403 | `manage_disabled` | `keys.mode = "static"` (or `manage_from_ui = false`). |
+| 403 | `key_ceiling_unsupported` | The `authzen` mode: the answer of the PDP for an action of the tools has a ceiling, and a key cannot apply it. Not retryable. |
 | 403 | `cross_site_request` | The guard refused the request. |
 | 404 | `mcp_disabled` | MCP is disabled. |
 | 404 | `not_found` | No key has this id. |

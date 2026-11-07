@@ -161,6 +161,8 @@ QueryExecutionStats collect_query_execution(
     return result;
   }
 
+  // The lookup of query_log is a statement of ChDash, not of a person: the ceilings of the grant never apply.
+  ChInternalScope internal;
   try {
     // Read first. Flush only as a last resort (flush_logs = true and the row
     // is still missing). SystemLogFlushGate shares one flush between the

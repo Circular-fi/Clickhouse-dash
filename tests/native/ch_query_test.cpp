@@ -13,6 +13,7 @@
 // Run:   ./build/chdash_ch_query_test   (exit code 0 = every check passed)
 
 #include "access_ceilings.hpp"
+#include "allowed_objects.hpp"
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
 #include "facet_limits.hpp"
@@ -217,6 +218,70 @@ void test_apply_ceilings_lowers_and_never_loosens() {
   ChSettingsProfile readonly = open_profile();
   readonly.readonly = 1;
   CHECK(ch_query_settings(limits, readonly, now).empty());
+}
+
+// An internal statement ignores the ceilings of the grant; a statement of a person obeys them (ChInternalScope, docs/access.md).
+void test_an_internal_scope_removes_the_ceilings_and_nothing_else() {
+  const auto now = std::chrono::steady_clock::now();
+  AccessCeilings ceilings;
+  ceilings.max_rows_read = 1000;
+  ceilings.max_read_size = 4096;
+  ceilings.max_rows = 10;
+  ceilings.max_result_size = 2048;
+  ceilings.max_duration = 30;
+  ceilings.max_memory = 1'000'000;
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:/api/explorer";
+  limits.max_execution_time_s = 10;
+  limits.max_rows_to_read = 5000;
+  limits.result_overflow_mode = "break";
+  limits.read_only_strict = true;
+  apply_ceilings(ceilings, limits);
+  CHECK(limits.max_rows_to_read == uint64_t(1000) && limits.max_result_rows == uint64_t(10) && limits.max_execution_time_s == int64_t(10));
+  CHECK(limits.before_ceilings.has_value() && !limits.internal);
+
+  // The pure function: the bounds go back to the value before the ceilings. The label, the readonly mode and the deadline stay.
+  limits.deadline = now + std::chrono::seconds(20);
+  const ChQueryLimits internal = ch_internal_limits(limits);
+  CHECK(internal.internal && !internal.ceilings.any() && !internal.before_ceilings.has_value());
+  CHECK(internal.max_rows_to_read == uint64_t(5000) && internal.max_bytes_to_read == 0 && internal.max_result_rows == 0 &&
+        internal.max_result_bytes == 0 && internal.max_memory_usage == 0 && internal.max_execution_time_s == int64_t(10));
+  CHECK(internal.read_overflow_mode.empty() && internal.timeout_overflow_mode.empty() && internal.result_overflow_mode == "break");
+  CHECK(internal.log_comment == "chdash:/api/explorer" && internal.read_only_strict && internal.deadline == limits.deadline);
+  // The settings of an internal statement hold no setting of a ceiling.
+  Settings sent = ch_query_settings(internal, open_profile(), now);
+  CHECK(setting(sent, "max_result_rows") == "<unset>" && setting(sent, "max_bytes_to_read") == "<unset>" && setting(sent, "max_memory_usage") == "<unset>");
+  CHECK(setting(sent, "max_rows_to_read") == "5000");
+  // The settings of a statement of a person hold them.
+  sent = ch_query_settings(limits, open_profile(), now);
+  CHECK(setting(sent, "max_result_rows") == "10" && setting(sent, "max_bytes_to_read") == "4096" && setting(sent, "max_memory_usage") == "1000000");
+
+  // An internal scope cannot take a ceiling again.
+  ChQueryLimits again = internal;
+  apply_ceilings(ceilings, again);
+  CHECK(!again.ceilings.any() && again.max_result_rows == 0 && !again.before_ceilings.has_value());
+  // Limits without a ceiling stay as they are.
+  ChQueryLimits plain;
+  plain.max_rows_to_read = 7;
+  const ChQueryLimits plain_internal = ch_internal_limits(plain);
+  CHECK(plain_internal.max_rows_to_read == 7 && plain_internal.internal);
+
+  // The scope: inside, the ceilings are gone. After it, they are back. Outside every scope, nothing changes.
+  CHECK(ChQueryScope::current() == nullptr);
+  {
+    ChInternalScope none;
+    CHECK(ChQueryScope::current() == nullptr);
+  }
+  ChQueryScope person(limits);
+  CHECK(ChQueryScope::current()->ceilings == ceilings && !ChQueryScope::current()->internal);
+  {
+    ChInternalScope inside;
+    const ChQueryLimits* current = ChQueryScope::current();
+    CHECK(current->internal && !current->ceilings.any() && current->max_rows_to_read == uint64_t(5000) && current->max_result_rows == 0);
+    ChInternalScope nested;  // a second internal scope changes nothing
+    CHECK(ChQueryScope::current()->internal && !ChQueryScope::current()->ceilings.any());
+  }
+  CHECK(!ChQueryScope::current()->internal && ChQueryScope::current()->ceilings == ceilings && ChQueryScope::current()->max_result_rows == uint64_t(10));
 }
 
 void test_readonly_or_unknown_profile_gets_no_setting() {
@@ -537,6 +602,66 @@ void test_the_ceilings_of_the_scope_stop_a_statement_that_sets_its_own_limits(co
   CHECK(code == 0);
 }
 
+// With a server: an internal statement ignores a ceiling that stops the statement of a person on the same connection, and the discovery
+// of the ACL does not fail under a low ceiling (the Explorer with a low explorer.read ceiling).
+void test_an_internal_statement_ignores_the_ceilings(const std::string& uri) {
+  auto pool = std::make_shared<ClickHouseClientPool>(4);
+  AccessCeilings ceilings;
+  ceilings.max_rows = 3;
+  ceilings.max_rows_read = 5;
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:/api/explorer/test";
+  apply_ceilings(ceilings, limits);
+  ChQueryScope scope(std::move(limits));
+  const auto count_rows = [&](clickhouse::Client& client, const std::string& sql) {
+    size_t rows = 0;
+    ch_select(client, sql, [&](const clickhouse::Block& block) { rows += block.GetRowCount(); });
+    return rows;
+  };
+  // A statement of a person obeys the ceiling.
+  {
+    auto client = lease(pool, uri);
+    bool stopped = false;
+    try {
+      count_rows(*client, "SELECT number FROM numbers(100)");
+    } catch (const std::exception&) {
+      stopped = true;
+    }
+    CHECK(stopped);
+  }
+  // An internal statement ignores it.
+  {
+    auto client = lease(pool, uri);
+    ChInternalScope internal;
+    CHECK(count_rows(*client, "SELECT number FROM numbers(100)") == 100);
+    CHECK(!ch_connection_dirty(*client));
+  }
+  // After the internal scope, the ceiling applies again.
+  {
+    auto client = lease(pool, uri);
+    bool stopped = false;
+    try {
+      count_rows(*client, "SELECT number FROM numbers(100)");
+    } catch (const std::exception&) {
+      stopped = true;
+    }
+    CHECK(stopped);
+  }
+  // The discovery of the ACL: the source of the runner lists the databases and checks a grant with the ceiling in the scope.
+  {
+    auto client = lease(pool, uri);
+    auto source = make_acl_source(client, pool);
+    const auto names = source->show_databases();
+    CHECK(names.size() > static_cast<size_t>(ceilings.max_rows));
+    AclBudget budget;
+    const AclDatabases found = discover_databases(*source, budget);
+    CHECK(!found.databases.empty() && !found.truncated);
+    CHECK(source->check_grant("SELECT ON system.one").has_value());
+    CHECK(source->describe_columns("system", "one").size() == 1);
+    CHECK(ChQueryScope::current()->ceilings == ceilings && !ChQueryScope::current()->internal);
+  }
+}
+
 void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
   auto pool = std::make_shared<ClickHouseClientPool>(4);
   auto client = lease(pool, uri);
@@ -819,6 +944,7 @@ int main() {
   test_settings_follow_the_scope_and_never_loosen_the_profile();
   test_the_bytes_read_are_a_bound_like_the_rows_read();
   test_apply_ceilings_lowers_and_never_loosens();
+  test_an_internal_scope_removes_the_ceilings_and_nothing_else();
   test_readonly_or_unknown_profile_gets_no_setting();
   test_read_only_and_the_overflow_modes();
   test_strict_read_only_of_the_access();
@@ -836,6 +962,7 @@ int main() {
       test_a_callback_that_stops_reading_keeps_the_connection(uri);
       test_the_scope_settings_reach_clickhouse(uri);
       test_the_ceilings_of_the_scope_stop_a_statement_that_sets_its_own_limits(uri);
+      test_an_internal_statement_ignores_the_ceilings(uri);
       test_a_refused_settings_clause_keeps_the_bounds(uri);
       test_the_query_id_of_the_scope_reaches_clickhouse(uri);
       test_a_passed_deadline_or_a_cancel_stops_before_sending(uri);

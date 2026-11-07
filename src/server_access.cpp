@@ -485,7 +485,7 @@ void Server::access_forbidden(httplib::Response& res, const std::string& action)
 
 void Server::access_unavailable(httplib::Response& res, const std::string& action) { refuse_decision(res, access_refusal_of({}), action); }
 
-bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions) {
+bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions, bool for_key) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp() || questions.empty()) return true;
   const auto decisions = access_decide(questions);
@@ -499,6 +499,24 @@ bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQ
     if (decisions[i].allowed) continue;
     refuse_decision(res, decisions[i], questions[i].action);
     return false;
+  }
+  if (for_key) {
+    // A key never has more than its creator (docs/mcp.md), and it applies no ceiling: a grant with a ceiling cannot give a key.
+    for (size_t i = 0; i < questions.size(); ++i) {
+      if (decisions[i].limits.empty()) continue;
+      log_event(LogLevel::Warn, "access.ceiling_unenforceable",
+                {{"request_id", state.call.request_id}, {"action", questions[i].action},
+                 {"resource", access_resource_path(questions[i].resource)}, {"ceiling", decisions[i].limits.begin()->first.substr(0, 128)}});
+      ApiError error;
+      error.status = 403;
+      error.code = "key_ceiling_unsupported";
+      error.message = "The grant of your account for the action " + questions[i].action +
+                      " has a limit. A key of ChDash cannot apply a limit, so it cannot get this action. Ask for a grant without a limit, or use the identity mode of MCP.";
+      error.retryable = false;
+      error.text.emplace_back("action", questions[i].action);
+      send_error(res, error);
+      return false;
+    }
   }
   AccessRequestState& writable = access_state();
   for (const auto& decision : decisions) {

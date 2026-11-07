@@ -501,9 +501,13 @@ public:
   // A failure of the PDP refuses the tool as a denial: the mode "keys" keeps this answer (docs/mcp.md, "Keys and the access of humans").
   McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
     if (inner_.tool_permitted(key, tool, arguments, call) != McpAccess::Allowed) return McpAccess::Denied;
-    const std::string refused = gate_.tool_refused_action(key, tool);
+    std::string ceiling;
+    const std::string refused = gate_.tool_refused_action(key, tool, &ceiling);
     if (refused.empty()) return McpAccess::Allowed;
-    log_event(LogLevel::Warn, "mcp.tool_refused", {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", refused}});
+    // A key cannot apply a ceiling (ProcurAuth 7.5): the grant of the creator makes the tool unusable for the key. The answer says so.
+    if (!ceiling.empty() && call) call->ceiling_refused = ceiling;
+    log_event(LogLevel::Warn, "mcp.tool_refused",
+              {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", refused}, {"ceiling", ceiling.substr(0, 128)}});
     return McpAccess::Denied;
   }
 
@@ -1464,7 +1468,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         }
         const auto questions = mcp_key_access_questions(input.tools.value_or(std::vector<std::string>{}), hosts,
                                                         input.databases.value_or(std::vector<std::string>{}), cfg_.access.audience);
-        if (!access_allows_all(res, questions)) return;
+        if (!access_allows_all(res, questions, true)) return;
       }
       const auto result = store.create(input, now, access_subject());
       if (!result.key) return write_failure(result);
@@ -1506,7 +1510,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       for (auto& question : mcp_key_access_questions(found->tools, found->hosts, found->databases, cfg_.access.audience)) {
         questions.push_back(std::move(question));
       }
-      if (!access_allows_all(res, questions)) return;
+      if (!access_allows_all(res, questions, true)) return;
       const std::string subject = access_subject();
       const auto result = store.adopt(id, found->creator, subject, now);
       if (!result.key) return write_failure(result);

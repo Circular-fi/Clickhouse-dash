@@ -266,6 +266,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   auto fetch_keywords = [&](MetaKeywords& out, std::string& err_code, std::string& err_msg) -> bool {
     constexpr MetaCredentialScope scope = MetaCredentialScope::System;
+    // The reads of the schema for the editor are statements of ChDash, not of a person: the ceilings of the grant never apply.
+    ChInternalScope internal;
     out.updated_at_ms = ts_ms;
     out.credential_scope = meta_credential_scope_name(scope);
 
@@ -338,6 +340,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   auto fetch_functions = [&](MetaFunctions& out, std::string& err_code, std::string& err_msg) -> bool {
     constexpr MetaCredentialScope scope = MetaCredentialScope::System;
+    // The reads of the schema for the editor are statements of ChDash, not of a person: the ceilings of the grant never apply.
+    ChInternalScope internal;
     out.updated_at_ms = ts_ms;
     out.credential_scope = meta_credential_scope_name(scope);
 
@@ -491,6 +495,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     const MetaCredentialScope scope = metadata_uses_runner_credentials(type)
       ? MetaCredentialScope::Runner
       : MetaCredentialScope::System;
+    // The reads of the schema for the editor are statements of ChDash, not of a person: the ceilings of the grant never apply.
+    ChInternalScope internal;
     out.updated_at_ms = ts_ms;
     out.credential_scope = meta_credential_scope_name(scope);
 

@@ -727,11 +727,12 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           record.terminal_status = query_failed ? "error" : "finished";
           record.original_sql = sql;
           // The reads of query_log for execution.csv are ChDash's own, not the user's.
-          ChQueryLimits metadata_limits = ChQueryScope::current_copy();
+          // The ceilings of the grant bound the SQL of the person, not these reads of ChDash: the scope is internal (ch_internal_limits).
+          // It keeps no bound of the export, so the bounds below are the only ones.
+          ChQueryLimits metadata_limits = ch_internal_limits(ChQueryScope::current_copy());
           metadata_limits.log_comment = "chdash:/api/export/stream";
           metadata_limits.max_execution_time_s = 0;
           metadata_limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
-          // The ceilings of the grant bound the SQL of the person, not these reads of ChDash: the scope of the export set them (apply_ceilings).
           metadata_limits.max_rows_to_read = 0;
           metadata_limits.max_bytes_to_read = 0;
           metadata_limits.max_result_rows = 0;
@@ -739,7 +740,6 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           metadata_limits.read_overflow_mode.clear();
           metadata_limits.result_overflow_mode.clear();
           metadata_limits.timeout_overflow_mode.clear();
-          metadata_limits.ceilings = AccessCeilings{};
           ChQueryScope metadata_scope(std::move(metadata_limits));
           QueryExecutionStats stats = collect_query_execution(
               record,

@@ -1637,6 +1637,12 @@ void test_enforce_ceilings_on_operations_and_navigation() {
   CHECK(decisions[0].allowed && decisions[0].limits.size() == 1);
   CHECK(!decisions[1].allowed && decisions[1].limits.empty() && decisions[1].reason == PdpReason::None && !decisions[1].usage_units);
   CHECK(!decisions[1].failed);  // a denial, not a failure
+  // The refusal keeps the name of the ceiling for the log and for the precise answer of a key of MCP. Nothing else carries it.
+  CHECK(decisions[1].ceiling_refused == "max_memory" && decisions[3].ceiling_refused == "max_rows");
+  CHECK(decisions[0].ceiling_refused.empty() && decisions[2].ceiling_refused.empty() && decisions[4].ceiling_refused.empty());
+  // A refusal for a ceiling is a denial: 403, not retryable, never the 503 of a failed PDP.
+  CHECK(access_outcome(decisions[1]) == AccessOutcome::Denied);
+  CHECK(access_refusal(decisions[1], "system.read").status == 403 && !access_refusal(decisions[1], "system.read").retryable);
   CHECK(decisions[2].allowed && decisions[2].limits.size() == 1);  // the navigation keeps the answer
   CHECK(!decisions[3].allowed);
   CHECK(decisions[4].allowed);
@@ -1645,11 +1651,12 @@ void test_enforce_ceilings_on_operations_and_navigation() {
   questions = {AccessQuestion{"system.read", host}, AccessQuestion{"system.read", host, AccessMatch::Subtree}, AccessQuestion{"system.read", host}};
   access_enforce_ceilings("req-2", questions, &decisions, all, false);
   CHECK(!decisions[0].allowed && decisions[1].allowed && decisions[2].allowed);
+  CHECK(decisions[0].ceiling_refused == "max_rows" && decisions[1].ceiling_refused.empty());
   // A false decision stays false, and the limits of a false decision are ignored (7.6).
   decisions = {AccessDecision{}};
   questions = {AccessQuestion{"system.read", host}};
   access_enforce_ceilings("req-3", questions, &decisions, all, true);
-  CHECK(!decisions[0].allowed);
+  CHECK(!decisions[0].allowed && decisions[0].ceiling_refused.empty());
 }
 
 void test_ceilings_of_a_decision_and_the_lowest_value() {

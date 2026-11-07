@@ -5455,6 +5455,7 @@ void test_creator_access() {
     std::set<std::string> allowed;  // "subject|action@path"
     std::set<std::string> unknown;  // the subjects that the PDP does not know: false with the reason "unknown_subject"
     bool fails = false;
+    std::string ceiling;  // when set: a true answer becomes false with this ceiling (access_enforce_ceilings of a key)
     int batches = 0;
     std::vector<std::vector<std::string>> asked;
   };
@@ -5476,6 +5477,10 @@ void test_creator_access() {
                             d.source = pdp.fails ? "error" : "pdp";
                             d.failed = pdp.fails;  // as PdpClient::decide marks a call without a valid answer
                             d.allowed = !pdp.fails && rules.decide(grants, q.action, q.resource).decision;
+                            if (d.allowed && !pdp.ceiling.empty()) {
+                              d.allowed = false;
+                              d.ceiling_refused = pdp.ceiling;
+                            }
                             d.unknown_subject = !pdp.fails && !d.allowed && pdp.unknown.count(subject) != 0;
                             out.push_back(d);
                           }
@@ -5529,6 +5534,25 @@ void test_creator_access() {
   const auto has = [&](const char* name) { return std::find(state.tools.begin(), state.tools.end(), name) != state.tools.end(); };
   CHECK(has("list_hosts") && !has("list_databases") && !has("system_overview") && !has("run_query"));
   CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("list_databases")), std::string("explorer.read"));
+
+  // The PDP gives the creator a true answer with a ceiling, and a key cannot apply it: the decision is false with the name of the ceiling.
+  // The refusal is a denial with a precise cause, not a failure of the PDP.
+  gate.forget(key.id);
+  pdp.allowed = {"alice|explorer.read@service:db"};
+  pdp.ceiling = "max_rows";
+  std::string ceiling;
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("list_databases"), &ceiling), std::string("explorer.read"));
+  CHECK_EQ(ceiling, std::string("max_rows"));
+  CHECK(gate.state(key).status == McpCreatorStatus::Active);
+  pdp.ceiling.clear();
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("list_databases"), &ceiling), std::string());
+  CHECK(ceiling.empty());
+  // A plain denial has no ceiling.
+  CHECK_EQ(gate.tool_refused_action(key, *mcp_find_tool("system_overview"), &ceiling), std::string("system.read"));
+  CHECK(ceiling.empty());
+  gate.forget(key.id);
+  pdp.allowed.clear();
+  clock += 30001;
 
   // The PDP does not know the creator any more (the reason "unknown_subject"): the key is an orphan.
   pdp.unknown = {"alice"};
@@ -5633,6 +5657,36 @@ void test_protocol_permitted_tools() {
   const auto ok = parse(mcp_handle_message(rpc("tools/call", R"({"name":"list_hosts","arguments":{}})"), key, backend, info, now).body);
   CHECK(ok.HasMember("result"));
   CHECK(backend.asked == (std::vector<std::string>{"system_overview", "list_hosts"}));
+}
+
+// The mode keys: the creator holds a grant with a ceiling that a key cannot apply. The answer is 403 with -32001 and a fixed message, never 503
+// and never a retry case. A plain denial keeps the answer for an unknown tool.
+void test_protocol_key_ceiling_refusal() {
+  struct Limited : FakeBackend {
+    McpAccess tool_permitted(const McpKey&, const McpToolInfo& tool, const rapidjson::Value&, McpCallInfo* call) override {
+      if (std::string(tool.name) == "system_overview") {
+        call->ceiling_refused = "max_rows";
+        return McpAccess::Denied;
+      }
+      return std::string(tool.name) == "list_databases" ? McpAccess::Denied : McpAccess::Allowed;
+    }
+  };
+  Limited backend;
+  McpServerInfo info;
+  const McpKey key = a_key({"list_hosts", "system_overview", "list_databases"}, {"*"});
+  const int64_t now = 1'800'000'000;
+  const auto limited = mcp_handle_message(rpc("tools/call", R"({"name":"system_overview","arguments":{}})"), key, backend, info, now);
+  CHECK_EQ(limited.http_status, 403);
+  CHECK_EQ(limited.rpc_error, kRpcForbidden);
+  const auto doc = parse(limited.body);
+  CHECK_EQ(doc["error"]["code"].GetInt(), kRpcForbidden);
+  CHECK_EQ(std::string(doc["error"]["message"].GetString()), std::string(kMcpKeyCeilingMessage));
+  // The message holds no value of the request or of the grant.
+  CHECK(!contains(doc["error"]["message"].GetString(), "max_rows") && !contains(doc["error"]["message"].GetString(), "system_overview"));
+  CHECK(std::find(backend.calls.begin(), backend.calls.end(), "system_overview") == backend.calls.end());
+  const auto plain = mcp_handle_message(rpc("tools/call", R"({"name":"list_databases","arguments":{}})"), key, backend, info, now);
+  CHECK_EQ(plain.http_status, 200);
+  CHECK_EQ(parse(plain.body)["error"]["code"].GetInt(), kRpcInvalidParams);
 }
 
 void test_protocol_modern() {
@@ -9023,6 +9077,7 @@ int main() {
   test_sql_builder();
   test_protocol();
   test_protocol_permitted_tools();
+  test_protocol_key_ceiling_refusal();
   test_protocol_modern();
   test_trace_and_untrusted();
   test_analysis_protocol();

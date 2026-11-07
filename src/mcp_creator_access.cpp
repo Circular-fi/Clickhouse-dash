@@ -97,14 +97,18 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
   return out;
 }
 
-std::string McpCreatorAccess::tool_refused_action(const McpKey& key, const McpToolInfo& tool) {
+std::string McpCreatorAccess::tool_refused_action(const McpKey& key, const McpToolInfo& tool, std::string* ceiling) {
+  if (ceiling) ceiling->clear();
   if (key.creator.empty()) return "creator";
   const std::vector<AccessQuestion> questions = mcp_tool_access_questions(tool, key.hosts, key.databases, service_id_);
   if (questions.empty()) return {};
   std::vector<AccessDecision> decisions = decide_(key.creator, questions);
   decisions.resize(questions.size());
   for (size_t i = 0; i < questions.size(); ++i) {
-    if (!decisions[i].allowed) return questions[i].action;
+    if (!decisions[i].allowed) {
+      if (ceiling) *ceiling = decisions[i].ceiling_refused;
+      return questions[i].action;
+    }
   }
   return {};
 }
