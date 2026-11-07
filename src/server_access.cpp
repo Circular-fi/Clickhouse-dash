@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "access_actions.hpp"
+#include "access_enforce.hpp"
 #include "access_pages.hpp"
 #include "api_error.hpp"
 #include "host_util.hpp"
@@ -42,6 +43,10 @@ struct AccessRequestState {
   // The rule of a route whose host is in the JSON body: check_access_body applies it once the body is read.
   bool pending = false;
   AccessRule pending_rule;
+  // The ceilings of the decisions that guard this request (access_ceilings.hpp) and the class of its SQL. The route fills the first
+  // at check_rule. The handler that runs SQL sets the class (access_classify_sql).
+  AccessRunCeilings ceilings;
+  SqlStatementClass sql_class = SqlStatementClass::Unsure;
 };
 
 AccessRequestState& access_state() {
@@ -71,30 +76,6 @@ void refuse_forbidden(httplib::Response& res, const std::string& action) {
   AccessDecision denied;
   denied.source = "pdp";
   refuse_decision(res, denied, action);
-}
-
-// The ceilings that ChDash can apply for `action` (ProcurAuth 7.5). ChDash declares no ceiling yet, so a true answer with a ceiling is
-// false. The declaration of the ceilings of the actions fills this set.
-std::set<std::string> declared_ceilings(const std::string& action) {
-  (void)action;
-  return {};
-}
-
-// ProcurAuth 7.5: a true decision with a ceiling that ChDash cannot apply becomes a false decision with no reason (a denial).
-void enforce_ceilings(const std::string& request_id, const std::vector<AccessQuestion>& questions, std::vector<AccessDecision>* decisions) {
-  for (size_t i = 0; i < questions.size() && i < decisions->size(); ++i) {
-    AccessDecision& decision = (*decisions)[i];
-    if (!decision.allowed || decision.limits.empty()) continue;
-    std::string refused;
-    if (ceilings_enforceable(decision.limits, declared_ceilings(questions[i].action), &refused)) continue;
-    log_event(LogLevel::Warn, "access.ceiling_unenforceable",
-              {{"request_id", request_id}, {"action", questions[i].action}, {"resource", access_resource_path(questions[i].resource)},
-               {"ceiling", refused.substr(0, 128)}});
-    decision.allowed = false;
-    decision.reason = PdpReason::None;
-    decision.limits.clear();
-    decision.usage_units.reset();
-  }
 }
 
 // The decisions of `decisions` whose questions have the action `action`.
@@ -129,6 +110,30 @@ std::string param_value(const httplib::Request& req, const char* name) { return 
 
 int64_t unix_now_s() {
   return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+// The refusal of the decisions of an export (query.export, query.run.read, query.run.write on one resource). Return true after the
+// function writes it (`close`: the body is not read, so the connection closes).
+bool refuse_export(httplib::Response& res, const std::vector<AccessDecision>& decisions, bool close) {
+  const auto deny = [&](const std::string& action, const std::vector<AccessDecision>& refused) {
+    if (close) res.set_header("Connection", "close");
+    refuse_decision(res, access_refusal_of(refused), action);
+    return true;
+  };
+  if (!decisions[0].allowed) return deny("query.export", {decisions[0]});
+  if (!decisions[1].allowed && !decisions[2].allowed) return deny("query.run.read", {decisions[1], decisions[2]});
+  return false;
+}
+
+// The ceilings of an export: query.export always applies, and the ceilings of query.run.* follow the class of the SQL.
+AccessRunCeilings export_ceilings(const std::vector<AccessDecision>& decisions) {
+  AccessRunCeilings out;
+  out.base = access_ceilings_of(decisions[0].limits);
+  out.has_read = decisions[1].allowed;
+  out.has_write = decisions[2].allowed;
+  if (out.has_read) out.read = access_ceilings_of(decisions[1].limits);
+  if (out.has_write) out.write = access_ceilings_of(decisions[2].limits);
+  return out;
 }
 
 } // namespace
@@ -204,7 +209,8 @@ void Server::init_access() {
           context.request_id = current_request_context().request_id;
           // Each decision keeps AccessDecision::failed: a failure of the PDP is not a denial (ProcurAuth 10.3).
           std::vector<AccessDecision> decisions = pdp_->decide(subject, questions, context);
-          enforce_ceilings(context.request_id, questions, &decisions);
+          // The tools of MCP apply no ceiling yet: a true answer with a ceiling is false (ProcurAuth 7.5).
+          access_enforce_ceilings(context.request_id, questions, &decisions, access_features(), false);
           return decisions;
         },
         [] {
@@ -214,12 +220,12 @@ void Server::init_access() {
   }
 }
 
-std::vector<AccessDecision> Server::access_decide(const std::vector<AccessQuestion>& questions) {
+std::vector<AccessDecision> Server::access_decide(const std::vector<AccessQuestion>& questions, bool operation) {
   const AccessRequestState& state = access_state();
   // Without a PDP or a subject, no decision is valid: each one fails (fail closed).
   if (!pdp_ || !state.enforced || state.subject.empty()) return std::vector<AccessDecision>(questions.size(), access_refusal_of({}));
   std::vector<AccessDecision> decisions = pdp_->decide(state.subject, questions, state.call);
-  enforce_ceilings(state.call.request_id, questions, &decisions);
+  if (operation) access_enforce_ceilings(state.call.request_id, questions, &decisions, access_features(), true);
   return decisions;
 }
 
@@ -359,7 +365,11 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
       // keeps the databases that the human may read (access_readable_databases). It never runs for a host that the human cannot see.
       const AccessMatch match = rule.list_filter && resource.type == "host" ? AccessMatch::Subtree : AccessMatch::Node;
       const auto decisions = access_decide({AccessQuestion{rule.action, resource, match}});
-      return decisions.front().allowed ? false : deny(rule.action, decisions);
+      if (!decisions.front().allowed) return deny(rule.action, decisions);
+      // The ceilings of the action apply to each query that the route sends (ProcurAuth 7.4).
+      state.ceilings = AccessRunCeilings{};
+      state.ceilings.base = access_ceilings_of(decisions.front().limits);
+      return false;
     }
     case AccessRuleKind::Run: {
       const auto decisions = access_decide({AccessQuestion{"query.run.read", resource}, AccessQuestion{"query.run.write", resource}});
@@ -368,15 +378,22 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
       if (!read && !write) return deny("query.run.read", decisions);
       // readonly = 1 without query.run.write on this host (or on this database of the host).
       state.read_only = !write;
+      // A person with both actions gets the ceilings of the one that fits the SQL (access_classify_sql). Until the class is known, the
+      // lower value of each ceiling applies.
+      state.ceilings = AccessRunCeilings{};
+      state.ceilings.has_read = read;
+      state.ceilings.has_write = write;
+      if (read) state.ceilings.read = access_ceilings_of(decisions[0].limits);
+      if (write) state.ceilings.write = access_ceilings_of(decisions[1].limits);
       return false;
     }
     case AccessRuleKind::Export: {
       // An export runs SQL: it needs query.export and, as a run, query.run.read or query.run.write, all on the host of the export.
       const auto decisions = access_decide({AccessQuestion{"query.export", resource}, AccessQuestion{"query.run.read", resource},
                                             AccessQuestion{"query.run.write", resource}});
-      if (!decisions[0].allowed) return deny("query.export", {decisions[0]});
-      if (!decisions[1].allowed && !decisions[2].allowed) return deny("query.run.read", {decisions[1], decisions[2]});
+      if (refuse_export(res, decisions, !body_read && is_write_method(req.method))) return true;
       state.read_only = !decisions[2].allowed;
+      state.ceilings = export_ceilings(decisions);
       return false;
     }
     default:
@@ -397,9 +414,14 @@ bool Server::access_allows(httplib::Response& res, const char* action, const std
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return true;
   const auto decisions = access_decide({AccessQuestion{action, access_resource_of(host_id, database)}});
-  if (decisions.front().allowed) return true;
-  refuse_decision(res, decisions.front(), action);
-  return false;
+  if (!decisions.front().allowed) {
+    refuse_decision(res, decisions.front(), action);
+    return false;
+  }
+  // A ceiling of another node of the same action applies to this request too (ProcurAuth 5.5a): the lower value wins.
+  AccessRequestState& writable = access_state();
+  writable.ceilings.base = access_ceilings_lowest(writable.ceilings.base, access_ceilings_of(decisions.front().limits));
+  return true;
 }
 
 void Server::access_forbidden(httplib::Response& res, const std::string& action) { refuse_forbidden(res, action); }
@@ -420,6 +442,10 @@ bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQ
     if (decisions[i].allowed) continue;
     refuse_decision(res, decisions[i], questions[i].action);
     return false;
+  }
+  AccessRequestState& writable = access_state();
+  for (const auto& decision : decisions) {
+    writable.ceilings.base = access_ceilings_lowest(writable.ceilings.base, access_ceilings_of(decision.limits));
   }
   return true;
 }
@@ -443,7 +469,8 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
   for (const auto& name : names) {
     for (const char* action : actions) questions.push_back(AccessQuestion{action, access_resource_of(host_id, name)});
   }
-  const auto decisions = access_decide(questions);
+  // These questions show or hide databases: they run no operation, so a ceiling never turns them false.
+  const auto decisions = access_decide(questions, false);
   if (failed) *failed = any_failed(decisions);
   for (size_t i = 0; i < actions.size(); ++i) {
     if (decisions[i].allowed) return std::nullopt;
@@ -462,7 +489,8 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
 
 std::vector<AccessDecision> Server::access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database) {
   *questions = access_navigation_questions(cfg_.access.audience, access_host_ids(), database, access_features());
-  return access_decide(*questions);
+  // The navigation shows or hides pages and hosts: it runs no operation, so a ceiling never turns a decision false.
+  return access_decide(*questions, false);
 }
 
 std::optional<std::set<std::string>> Server::access_visible_hosts(bool* failed) {
@@ -506,12 +534,68 @@ std::set<std::string> Server::navigation_pages(const std::string& database, bool
 bool Server::access_permits(const char* action) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return true;
-  return access_decide({AccessQuestion{action, access_service_resource(cfg_.access.audience)}}).front().allowed;
+  return access_decide({AccessQuestion{action, access_service_resource(cfg_.access.audience)}}, false).front().allowed;
 }
 
 bool Server::access_read_only() const {
   const AccessRequestState& state = access_state();
   return state.enforced && state.read_only && !current_request_context().is_mcp();
+}
+
+AccessCeilings Server::access_ceilings() const {
+  const AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return AccessCeilings{};
+  return state.ceilings.resolve(state.sql_class);
+}
+
+SqlStatementClass Server::access_classify_sql(const std::vector<std::string>& texts) {
+  AccessRequestState& state = access_state();
+  state.sql_class = sql_statements_class(texts);
+  return state.sql_class;
+}
+
+SqlStatementClass Server::access_sql_class() const { return access_state().sql_class; }
+
+void Server::apply_ceilings(ChQueryLimits& limits) const { chdash::apply_ceilings(access_ceilings(), limits); }
+
+AccessCeilings Server::access_ceiling_bounds() const {
+  // The bound of each setting that carries a ceiling: the key of the query block, the key of generated_queries (the pages), and the field of
+  // the export. A bound of 0 stands for the schema max of the key (access_declared_max). A ceiling that no key bounds has no entry.
+  const auto seconds = [](int64_t value) { return value > 0 ? static_cast<uint64_t>(value) : uint64_t{0}; };
+  AccessCeilings out;
+  for (const AccessCeilingInfo& info : access_ceiling_table()) {
+    const std::string name = info.name;
+    std::vector<uint64_t> bounds;
+    if (name == "max_rows_read") {
+      bounds = {cfg_.query_options.max_rows_to_read, cfg_.generated_queries.max_rows_to_read};
+    } else if (name == "max_read_size") {
+      bounds = {cfg_.query_options.max_bytes_to_read, cfg_.generated_queries.max_bytes_to_read};
+    } else if (name == "max_duration") {
+      // The request of a page ends after generated_queries.timeout_ms: round up to whole seconds.
+      bounds = {seconds(cfg_.query_options.max_execution_time_s), seconds(cfg_.export_settings.max_execution_time_s),
+                static_cast<uint64_t>((cfg_.generated_queries.timeout_ms + 999) / 1000)};
+    } else if (name == "max_memory") {
+      bounds = {cfg_.query_options.max_memory_usage, cfg_.generated_queries.max_memory_usage, cfg_.export_settings.max_memory_usage};
+    }
+    out.set(name, access_declared_max(bounds, info.schema_max));
+  }
+  return out;
+}
+
+bool Server::access_check_export_stream(httplib::Response& res, const std::string& host_id, const ExportJobAccess& stored) {
+  AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return true;
+  // The same three questions as the run, on the host of the job: the stream body holds the token only, so no host is in the request.
+  const AccessResource resource = access_resource_of(host_id, std::string());
+  const auto decisions = access_decide({AccessQuestion{"query.export", resource}, AccessQuestion{"query.run.read", resource},
+                                        AccessQuestion{"query.run.write", resource}});
+  if (refuse_export(res, decisions, false)) return false;
+  state.ceilings = export_ceilings(decisions);
+  // The run decided too: the stream is never looser than the run was.
+  state.ceilings.base = access_ceilings_lowest(state.ceilings.base, stored.ceilings);
+  state.sql_class = stored.sql_class;
+  state.read_only = !decisions[2].allowed || stored.read_only;
+  return true;
 }
 
 std::string Server::access_json(bool* failed) {

@@ -111,7 +111,8 @@ std::vector<AccessAction> access_published_actions(const AccessFeatures& feature
   return out;
 }
 
-std::string access_actions_json(std::string_view server, const AccessFeatures& features, const std::vector<AccessHostEntry>& hosts) {
+std::string access_actions_json(std::string_view server, const AccessFeatures& features, const std::vector<AccessHostEntry>& hosts,
+                                const AccessCeilings& bounds) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -145,6 +146,14 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
     w.EndArray();
     w.Key("description");
     w.String(action.description);
+    // The ceilings of the action (ProcurAuth 5.2, 6.2): the names that the member "limits" of the document declares.
+    const std::vector<std::string> ceilings = access_action_ceilings(action.name);
+    if (!ceilings.empty()) {
+      w.Key("limits");
+      w.StartArray();
+      for (const std::string& name : ceilings) write_json_text(w, name);
+      w.EndArray();
+    }
     w.EndObject();
   }
   w.EndArray();
@@ -163,6 +172,28 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
     }
     w.EndArray();
   }
+  // The declaration of the ceilings (ProcurAuth 6.1). The lowest value is 1: ClickHouse reads 0 as no limit, so a grant never gives it.
+  w.Key("limits");
+  w.StartArray();
+  for (const AccessCeilingInfo& info : access_ceiling_table()) {
+    w.StartObject();
+    w.Key("name");
+    w.String(info.name);
+    w.Key("label");
+    w.String(info.label);
+    w.Key("description");
+    w.String(info.description);
+    w.Key("unit");
+    w.String(info.unit);
+    w.Key("kind");
+    w.String("ceiling");
+    w.Key("min");
+    w.Uint64(1);
+    w.Key("max");
+    w.Uint64(access_ceiling_max(bounds, info));
+    w.EndObject();
+  }
+  w.EndArray();
   w.EndObject();
   return std::string(sb.GetString(), sb.GetSize());
 }
@@ -200,6 +231,9 @@ AccessRule access_rule(std::string_view method_in, std::string_view path) {
   if ((path == "/api/query/deep-analysis" || path == "/api/query/execution") && method == "GET") return host_rule(AccessRuleKind::Run, nullptr);
   // The names of the editor (keywords, functions, the tables and the columns of a database).
   if (path == "/api/meta" && method == "GET") return host_rule(AccessRuleKind::Run, nullptr, true);
+  // The body of the stream holds only the token of the export, so it names no host. The handler asks the actions on the host of the job
+  // (Server::access_check_export_stream): a question on the service would refuse a person who has grants on one host only.
+  if (path == "/api/export/stream" && method == "POST") return rule(AccessRuleKind::Identity);
   if (path == "/api/export/run" || path == "/api/export/stream") return host_rule(AccessRuleKind::Export, nullptr, false, method == "POST");
 
   if (starts_with(path, "/api/traces/") || starts_with(path, "/api/logs/") || starts_with(path, "/api/metrics/")) {

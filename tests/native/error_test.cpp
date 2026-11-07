@@ -174,6 +174,11 @@ void test_the_classification_is_by_code() {
   CHECK(classify_clickhouse_error(server_error(159, "nothing to see")).kind == ChErrorKind::Timeout);
   // These failures did not come from the server.
   CHECK(classify_clickhouse_error(ChQueryCanceled()).kind == ChErrorKind::Canceled);
+  // A ceiling of the grant that the client counted answers as the ClickHouse code of the same meaning (ch_query.hpp).
+  CHECK(classify_clickhouse_error(ChCeilingExceeded(158, "query_scan_limit: x")).kind == ChErrorKind::ScanLimit);
+  CHECK(classify_clickhouse_error(ChCeilingExceeded(307, "query_result_limit: x")).kind == ChErrorKind::ScanLimit);
+  CHECK(classify_clickhouse_error(ChCeilingExceeded(159, "query_timeout: x")).kind == ChErrorKind::Timeout);
+  CHECK(classify_clickhouse_error(ChCeilingExceeded(158, "x")).code == 158);
   CHECK(classify_clickhouse_error(std::system_error(ETIMEDOUT, std::system_category(), "recv")).kind == ChErrorKind::Timeout);
   CHECK(classify_clickhouse_error(std::system_error(EAGAIN, std::system_category(), "recv")).kind == ChErrorKind::Timeout);
   CHECK(classify_clickhouse_error(std::system_error(ECONNRESET, std::system_category(), "recv")).kind == ChErrorKind::Unavailable);

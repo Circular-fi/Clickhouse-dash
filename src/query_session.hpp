@@ -1,5 +1,6 @@
 #pragma once
 
+#include "access_ceilings.hpp"
 #include "query_result_plan.hpp"
 #include "query_run_profile.hpp"
 #include "worker_group.hpp"
@@ -69,6 +70,10 @@ struct QuerySessionOptions {
   int64_t max_execution_time_s = 0;
   uint64_t max_memory_usage = 0;
   uint64_t max_rows_to_read = 0;
+  uint64_t max_bytes_to_read = 0;
+  // The ceilings of the grant of the person (access_ceilings.hpp). They lower the bounds above and the backstops of the session enforce them.
+  // They are never a value of the file.
+  AccessCeilings ceilings;
   // readonly = 1 on every statement of the run.
   // The access of humans (docs/access.md) sets it for a user who has query.run.read and not query.run.write.
   // It is never a value of the file.
@@ -247,6 +252,11 @@ private:
 
   uint64_t result_rows_emitted_ = 0;
   uint64_t result_bytes_emitted_ = 0;
+  // The backstops of the ceilings (access_ceilings.hpp). The meter counts the progress packets and the result that this run receives. It
+  // does not depend on any setting of ClickHouse, so a SETTINGS clause or a SET statement cannot raise a ceiling. The mutex mu_ guards it.
+  CeilingMeter ceiling_meter_;
+  // True after the deadline thread of max_duration fired: the run ends with query_timeout.
+  std::atomic<bool> ceiling_deadline_hit_{false};
   // This is the time split of the last SELECT attempt (SessionSnapshot::receive_ms and the two fields after it).
   int64_t receive_ns_ = 0;
   int64_t encode_ns_ = 0;

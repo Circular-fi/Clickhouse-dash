@@ -159,6 +159,7 @@ bool ExportSerializer::flush() {
 bool ExportSerializer::append(std::string_view value) {
   if (!ok_) return false;
   if (value.empty()) return true;
+  bytes_written_ += value.size();
   if (value.size() >= buffer_limit_) {
     if (!flush()) return false;
     if (!zip_.write_data(value.data(), value.size())) {
@@ -174,6 +175,7 @@ bool ExportSerializer::append(std::string_view value) {
 
 bool ExportSerializer::append_char(char value) {
   if (!ok_) return false;
+  ++bytes_written_;
   if (buffer_.size() + 1 > buffer_limit_ && !flush()) return false;
   buffer_.push_back(value);
   return true;

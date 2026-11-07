@@ -137,7 +137,7 @@ Every statement that ChDash sends to ClickHouse has a label and bounds. The sett
 
 | What | `log_comment` | Bounds |
 |---|---|---|
-| A run of the Query page | `chdash-run` | `query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read` (0 = the profile, the default) |
+| A run of the Query page | `chdash-run` | `query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read`, `query.max_bytes_to_read` (0 = the profile, the default) |
 | Deep Analyze | `chdash-deep-analysis` | the same as a run, and `analysis.deep_max_execution_time_s` (default 300 seconds) |
 | A statement of an export | `chdash-export` | `export.max_execution_time_s`, `export.max_memory_usage` (0 = the profile, the default) |
 | A request of a page (Explorer, System, Traces, Logs, Metrics, the analysis, the formatter, the metadata) | `chdash:<path of the route>`, `chdash-system` for the System page | `generated_queries` |
@@ -149,14 +149,18 @@ generated_queries {
   timeout_ms       = 60000
   max_memory_usage = 4294967296
   max_rows_to_read = 20000000000
+  max_bytes_to_read = 0
 }
 ```
 
 - `timeout_ms` (1000..3600000, default 60000): the time of one request of a page. Each statement of the request gets `max_execution_time` = the seconds that remain (at least 1). A statement that starts after the end fails at once with `TIMEOUT_EXCEEDED`. It does not reach ClickHouse. A route that sets its own `max_execution_time` in its SQL keeps it.
 - `max_memory_usage` (default 4 GiB): the memory of one statement, in bytes. `0` leaves it to the profile.
 - `max_rows_to_read` (default 20 000 000 000): the rows that one statement may read. A statement that reads more rows fails with `<page>_scan_limit` (422, [operations.md](operations.md#errors)). `0` leaves it to the profile. The System page sets its own cap (`system.query_log_max_rows`), and a route that sets `max_rows_to_read` in its SQL keeps it.
+- `max_bytes_to_read` (default 0): the bytes that one statement may read. A statement that reads more fails with `<page>_scan_limit` (422). `0` leaves it to the profile.
 - The Explorer adds its own caps. Each statement gets 10 seconds. The data preview gets 30 seconds and 64 MiB of result (`result_overflow_mode = 'break'`: the preview then has fewer rows).
 - The Metrics catalog stops its scan after 200 million rows read and answers `estimated: true` (`docs/metrics.md`).
+
+The ceilings of a grant (the access of humans, [access.md](access.md#limits-of-a-grant)) lower these bounds for the person who holds them. The value that ClickHouse gets is the lowest of the ceiling, the bound of this configuration and the settings profile. The keys of this section are also the declared `max` of the ceilings in the action document.
 
 A request of a page stops when the browser closes the connection. The next packet of the statement in progress throws. ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`). An export stops too.
 
@@ -634,10 +638,11 @@ query {
   max_execution_time_s    = 0
   max_memory_usage        = 0
   max_rows_to_read        = 0
+  max_bytes_to_read       = 0
 }
 ```
 
-`max_execution_time_s` (0..604800), `max_memory_usage` and `max_rows_to_read` bound a run in ClickHouse (refer to [The bounds of the queries](#the-bounds-of-the-queries)). `0`, the default, leaves the bound to the settings profile of the runner user. `result_preview_row_limit` limits only the rows that go to the browser, not the work of ClickHouse.
+`max_execution_time_s` (0..604800), `max_memory_usage`, `max_rows_to_read` and `max_bytes_to_read` bound a run in ClickHouse (refer to [The bounds of the queries](#the-bounds-of-the-queries)). `0`, the default, leaves the bound to the settings profile of the runner user. `result_preview_row_limit` limits only the rows that go to the browser, not the work of ClickHouse.
 
 The first two defaults are 32 MiB. A cell or an event that is too large fails with an explicit error: `result_cell_too_large` or `result_event_too_large`. The dashboard does not truncate data silently. These limits apply to interactive SSE results. They do not apply to the dedicated massive-export stream.
 

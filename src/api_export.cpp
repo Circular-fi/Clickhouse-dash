@@ -376,6 +376,12 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
     job.queries.push_back(std::move(sql));
   }
 
+  // The access check of this run (docs/access.md, "Limits of a grant"): the class of the SQL, the ceilings of query.export and of the class,
+  // and readonly = 1. The job keeps them. The stream asks again and applies the lower ceilings.
+  job.access.sql_class = access_classify_sql(job.queries);
+  job.access.ceilings = access_ceilings();
+  job.access.read_only = access_read_only();
+
   // Export execution metadata is part of the download contract. It is not a best-effort decoration.
   // Fail the JSON handshake while the UI can still show an explicit error.
   // Do not start an archive that the export cannot fully describe.
@@ -454,6 +460,14 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
     return json_error(res, 404, "export_not_found", "Export is unavailable or expired.");
   }
 
+  // The body of the stream holds only the token, so the rule of the route asks nothing (access_rule). Ask the actions on the host of the
+  // job, before the job is taken: a refusal or a failure of the PDP (503, retryable) must not burn the token.
+  ExportJobAccess stored_access;
+  if (!export_jobs_->peek_access(claims->export_id, claims->host_id, &stored_access)) {
+    return json_error(res, 404, "export_not_found", "Export is unavailable or expired.");
+  }
+  if (!access_check_export_stream(res, claims->host_id, stored_access)) return;
+
   size_t active = active_exports_.load(std::memory_order_relaxed);
   for (;;) {
     if (active >= cfg_.export_settings.max_concurrent) {
@@ -506,10 +520,12 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
   auto stream_started = std::make_shared<std::atomic<bool>>(false);
   // Without query.run.write, every statement of the export runs with readonly = 1 (docs/access.md).
   const bool read_only = access_read_only();
+  // The ceilings of query.export and of the class of the SQL: the lower of the stream and of the run.
+  const AccessCeilings ceilings = access_ceilings();
 
   res.set_chunked_content_provider(
       "application/zip",
-      [this, stream_job, allowed, host_copy, stream_started, read_only](size_t, httplib::DataSink& sink) -> bool {
+      [this, stream_job, allowed, host_copy, stream_started, read_only, ceilings](size_t, httplib::DataSink& sink) -> bool {
         bool expected = false;
         if (!stream_started->compare_exchange_strong(expected, true)) {
           sink.done();
@@ -540,6 +556,8 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
         limits.log_comment = "chdash-export";
         limits.max_execution_time_s = cfg_.export_settings.max_execution_time_s;
         limits.max_memory_usage = cfg_.export_settings.max_memory_usage;
+        // The ceilings of the grant lower these bounds. The profile lowers them again, and the meter of each statement is the backstop.
+        chdash::apply_ceilings(ceilings, limits);
         limits.read_only_strict = read_only;
         limits.canceled = [&sink] { return sink.is_writable && !sink.is_writable(); };
         ChQueryScope scope(std::move(limits));
@@ -568,6 +586,12 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
 
           bool query_failed = false;
           std::string query_error;
+          // The backstop of the ceilings for this statement (access_ceilings.hpp): the progress of ClickHouse gives the rows and bytes read, the
+          // blocks give the result. It works when the profile takes no setting and when the SQL sets a setting of its own. The deadline
+          // ends a statement that takes longer than max_duration with the KILL path of the download watchdog.
+          CeilingMeter meter(ceilings, std::chrono::steady_clock::now());
+          uint64_t result_bytes_seen = 0;
+          std::atomic<bool> deadline_hit{false};
           bool result_entry_open = false;
           bool result_entry_written = false;
           std::unique_ptr<ExportSerializer> serializer;
@@ -583,11 +607,15 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
               enabled.value = "1";
               query.SetSetting("log_queries", enabled);
 
-              query.OnProgress([&](const clickhouse::Progress&) {
+              query.OnProgress([&](const clickhouse::Progress& progress) {
                 if (sink.is_writable && !sink.is_writable()) {
                   disconnected = true;
                   throw ClientDisconnected();
                 }
+                const auto breach = meter.on_progress(progress.rows, progress.bytes);
+                if (breach) throw std::runtime_error(ceiling_breach_text(*breach));
+                const auto late = meter.on_clock(std::chrono::steady_clock::now());
+                if (late) throw std::runtime_error(ceiling_breach_text(*late));
               });
 
               // Execute is the arbitrary-query API in clickhouse-cpp. Attach a data callback to every statement.
@@ -600,6 +628,11 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                 // A command answers with a block that has no column (its header). It opens no member.
                 // The synthetic status member below stands for it.
                 if (block.GetColumnCount() == 0) return true;
+                {
+                  // The rows of this block count before it is written: a block that goes past max_rows is not written.
+                  const auto breach = meter.on_result(block.GetRowCount(), 0);
+                  if (breach) throw std::runtime_error(ceiling_breach_text(*breach));
+                }
                 if (!result_entry_open) {
                   if (!zip.begin_entry(result_name)) {
                     disconnected = true;
@@ -614,6 +647,13 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                   disconnected = true;
                   return false;
                 }
+                {
+                  // The bytes of the result count after the block is written: a result goes past max_result_size by one block at most.
+                  const uint64_t written = serializer->bytes_written();
+                  const auto breach = meter.on_result(0, written - result_bytes_seen);
+                  result_bytes_seen = written;
+                  if (breach) throw std::runtime_error(ceiling_breach_text(*breach));
+                }
                 return true;
               });
 
@@ -623,6 +663,10 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                 DownloadWatchdog watchdog(
                     [&sink] { return !sink.is_writable || sink.is_writable(); },
                     [&host_copy, &query_id] { cancel_export_best_effort(host_copy, query_id); });
+                CeilingDeadline deadline(ceilings.max_duration, [&host_copy, &query_id, &deadline_hit] {
+                  deadline_hit.store(true, std::memory_order_release);
+                  cancel_export_best_effort(host_copy, query_id);
+                });
                 try {
                   ch_execute(*client, query);
                 } catch (...) {
@@ -654,6 +698,13 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
             } catch (const std::exception& e) {
               query_failed = true;
               query_error = stopping() ? std::string(kStopped) : sql_error_text(e);
+              if (deadline_hit.load(std::memory_order_acquire) && ceiling_breach_code(query_error).empty() && !stopping()) {
+                // The deadline of max_duration killed the statement: the error of ClickHouse (QUERY_WAS_CANCELLED) is not the cause.
+                query_error = ceiling_breach_text(meter.duration_breach());
+              } else if (!ceiling_breach_code(query_error).empty()) {
+                // A backstop ended the statement: stop it in ClickHouse too (the KILL path of the download).
+                cancel_export_best_effort(host_copy, query_id);
+              }
             }
           }
 
@@ -680,6 +731,15 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           metadata_limits.log_comment = "chdash:/api/export/stream";
           metadata_limits.max_execution_time_s = 0;
           metadata_limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
+          // The ceilings of the grant bound the SQL of the person, not these reads of ChDash: the scope of the export set them (apply_ceilings).
+          metadata_limits.max_rows_to_read = 0;
+          metadata_limits.max_bytes_to_read = 0;
+          metadata_limits.max_result_rows = 0;
+          metadata_limits.max_result_bytes = 0;
+          metadata_limits.read_overflow_mode.clear();
+          metadata_limits.result_overflow_mode.clear();
+          metadata_limits.timeout_overflow_mode.clear();
+          metadata_limits.ceilings = AccessCeilings{};
           ChQueryScope metadata_scope(std::move(metadata_limits));
           QueryExecutionStats stats = collect_query_execution(
               record,

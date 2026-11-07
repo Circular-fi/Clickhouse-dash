@@ -56,6 +56,8 @@ ChError classify_clickhouse_error(const std::exception& error) {
     return {kind_of_code(server->GetCode()), server->GetCode()};
   }
   if (dynamic_cast<const ChQueryCanceled*>(&error)) return {ChErrorKind::Canceled, 0};
+  // A ceiling of the grant that the client counted: the answer of the code that ClickHouse would send (ch_query.hpp).
+  if (const auto* ceiling = dynamic_cast<const ChCeilingExceeded*>(&error)) return {kind_of_code(ceiling->code()), ceiling->code()};
   if (const auto* system = dynamic_cast<const std::system_error*>(&error)) {
     const int value = system->code().value();
     if (value == ETIMEDOUT || value == EAGAIN || value == EWOULDBLOCK) return {ChErrorKind::Timeout, 0};

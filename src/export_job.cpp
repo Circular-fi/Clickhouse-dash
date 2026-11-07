@@ -75,6 +75,15 @@ std::optional<ExportJob> ExportJobStore::consume(
   return job;
 }
 
+bool ExportJobStore::peek_access(const std::string& export_id, const std::string& host_id, ExportJobAccess* out) {
+  std::lock_guard<std::mutex> lock(mu_);
+  prune_locked(std::chrono::steady_clock::now());
+  const auto it = jobs_.find(export_id);
+  if (it == jobs_.end() || it->second.host_id != host_id) return false;
+  if (out) *out = it->second.access;
+  return true;
+}
+
 size_t ExportJobStore::size() {
   std::lock_guard<std::mutex> lock(mu_);
   prune_locked(std::chrono::steady_clock::now());

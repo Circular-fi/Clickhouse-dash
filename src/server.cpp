@@ -609,7 +609,7 @@ Server::Server(AppConfig cfg, bool start_background)
     for (const auto& host : cfg_.hosts) {
       if (access_valid_id(host.id)) hosts.push_back(AccessHostEntry{host.id, host.label});
     }
-    res.set_content(access_actions_json(access_server_name(), access_features(), hosts), "application/json");
+    res.set_content(access_actions_json(access_server_name(), access_features(), hosts, access_ceiling_bounds()), "application/json");
   });
   // The children of a node, for the form of the grants (ProcurAuth 5.6). It needs the identity token of the edge (access_rule: Identity).
   http_.Get("/.well-known/procurauth/resources", scoped([&](const auto& req, auto& res) { handle_procurauth_resources(req, res); }));
@@ -912,6 +912,7 @@ ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_dead
   limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
   // Every page has a read cap. A statement that reads more fails (<page>_scan_limit). The System page sets its own cap below.
   limits.max_rows_to_read = cfg_.generated_queries.max_rows_to_read;
+  limits.max_bytes_to_read = cfg_.generated_queries.max_bytes_to_read;
   limits.read_overflow_mode = "throw";
   // The System page bounds every read as its own system-table reads are (docs/system.md): read only,
   // a read cap and a result cap that fail rather than cut.
@@ -935,6 +936,8 @@ ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_dead
   } else if (!system_page && req.path.rfind("/api/explorer/", 0) == 0) {
     limits.max_execution_time_s = 10;
   }
+  // The ceilings of the grant lower these bounds (ProcurAuth 7.4). The settings profile of the ClickHouse user lowers them again.
+  apply_ceilings(limits);
   // A statement stops when the browser goes away, and when the server stops.
   limits.canceled = [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); };
   return limits;
@@ -1084,6 +1087,9 @@ ChQueryLimits Server::user_sql_limits(const httplib::Request& req, std::string l
   limits.max_execution_time_s = cfg_.query_options.max_execution_time_s;
   limits.max_memory_usage = cfg_.query_options.max_memory_usage;
   limits.max_rows_to_read = cfg_.query_options.max_rows_to_read;
+  limits.max_bytes_to_read = cfg_.query_options.max_bytes_to_read;
+  // The ceilings of the grant lower these bounds (the caller classified the SQL first).
+  apply_ceilings(limits);
   // Without query.run.write, the SQL of the user runs with readonly = 1 (docs/access.md).
   limits.read_only_strict = access_read_only();
   limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };

@@ -76,6 +76,7 @@ query {
   max_execution_time_s = 0
   max_memory_usage     = 0
   max_rows_to_read     = 0
+  max_bytes_to_read    = 0
 }
 
 # The queries that ChDash writes itself (every page but the Run of the Query
@@ -89,6 +90,8 @@ generated_queries {
   # with <page>_scan_limit (422). The table preview of the Explorer stops at the
   # cap and shows fewer rows. 0 = the settings profile.
   max_rows_to_read = 20000000000
+  # Bytes that one statement may read. 0 = the settings profile.
+  max_bytes_to_read = 0
 }
 
 # The heavy reads of the pages take a place first, for each ClickHouse host. A

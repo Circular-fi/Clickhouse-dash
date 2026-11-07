@@ -101,6 +101,10 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
     // A user that has query.run.read, but not query.run.write, runs with readonly = 1 (docs/access.md, contract 11.6).
   QuerySessionOptions run_options = cfg_.query_options;
   run_options.read_only_strict = access_read_only();
+  // The ceilings of the grant (docs/access.md, "Limits of a grant"): a person with query.run.read and query.run.write gets the ceilings of
+  // the action that fits the SQL. The session lowers its bounds with them and keeps the backstops of the client.
+  access_classify_sql({registry_sql});
+  run_options.ceilings = access_ceilings();
   auto session = std::make_shared<QuerySession>(
       qid,
       host_id,
