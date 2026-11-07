@@ -17,7 +17,9 @@ the headers that matter and the body). The tests set its answers and read what i
                              "context": {"reason": "unknown_subject"} (contract 11.5). subjects gives the whole grant of a
                              subject: true for the entries of its list only (the same forms as allow). parents gives the tree of
                              the types under the service (default {"host": "service", "database": "host"}). status and delay_ms
-                             apply to every evaluation request until the next /control/answer or /control/reset.
+                             apply to every evaluation request until the next /control/answer or /control/reset. fixed gives the
+                             whole answer of each evaluation of an action, for a known subject and a valid chain, for example
+                             {"fixed": {"system.read": {"decision": false, "context": {"reason": "budget_exceeded", "retry_after": 7}}}}.
     GET  /healthz            200
 
 Each evaluation follows the rules of contract 11.4: the chain of the resource (properties.ancestors and the resource) must start with
@@ -46,7 +48,7 @@ SERVICE = os.environ.get("FAKE_PDP_SERVICE", "db")
 LOCK = threading.Lock()
 RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
 DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
-                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}}
+                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
@@ -105,6 +107,9 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     chain = chain_of(resource, answer["parents"] or {})
     if chain is None:
         return dict(INVALID_RESOURCE)
+    fixed = (answer["fixed"] or {}).get(str((action or {}).get("name", "")))
+    if isinstance(fixed, dict):
+        return json.loads(json.dumps(fixed))
     return {"decision": allowed(answer, subject, action, chain, match == "subtree")}
 
 

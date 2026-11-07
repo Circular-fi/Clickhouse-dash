@@ -53,22 +53,62 @@ void refuse_unauthenticated(httplib::Response& res) {
   json_error(res, 401, "unauthenticated", "A valid identity token is required.");
 }
 
+// The answer of a refused decision (ProcurAuth 10.3, access_refusal): 403 for a denial, 429 with Retry-After for budget_exceeded,
+// 503 (retryable) when the PDP gave no valid answer. The body never holds the reason of the PDP.
+void refuse_decision(httplib::Response& res, const AccessDecision& decision, const std::string& action) {
+  const AccessRefusal refusal = access_refusal(decision, action);
+  ApiError error;
+  error.status = refusal.status;
+  error.code = refusal.error_code;
+  error.message = refusal.message;
+  error.retryable = refusal.retryable;
+  error.text.emplace_back("action", action);
+  if (refusal.retry_after) res.set_header("Retry-After", std::to_string(*refusal.retry_after));
+  send_error(res, error);
+}
+
 void refuse_forbidden(httplib::Response& res, const std::string& action) {
-  rapidjson::StringBuffer sb;
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("error_code");
-  w.String("forbidden");
-  w.Key("message");
-  write_json_text(w, "The action " + action + " is not allowed.");
-  w.Key("retryable");
-  w.Bool(false);
-  w.Key("action");
-  write_json_text(w, action);
-  w.EndObject();
-  res.status = 403;
-  res.set_header("Cache-Control", "no-store");
-  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
+  AccessDecision denied;
+  denied.source = "pdp";
+  refuse_decision(res, denied, action);
+}
+
+// The ceilings that ChDash can apply for `action` (ProcurAuth 7.5). ChDash declares no ceiling yet, so a true answer with a ceiling is
+// false. The declaration of the ceilings of the actions fills this set.
+std::set<std::string> declared_ceilings(const std::string& action) {
+  (void)action;
+  return {};
+}
+
+// ProcurAuth 7.5: a true decision with a ceiling that ChDash cannot apply becomes a false decision with no reason (a denial).
+void enforce_ceilings(const std::string& request_id, const std::vector<AccessQuestion>& questions, std::vector<AccessDecision>* decisions) {
+  for (size_t i = 0; i < questions.size() && i < decisions->size(); ++i) {
+    AccessDecision& decision = (*decisions)[i];
+    if (!decision.allowed || decision.limits.empty()) continue;
+    std::string refused;
+    if (ceilings_enforceable(decision.limits, declared_ceilings(questions[i].action), &refused)) continue;
+    log_event(LogLevel::Warn, "access.ceiling_unenforceable",
+              {{"request_id", request_id}, {"action", questions[i].action}, {"resource", access_resource_path(questions[i].resource)},
+               {"ceiling", refused.substr(0, 128)}});
+    decision.allowed = false;
+    decision.reason = PdpReason::None;
+    decision.limits.clear();
+    decision.usage_units.reset();
+  }
+}
+
+// The decisions of `decisions` whose questions have the action `action`.
+std::vector<AccessDecision> decisions_of(const std::vector<AccessQuestion>& questions, const std::vector<AccessDecision>& decisions,
+                                         std::string_view action) {
+  std::vector<AccessDecision> out;
+  for (size_t i = 0; i < questions.size() && i < decisions.size(); ++i) {
+    if (questions[i].action == action) out.push_back(decisions[i]);
+  }
+  return out;
+}
+
+bool any_failed(const std::vector<AccessDecision>& decisions) {
+  return std::any_of(decisions.begin(), decisions.end(), [](const AccessDecision& decision) { return decision.failed; });
 }
 
 bool is_write_method(const std::string& method) { return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE"; }
@@ -161,7 +201,10 @@ void Server::init_access() {
         [this](const std::string& subject, const std::vector<AccessQuestion>& questions) {
           PdpCallContext context;
           context.request_id = current_request_context().request_id;
-          return pdp_->decide(subject, questions, context);
+          // Each decision keeps AccessDecision::failed: a failure of the PDP is not a denial (ProcurAuth 10.3).
+          std::vector<AccessDecision> decisions = pdp_->decide(subject, questions, context);
+          enforce_ceilings(context.request_id, questions, &decisions);
+          return decisions;
         },
         [] {
           return static_cast<int64_t>(
@@ -172,8 +215,11 @@ void Server::init_access() {
 
 std::vector<AccessDecision> Server::access_decide(const std::vector<AccessQuestion>& questions) {
   const AccessRequestState& state = access_state();
-  if (!pdp_ || !state.enforced || state.subject.empty()) return std::vector<AccessDecision>(questions.size());
-  return pdp_->decide(state.subject, questions, state.call);
+  // Without a PDP or a subject, no decision is valid: each one fails (fail closed).
+  if (!pdp_ || !state.enforced || state.subject.empty()) return std::vector<AccessDecision>(questions.size(), access_refusal_of({}));
+  std::vector<AccessDecision> decisions = pdp_->decide(state.subject, questions, state.call);
+  enforce_ceilings(state.call.request_id, questions, &decisions);
+  return decisions;
 }
 
 bool Server::check_access(const httplib::Request& req, httplib::Response& res, const std::string& request_id) {
@@ -251,9 +297,10 @@ AccessResource Server::access_resource_of(const std::string& host_id, const std:
 
 bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, httplib::Response& res, bool body_read) {
   AccessRequestState& state = access_state();
-  const auto deny = [&](const std::string& action) {
+  // Refuse the operation with the refusal of `refused` (access_refusal_of): 503, 429 or 403.
+  const auto deny = [&](const std::string& action, const std::vector<AccessDecision>& refused) {
     if (!body_read && is_write_method(req.method)) res.set_header("Connection", "close");
-    refuse_forbidden(res, action);
+    refuse_decision(res, access_refusal_of(refused), action);
     return true;
   };
   if (rule.kind != AccessRuleKind::Action && rule.kind != AccessRuleKind::Run && rule.kind != AccessRuleKind::Export) return false;
@@ -278,8 +325,12 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
         if (questions[i].action == "query.export") export_somewhere = true;
         else run_somewhere = true;
       }
-      if (!export_somewhere) return deny("query.export");
-      if (!run_somewhere) return deny("query.run.read");
+      if (!export_somewhere) return deny("query.export", decisions_of(questions, decisions, "query.export"));
+      if (!run_somewhere) {
+        std::vector<AccessDecision> run = decisions_of(questions, decisions, "query.run.read");
+        for (auto& decision : decisions_of(questions, decisions, "query.run.write")) run.push_back(std::move(decision));
+        return deny("query.run.read", run);
+      }
     }
     state.pending = true;
     state.pending_rule = rule;
@@ -304,13 +355,13 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
   switch (rule.kind) {
     case AccessRuleKind::Action: {
       const auto decisions = access_decide({AccessQuestion{rule.action, resource}});
-      return decisions.front().allowed ? false : deny(rule.action);
+      return decisions.front().allowed ? false : deny(rule.action, decisions);
     }
     case AccessRuleKind::Run: {
       const auto decisions = access_decide({AccessQuestion{"query.run.read", resource}, AccessQuestion{"query.run.write", resource}});
       const bool read = decisions[0].allowed;
       const bool write = decisions[1].allowed;
-      if (!read && !write) return deny("query.run.read");
+      if (!read && !write) return deny("query.run.read", decisions);
       // readonly = 1 without query.run.write on this host (or on this database of the host).
       state.read_only = !write;
       return false;
@@ -319,8 +370,8 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
       // An export runs SQL: it needs query.export and, as a run, query.run.read or query.run.write, all on the host of the export.
       const auto decisions = access_decide({AccessQuestion{"query.export", resource}, AccessQuestion{"query.run.read", resource},
                                             AccessQuestion{"query.run.write", resource}});
-      if (!decisions[0].allowed) return deny("query.export");
-      if (!decisions[1].allowed && !decisions[2].allowed) return deny("query.run.read");
+      if (!decisions[0].allowed) return deny("query.export", {decisions[0]});
+      if (!decisions[1].allowed && !decisions[2].allowed) return deny("query.run.read", {decisions[1], decisions[2]});
       state.read_only = !decisions[2].allowed;
       return false;
     }
@@ -341,20 +392,29 @@ bool Server::check_access_body(const httplib::Request& req, httplib::Response& r
 bool Server::access_allows(httplib::Response& res, const char* action, const std::string& host_id, const std::string& database) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return true;
-  if (access_decide({AccessQuestion{action, access_resource_of(host_id, database)}}).front().allowed) return true;
-  refuse_forbidden(res, action);
+  const auto decisions = access_decide({AccessQuestion{action, access_resource_of(host_id, database)}});
+  if (decisions.front().allowed) return true;
+  refuse_decision(res, decisions.front(), action);
   return false;
 }
 
 void Server::access_forbidden(httplib::Response& res, const std::string& action) { refuse_forbidden(res, action); }
 
+void Server::access_unavailable(httplib::Response& res, const std::string& action) { refuse_decision(res, access_refusal_of({}), action); }
+
 bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions) {
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp() || questions.empty()) return true;
   const auto decisions = access_decide(questions);
+  // A failure answers 503 before a denial: the failed question can be the only one that a working PDP refuses.
+  for (size_t i = 0; i < questions.size(); ++i) {
+    if (!decisions[i].failed) continue;
+    refuse_decision(res, decisions[i], questions[i].action);
+    return false;
+  }
   for (size_t i = 0; i < questions.size(); ++i) {
     if (decisions[i].allowed) continue;
-    refuse_forbidden(res, questions[i].action);
+    refuse_decision(res, decisions[i], questions[i].action);
     return false;
   }
   return true;
@@ -362,7 +422,8 @@ bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQ
 
 std::optional<std::unordered_set<std::string>> Server::access_readable_databases(const std::vector<const char*>& actions,
                                                                                 const std::string& host_id,
-                                                                                const std::vector<std::string>& databases) {
+                                                                                const std::vector<std::string>& databases, bool* failed) {
+  if (failed) *failed = false;
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return std::nullopt;
   std::vector<std::string> names;
@@ -379,6 +440,7 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
     for (const char* action : actions) questions.push_back(AccessQuestion{action, access_resource_of(host_id, name)});
   }
   const auto decisions = access_decide(questions);
+  if (failed) *failed = any_failed(decisions);
   for (size_t i = 0; i < actions.size(); ++i) {
     if (decisions[i].allowed) return std::nullopt;
   }
@@ -399,16 +461,19 @@ std::vector<AccessDecision> Server::access_host_decisions(std::vector<AccessQues
   return access_decide(*questions);
 }
 
-std::optional<std::set<std::string>> Server::access_visible_hosts() {
+std::optional<std::set<std::string>> Server::access_visible_hosts(bool* failed) {
+  if (failed) *failed = false;
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return std::nullopt;
   std::vector<AccessQuestion> questions;
   const auto decisions = access_host_decisions(&questions, std::string());
+  if (failed) *failed = any_failed(decisions);
   return chdash::access_visible_hosts(questions, decisions);
 }
 
-std::set<std::string> Server::navigation_pages(const std::string& database, bool* database_allowed) {
+std::set<std::string> Server::navigation_pages(const std::string& database, bool* database_allowed, bool* failed) {
   if (database_allowed) *database_allowed = true;
+  if (failed) *failed = false;
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) {
     std::set<std::string> all;
@@ -419,6 +484,7 @@ std::set<std::string> Server::navigation_pages(const std::string& database, bool
   // address on each host.
   std::vector<AccessQuestion> questions;
   const auto decisions = access_host_decisions(&questions, database);
+  if (failed) *failed = any_failed(decisions);
   if (database_allowed) {
     *database_allowed = false;
     for (size_t i = 0; i < questions.size() && !database.empty(); ++i) {

@@ -105,7 +105,11 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
 void Server::handle_api_hosts(const httplib::Request&, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
   // In the authzen mode, the list holds only the hosts on which the human holds one action at least (one batch of the PDP, cached).
-  const HostsSnapshot snap = visible_snapshot(health_->snapshot(), access_visible_hosts());
+  // A failure of the PDP gives 503, not an empty list (ProcurAuth 10.3).
+  bool failed = false;
+  const std::optional<std::set<std::string>> visible = access_visible_hosts(&failed);
+  if (failed) return access_unavailable(res, "hosts");
+  const HostsSnapshot snap = visible_snapshot(health_->snapshot(), visible);
   const std::string json = build_hosts_json(snap);
   res.status = 200;
   res.set_content(json, "application/json");
@@ -136,7 +140,12 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
     return json_error(res, 503, "too_many_streams", "too many host status streams are open: poll /api/hosts");
   }
   // The hosts that the human can see when the stream starts. The stream keeps them: the identity of a stream is checked once, at its start.
-  const std::optional<std::set<std::string>> visible = access_visible_hosts();
+  bool failed = false;
+  const std::optional<std::set<std::string>> visible = access_visible_hosts(&failed);
+  if (failed) {
+    active_host_streams_.fetch_sub(1);
+    return access_unavailable(res, "hosts");
+  }
   const HostsSnapshot initial_snapshot = visible_snapshot(health_->snapshot(), visible);
   auto st = std::make_shared<HostsStreamState>();
   st->last_version = health_->version();

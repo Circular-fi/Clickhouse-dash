@@ -664,6 +664,196 @@ void test_pdp_cache_bytes() {
   CHECK(client.cached_bytes() <= options.cache_bytes);
 }
 
+// ---- ProcurAuth: the whole answer, the outcome of a decision and the cache (foundation) ------------------------------------------
+
+// ProcurAuth 7.3, 7.6, 6.12, 11.1: the limits, the units, the reason and retry_after of an answer. A bad member makes the body not valid.
+void test_pdp_answer_context() {
+  std::vector<PdpAnswer> d;
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":1000,"max_duration":0}}})", 1, &d));
+  CHECK(d[0].decision && d[0].limits.size() == 2 && d[0].limits.at("max_rows") == 1000 && d[0].limits.at("max_duration") == 0);
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{}}})", 1, &d) && d[0].limits.empty());
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":18446744073709551615}}})", 1, &d));
+  // Bad types and values of the limits of a true answer: the answer is not valid.
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":-1}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":1.5}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":10.0}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":1e3}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":"10"}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":null}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":{"amount":1}}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":[1]}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":7}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":1,"max_rows":2}}})", 1, &d));
+  // One bad item makes the whole batch not valid.
+  CHECK(!PdpClient::parse_answer(R"({"evaluations":[{"decision":true},{"decision":true,"context":{"limits":{"max_rows":-5}}}]})", 2, &d));
+  // 7.6: ChDash ignores the limits of a false answer, also limits with a bad type.
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"limits":{"max_rows":10}}})", 1, &d) && d[0].limits.empty());
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"limits":"bad"}})", 1, &d) && d[0].limits.empty());
+  // 6.12: the units of a true answer, 0 or 1.
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"usage":{"units":1}}})", 1, &d) && d[0].usage_units == uint64_t(1));
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"usage":{"units":0}}})", 1, &d) && d[0].usage_units == uint64_t(0));
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"usage":{}}})", 1, &d) && !d[0].usage_units);
+  CHECK(PdpClient::parse_answer(R"({"decision":true})", 1, &d) && !d[0].usage_units && d[0].reason == PdpReason::None);
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"usage":{"units":2}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"usage":{"units":-1}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"usage":{"units":"1"}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"usage":1}})", 1, &d));
+  // 11.1: the reasons of a false answer.
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"invalid_resource"}})", 1, &d) && d[0].reason == PdpReason::InvalidResource);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"invalid_request"}})", 1, &d) && d[0].reason == PdpReason::InvalidRequest);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"unknown_subject"}})", 1, &d));
+  CHECK(d[0].reason == PdpReason::UnknownSubject && d[0].unknown_subject);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"something new"}})", 1, &d) && d[0].reason == PdpReason::Other);
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":7}})", 1, &d) && d[0].reason == PdpReason::Other);
+  CHECK(PdpClient::parse_answer(R"({"decision":false})", 1, &d) && d[0].reason == PdpReason::None && !d[0].retry_after);
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"reason":"budget_exceeded","retry_after":5}})", 1, &d));
+  CHECK(d[0].reason == PdpReason::None && !d[0].retry_after);
+  // budget_exceeded has retry_after: a whole number from 1. Without it, the answer is not valid.
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":12}})", 1, &d));
+  CHECK(d[0].reason == PdpReason::BudgetExceeded && d[0].retry_after == uint64_t(12) && !d[0].unknown_subject);
+  CHECK(!PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"budget_exceeded"}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":0}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":11.2}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":"12"}})", 1, &d));
+  // retry_after of another reason means nothing.
+  CHECK(PdpClient::parse_answer(R"({"decision":false,"context":{"reason":"invalid_resource","retry_after":"x"}})", 1, &d) && !d[0].retry_after);
+  CHECK_EQ(std::string(pdp_reason_name(PdpReason::BudgetExceeded)), std::string("budget_exceeded"));
+  CHECK_EQ(std::string(pdp_reason_name(PdpReason::None)), std::string(""));
+}
+
+// ProcurAuth 10.3: a failure (503) is not a denial (403); budget_exceeded gives 429 with Retry-After. The reason never reaches the client.
+void test_access_outcome() {
+  std::vector<FakeTransport::Call> calls;
+  auto transport = std::make_unique<FakeTransport>(&calls);
+  FakeTransport* fake = transport.get();
+  PdpOptions options;
+  options.timeout = std::chrono::milliseconds(200);
+  options.cache_ttl = std::chrono::seconds(60);
+  PdpClient client(options, std::move(transport));
+  const AccessQuestion question{"system.read", access_service_resource("db")};
+
+  fake->answer = ok(R"({"decision":false,"context":{"reason":"invalid_resource"}})");
+  const AccessDecision denied = client.decide("alice", {question}, PdpCallContext{})[0];
+  CHECK(!denied.allowed && !denied.failed && access_outcome(denied) == AccessOutcome::Denied);
+  PdpHttpResult down;
+  down.error = "Connection";
+  fake->answer = down;
+  const AccessDecision failed = client.decide("bob", {question}, PdpCallContext{})[0];
+  CHECK(!failed.allowed && failed.failed && std::string(failed.source) == "error" && access_outcome(failed) == AccessOutcome::Failed);
+  PdpHttpResult status401;
+  status401.status = 401;
+  fake->answer = status401;
+  CHECK(client.decide("bob", {question}, PdpCallContext{})[0].failed);
+  fake->answer = ok(R"({"decision":true,"context":{"limits":{"max_rows":-1}}})");
+  CHECK(client.decide("bob", {question}, PdpCallContext{})[0].failed);
+  fake->answer = ok(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":7}})");
+  const AccessDecision budget = client.decide("carol", {question}, PdpCallContext{})[0];
+  CHECK(access_outcome(budget) == AccessOutcome::BudgetExceeded && budget.retry_after == uint64_t(7));
+  fake->answer = ok(R"({"decision":true})");
+  const AccessDecision allowed = client.decide("dave", {question}, PdpCallContext{})[0];
+  CHECK(access_outcome(allowed) == AccessOutcome::Allowed && !allowed.failed);
+
+  // The answer of a route.
+  AccessRefusal r = access_refusal(denied, "system.read");
+  CHECK(r.status == 403 && r.error_code == "forbidden" && !r.retryable && !r.retry_after);
+  CHECK_EQ(r.message, std::string("The action system.read is not allowed."));
+  r = access_refusal(failed, "system.read");
+  CHECK(r.status == 503 && r.error_code == "pdp_unavailable" && r.retryable && !r.retry_after);
+  r = access_refusal(budget, "query.run.read");
+  CHECK(r.status == 429 && r.error_code == "too_many_requests" && r.retryable && r.retry_after == uint64_t(7));
+  for (const auto& refusal : {access_refusal(denied, "a"), access_refusal(failed, "a"), access_refusal(budget, "a")}) {
+    CHECK(refusal.message.find("invalid_resource") == std::string::npos && refusal.message.find("budget_exceeded") == std::string::npos);
+  }
+  // Several decisions: a failure first, then the largest retry_after, then the first denial. No decision is a failure.
+  AccessDecision budget2 = budget;
+  budget2.retry_after = 30;
+  CHECK(access_refusal_of({denied, budget, failed}).failed);
+  CHECK(access_refusal_of({denied, budget, budget2}).retry_after == uint64_t(30));
+  CHECK(access_outcome(access_refusal_of({denied, denied})) == AccessOutcome::Denied);
+  CHECK(access_outcome(access_refusal_of({})) == AccessOutcome::Failed);
+  // A decision with no PDP (the default) is a denial, not a failure; the server marks a failure itself.
+  CHECK(access_outcome(AccessDecision{}) == AccessOutcome::Denied);
+
+  // ProcurAuth 7.5: each ceiling must be declared. ChDash declares none yet.
+  std::string refused;
+  CHECK(ceilings_enforceable({}, {}));
+  CHECK(!ceilings_enforceable({{"max_rows", 10}}, {}, &refused) && refused == "max_rows");
+  CHECK(ceilings_enforceable({{"max_rows", 10}}, {"max_rows", "max_duration"}));
+  CHECK(!ceilings_enforceable({{"max_rows", 10}, {"max_secret", 1}}, {"max_rows"}, &refused) && refused == "max_secret");
+}
+
+// ProcurAuth 10.1: the cache keeps the whole answer, never an answer that took units, and budget_exceeded for retry_after at most.
+// When it is full, it removes the expired answers, then the oldest answers: it never empties itself.
+void test_pdp_cache_answers() {
+  std::vector<FakeTransport::Call> calls;
+  auto transport = std::make_unique<FakeTransport>(&calls);
+  FakeTransport* fake = transport.get();
+  PdpOptions options;
+  options.cache_ttl = std::chrono::seconds(60);
+  options.cache_entries = 4;
+  PdpClient client(options, std::move(transport));
+  const auto q = [](int n) { return AccessQuestion{"explorer.read", access_database_resource("db", "prod", "d" + std::to_string(n))}; };
+  const auto ask = [&](int n) { return client.decide("alice", {q(n)}, PdpCallContext{})[0]; };
+
+  // A kept true keeps its limits.
+  fake->answer = ok(R"({"decision":true,"context":{"limits":{"max_rows":1000}}})");
+  CHECK(ask(0).limits.at("max_rows") == 1000);
+  fake->answer = ok(R"({"decision":false})");
+  const AccessDecision kept = ask(0);
+  CHECK(std::string(kept.source) == "cache" && kept.allowed && kept.limits.size() == 1 && kept.limits.at("max_rows") == 1000);
+  // An answer with units 1 is never kept; units 0 is kept.
+  fake->answer = ok(R"({"decision":true,"context":{"usage":{"units":1}}})");
+  ask(1);
+  CHECK(std::string(ask(1).source) == "pdp");
+  fake->answer = ok(R"({"decision":true,"context":{"usage":{"units":0}}})");
+  ask(2);
+  const AccessDecision zero = ask(2);
+  CHECK(std::string(zero.source) == "cache" && zero.usage_units == uint64_t(0));
+  // A failure is never kept.
+  PdpHttpResult down;
+  down.error = "Connection";
+  fake->answer = down;
+  ask(3);
+  CHECK(std::string(ask(3).source) == "error");
+  CHECK_EQ(client.cached_entries(), size_t(2));
+  // Full: the oldest answers go first, the newer stay.
+  fake->answer = ok(R"({"decision":false})");
+  for (int n = 10; n < 13; ++n) ask(n);
+  CHECK_EQ(client.cached_entries(), size_t(4));
+  const size_t before = calls.size();
+  CHECK(std::string(ask(0).source) == "pdp");  // the oldest went (q0, then q2 when q0 came back)
+  CHECK_EQ(calls.size(), before + 1);
+  CHECK_EQ(client.cached_entries(), size_t(4));
+  CHECK(std::string(ask(12).source) == "cache" && std::string(ask(11).source) == "cache");
+  CHECK(std::string(ask(2).source) == "pdp");
+
+  // budget_exceeded stays for the lower of retry_after and cache_ttl; the expired answers go before the others.
+  std::vector<FakeTransport::Call> short_calls;
+  auto short_transport = std::make_unique<FakeTransport>(&short_calls);
+  FakeTransport* short_fake = short_transport.get();
+  PdpOptions short_options;
+  short_options.cache_ttl = std::chrono::milliseconds(150);
+  short_options.cache_entries = 3;
+  PdpClient short_client(short_options, std::move(short_transport));
+  const auto short_ask = [&](int n) { return short_client.decide("bob", {q(n)}, PdpCallContext{})[0]; };
+  short_fake->answer = ok(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":1}})");
+  CHECK(access_outcome(short_ask(0)) == AccessOutcome::BudgetExceeded);
+  const AccessDecision kept_budget = short_ask(0);
+  CHECK(std::string(kept_budget.source) == "cache" && kept_budget.retry_after == uint64_t(1));
+  short_fake->answer = ok(R"({"decision":true})");
+  short_ask(1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  short_client.decide("bob", {q(2)}, PdpCallContext{});
+  // q0 and q1 expired: the full cache removes them and keeps q2, q3 and q4.
+  short_ask(3);
+  short_ask(4);
+  CHECK_EQ(short_client.cached_entries(), size_t(3));
+  const size_t short_before = short_calls.size();
+  short_ask(2);
+  short_ask(4);
+  CHECK_EQ(short_calls.size(), short_before);
+}
+
 // The resources of the hosts (contract 11.4): the encoded ids, the path, the valid ids, and the cache that keeps two hosts apart.
 void test_resources() {
   CHECK_EQ(access_encode_id("analytics"), std::string("analytics"));
@@ -879,7 +1069,12 @@ void test_navigation_pages() {
   }
   const auto decide = [&](std::set<std::string> allowed) {
     std::vector<AccessDecision> out;
-    for (const auto& q : questions) out.push_back(AccessDecision{allowed.count(q.action + "@" + q.resource.type) != 0, "pdp"});
+    for (const auto& q : questions) {
+      AccessDecision decision;
+      decision.allowed = allowed.count(q.action + "@" + q.resource.type) != 0;
+      decision.source = "pdp";
+      out.push_back(decision);
+    }
     return access_navigation_pages(questions, out);
   };
   // A human with the query actions only: the Query page only.
@@ -948,6 +1143,9 @@ int main() {
   RUN(test_pdp_body_and_answer);
   RUN(test_pdp_client);
   RUN(test_pdp_cache_bytes);
+  RUN(test_pdp_answer_context);
+  RUN(test_access_outcome);
+  RUN(test_pdp_cache_answers);
   RUN(test_resources);
   RUN(test_host_hierarchy);
   RUN(test_navigation_pages);

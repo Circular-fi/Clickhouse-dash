@@ -255,17 +255,68 @@ def test_u07_a_false_decision_gives_403_with_the_action_and_a_true_one_200():
     assert call("GET", SYSTEM).status_code == 200
 
 
+def assert_pdp_unavailable(response: requests.Response, action: str) -> None:
+    """ProcurAuth 10.3: no valid answer of the PDP gives 503 (retryable), never the 403 of a denial."""
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["error_code"] == "pdp_unavailable" and body["retryable"] is True and body["action"] == action, body
+
+
 @needs_access
-def test_u08_no_answer_or_an_error_of_the_pdp_gives_403():
+def test_u08_no_answer_or_an_error_of_the_pdp_gives_503():
     answer(status=500)
-    assert call("GET", SYSTEM).status_code == 403
+    assert_pdp_unavailable(call("GET", SYSTEM), "system.read")
+    # A refusal of the credential of the server by the PDP is a failure too, not a denial.
+    answer(status=401)
+    assert_pdp_unavailable(call("GET", SYSTEM), "system.read")
     answer(delay_ms=1500)  # pdp.timeout is 500ms
     started = time.monotonic()
-    assert call("GET", SYSTEM).status_code == 403
+    assert_pdp_unavailable(call("GET", SYSTEM), "system.read")
     assert time.monotonic() - started < 1.4
     # The failure is never kept: the next answer applies at once.
     pdp("/control/answer", {"default": True})
     assert call("GET", SYSTEM).status_code == 200
+
+
+@needs_access
+def test_a_failure_of_the_pdp_gives_the_503_page_and_no_host_list():
+    answer(status=500)
+    page = call("GET", "/system")
+    assert page.status_code == 503, page.text
+    assert 'id="accessUnavailable"' in page.text and 'id="accessDenied"' not in page.text
+    assert "<script" not in page.text
+    assert call("GET", "/").status_code == 503
+    assert_pdp_unavailable(call("GET", "/api/hosts"), "hosts")
+    # A body that is not a valid answer is a failure: a ceiling with a negative value.
+    answer(fixed={"system.read": {"decision": True, "context": {"limits": {"max_rows": -1}}}})
+    assert_pdp_unavailable(call("GET", SYSTEM), "system.read")
+
+
+@needs_access
+def test_budget_exceeded_gives_429_with_retry_after_and_no_reason():
+    answer(fixed={"system.read": {"decision": False, "context": {"reason": "budget_exceeded", "retry_after": 7}}})
+    response = call("GET", SYSTEM)
+    assert response.status_code == 429, response.text
+    assert response.headers.get("Retry-After") == "7"
+    body = response.json()
+    assert body["error_code"] == "too_many_requests" and body["retryable"] is True and body["action"] == "system.read"
+    # ProcurAuth 10.3: the reason of the PDP never reaches the client.
+    assert "budget_exceeded" not in response.text and "reason" not in body
+    # Another reason is a denial: 403.
+    answer(fixed={"system.read": {"decision": False, "context": {"reason": "invalid_resource"}}})
+    response = call("GET", SYSTEM)
+    assert response.status_code == 403 and "invalid_resource" not in response.text
+
+
+@needs_access
+def test_a_true_answer_with_a_ceiling_that_chdash_cannot_apply_is_a_denial():
+    # ProcurAuth 7.5: ChDash declares no ceiling for system.read, so it cannot apply max_rows.
+    answer(fixed={"system.read": {"decision": True, "context": {"limits": {"max_rows": 10}}}})
+    response = call("GET", SYSTEM)
+    assert response.status_code == 403 and response.json()["action"] == "system.read", response.text
+    # ProcurAuth 7.6: the limits of a false answer mean nothing.
+    answer(fixed={"system.read": {"decision": False, "context": {"limits": "not an object"}}})
+    assert call("GET", SYSTEM).status_code == 403
 
 
 @needs_access

@@ -60,6 +60,9 @@ std::string access_mark_navigation(std::string_view html, const std::set<std::st
 // The 403 page of `page`: no script and no data, the action that it needs, and a link to each page of `pages`. `root` leads from the
 // address of the request to the root of ChDash (access_root_of), so a prefix of a reverse proxy stays.
 std::string access_denied_page(const AccessPage& page, const std::set<std::string>& pages, const std::string& root);
+// The 503 page of `page` when the PDP gave no valid decision (ProcurAuth 10.3): no script and no data. It tells the human to try
+// again later. It is not the 403 page: a failure is not a denial.
+std::string access_unavailable_page(const AccessPage& page);
 // The page to open at the root of ChDash: the first page of `pages` in the order of the navigation, or null when there is none.
 const AccessPage* access_first_page(const std::set<std::string>& pages);
 // "../" for each directory level of `path` below the root ("/query" gives "", "/explorer/catalog/db" gives "../../").

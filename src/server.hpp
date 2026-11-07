@@ -450,27 +450,33 @@ private:
   std::vector<AccessDecision> access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database);
   // The hosts that the subject of this request can see: the hosts with one action at least, on the host or below it (one batch with
   // the match "subtree", cached). Return nullopt when no check applies (the open mode, a call of MCP): every host is visible.
-  std::optional<std::set<std::string>> access_visible_hosts();
+  // *failed (when not null) receives true when a decision of the batch failed (AccessDecision::failed): the route then answers 503.
+  std::optional<std::set<std::string>> access_visible_hosts(bool* failed = nullptr);
   // Return the decision of `action` on the database `database` of the host `host_id` (access_resource_of). Return false after the
-  // function writes the 403. Return true when no check applies, for example in the open mode or for a call of MCP.
+  // function writes the refusal: 403, 429 with Retry-After, or 503 when the PDP gave no valid answer (ProcurAuth 10.3). Return true
+  // when no check applies, for example in the open mode or for a call of MCP.
   bool access_allows(httplib::Response& res, const char* action, const std::string& host_id, const std::string& database);
-  // Return true when the subject of this request passes every question. Else write the 403 of the first refused action, and
-  // return false. Return true when no check applies.
+  // Return true when the subject of this request passes every question. Else write the refusal of the first failed question (503),
+  // or else of the first refused question (403 or 429), and return false. Return true when no check applies.
   bool access_allows_all(httplib::Response& res, const std::vector<AccessQuestion>& questions);
   // Write the 403 of a refused action (docs/access.md, "Enforcement").
   static void access_forbidden(httplib::Response& res, const std::string& action);
+  // Write the 503 of a decision that the PDP did not give (pdp_unavailable, retryable).
+  static void access_unavailable(httplib::Response& res, const std::string& action);
   // The databases of `databases` on the host `host_id` that the subject of this request may read: one batch asks each action of
   // `actions` on the host and on each database of the host. A database passes when one action is true on it or on the host (a grant
   // on the service covers the host). Return nullopt when every database passes: no check applies, or an action is true on the host.
+  // *failed (when not null) receives true when a decision of the batch failed: the caller then answers 503 (access_unavailable).
   std::optional<std::unordered_set<std::string>> access_readable_databases(const std::vector<const char*>& actions, const std::string& host_id,
-                                                                          const std::vector<std::string>& databases);
+                                                                          const std::vector<std::string>& databases, bool* failed = nullptr);
   // Return the decision of `action` on the service for the subject of this request.
   // The page uses it to show or hide a control. Return true when no check applies.
   bool access_permits(const char* action);
   // The pages of one render for the subject of this request (docs/access.md, "Navigation"), from one batch of the PDP. A `database`
   // that is not empty adds explorer.read on it on each host; *database_allowed receives true when one of them is true. In the open
   // mode, every page.
-  std::set<std::string> navigation_pages(const std::string& database, bool* database_allowed = nullptr);
+  // *failed (when not null) receives true when a decision of the batch failed: the page then answers 503, not the 403 page.
+  std::set<std::string> navigation_pages(const std::string& database, bool* database_allowed = nullptr, bool* failed = nullptr);
   // Serve the shell `file` of a page. In the authzen mode, a human who cannot use the page gets the 403 page (no script, no data), and
   // the other humans get the shell with the links to the pages that they cannot use hidden (access_pages.hpp).
   void serve_shell(const httplib::Request& req, httplib::Response& res, const std::string& file);
