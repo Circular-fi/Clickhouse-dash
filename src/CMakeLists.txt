@@ -104,7 +104,7 @@ target_compile_definitions(chdash_signatures PUBLIC
 set_target_properties(chdash_signatures PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # The access of humans (docs/access.md): the identity token, the actions and their routes, the PDP.
-set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_pages.cpp access_pdp.cpp access_resource.cpp signature_verify.cpp)
+set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_options.cpp access_pages.cpp access_pdp.cpp access_resource.cpp signature_verify.cpp)
 
 if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
@@ -456,6 +456,7 @@ if (CHDASH_BUILD_APP)
     system_request.cpp
     system_json.cpp
     api_explorer.cpp
+    api_resources.cpp
     api_system_activity.cpp
     api_system.cpp
     api_traces.cpp

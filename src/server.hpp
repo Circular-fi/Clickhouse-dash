@@ -561,6 +561,8 @@ private:
   void handle_export_stream(const httplib::Request& req, httplib::Response& res);
   void handle_export_stream_not_allowed(const httplib::Request& req, httplib::Response& res);
 
+  // GET /.well-known/procurauth/resources (access_options.hpp, docs/access.md, "The route of the options").
+  void handle_procurauth_resources(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_catalog(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
@@ -828,6 +830,11 @@ private:
   TtlCache<std::string, MetaCatalog> meta_catalog_cache_{cache_options<MetaCatalog>(
       std::chrono::minutes(10), {}, 2048, 64u << 20,
       [](const MetaCatalog& v) { return sizeof(v) + 192 * v.items.size(); })};
+  // The databases of each host for the route of the options (api_resources.cpp): the names that the runner of the host sees, without the
+  // system databases. The key is the id of the host. The list is the same for every human: the decisions of the PDP are not in it.
+  TtlCache<std::string, std::vector<std::string>> options_databases_cache_{cache_options<std::vector<std::string>>(
+      std::chrono::seconds(30), {}, 256, 16u << 20,
+      [](const std::vector<std::string>& v) { return sizeof(v) + 64 * v.size(); })};
   // Browse uses a small catalog that holds only the identity (one entry for each host and database).
   // The rich summaries are loaded only when a table is opened or when Graph needs them.
   TtlCache<std::string, ExplorerCatalog> explorer_catalog_list_cache_{cache_options<ExplorerCatalog>(
