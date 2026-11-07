@@ -501,17 +501,22 @@ A PDP that is down never looks like a denial. A `tools/list` that cannot be deci
 
 ### Ceilings
 
-A true answer can have `limits` (ProcurAuth 7.3). For a tool call, ChDash takes the lowest value of each ceiling of the actions that the tool uses. The ceiling lowers the limit of the call. It never raises the limit.
+A true answer can have `limits` (ProcurAuth 7.3). For a tool call, ChDash takes the lowest value of each ceiling of the actions that the tool uses. The ceiling lowers the limit of the call. It never raises the limit. The six ceilings of the document apply:
 
 | Ceiling | Limit of the call |
 | --- | --- |
 | `max_rows` | Rows in the result |
 | `max_duration` (seconds) | Time of the call |
 | `max_rows_read` | `max_rows_to_read` |
+| `max_read_size` (bytes) | `max_bytes_to_read` |
 | `max_memory` (bytes) | `max_memory_usage` |
 | `max_result_size` (bytes) | Bytes in the result |
 
-A ceiling with another name, or with a value below 1, cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`. The ceilings that the PDP can send for an action are the ceilings that ChDash declares for it ([access.md](access.md#decisions)).
+The tools of the data, of the SQL and of the observability send these settings with their statements, when the settings profile of the MCP user has no lower value. An API tool gives the ceilings to the route that it calls. The route then applies them as it does for the pages ([access.md](access.md#how-chdash-applies-a-ceiling)).
+
+The PDP can send for an action only the ceilings that the document declares for that action ([access.md](access.md#actions-that-list-ceilings)). For example, `explorer.read` declares `max_rows`, `max_rows_read`, `max_duration` and `max_memory`, and `mcp.session` declares none. A ceiling that the action does not declare, a name that ChDash does not know, or a value below 1 cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`.
+
+In the mode `keys`, the key of the page applies no ceiling. A `true` answer for the creator of the key with a ceiling is `false` for the key.
 
 ### What is lost
 

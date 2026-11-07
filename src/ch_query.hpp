@@ -223,6 +223,7 @@ struct ChMcpLimits {
   int64_t timeout_seconds = 0;
   int64_t max_memory_bytes = 0;
   int64_t max_rows_to_read = 0;  // 0 = none
+  int64_t max_bytes_to_read = 0; // 0 = none
   int64_t sql_bytes = 0;         // the size of the statement: max_query_size follows it
   std::string log_comment;
 };

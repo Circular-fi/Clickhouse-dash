@@ -757,6 +757,7 @@ void test_mcp_settings_follow_the_profile() {
   CHECK(setting(plan.settings, "max_memory_usage") == "1073741824");
   CHECK(setting(plan.settings, "max_query_size") == "262144");
   CHECK(setting(plan.settings, "max_rows_to_read") == "<unset>");
+  CHECK(setting(plan.settings, "max_bytes_to_read") == "<unset>");
   CHECK(setting(plan.settings, "log_comment") == "chdash-mcp key=k1");
   CHECK(plan.max_rows == 1000 && !plan.rows_cut_by_profile && !plan.bytes_cut_by_profile);
   // An unreadable profile is a user without one.
@@ -783,8 +784,11 @@ void test_mcp_settings_follow_the_profile() {
   strict.max_result_bytes = 4096;
   strict.max_memory_usage = 1'000'000;
   strict.max_rows_to_read = 5000;
+  strict.max_bytes_to_read = 6000;
   limits.max_rows_to_read = 100'000;
+  limits.max_bytes_to_read = 200'000;  // the ceiling max_read_size of the identity mode
   plan = ch_mcp_settings(limits, strict);
+  CHECK(setting(plan.settings, "max_bytes_to_read") == "<unset>");
   CHECK(setting(plan.settings, "max_execution_time") == "<unset>");
   CHECK(setting(plan.settings, "max_result_rows") == "<unset>");
   CHECK(setting(plan.settings, "max_result_bytes") == "<unset>");
@@ -800,7 +804,9 @@ void test_mcp_settings_follow_the_profile() {
   loose.max_result_bytes = 100'000'000;
   loose.max_memory_usage = 8'000'000'000ULL;
   loose.max_rows_to_read = 1'000'000;
+  loose.max_bytes_to_read = 0;  // no bound in the profile
   plan = ch_mcp_settings(limits, loose);
+  CHECK(setting(plan.settings, "max_bytes_to_read") == "200000");
   CHECK(setting(plan.settings, "max_execution_time") == "30");
   CHECK(setting(plan.settings, "max_result_rows") == "1001");
   CHECK(setting(plan.settings, "max_result_bytes") == "1048576");

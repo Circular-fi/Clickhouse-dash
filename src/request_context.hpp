@@ -15,6 +15,7 @@
 // The RequestScope owns the context and the scope of the statements (ch_query.hpp, ChQueryScope).
 // The statements of a request carry its limits for as long as the RequestScope lives.
 
+#include "access_ceilings.hpp"
 #include "ch_query.hpp"
 
 #include <functional>
@@ -37,6 +38,9 @@ struct RequestContext {
   std::string request_id;
   // What each statement of the request carries. This is the label, the deadline, the memory and read bounds, and the stop.
   ChQueryLimits limits;
+  // The ceilings of the grant of an MCP call in the identity mode (docs/mcp.md, "The identity mode"). A route that an API tool calls
+  // applies them as the ceilings of the request (Server::access_ceilings). Empty for a browser and for the keys of ChDash.
+  AccessCeilings mcp_ceilings;
 
   bool is_mcp() const { return caller == Caller::Mcp; }
 };

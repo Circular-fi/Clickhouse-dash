@@ -31,7 +31,7 @@ std::optional<OtlpEndpoint> otlp_parse_endpoint(std::string_view text, std::stri
     return std::nullopt;
   };
   if (text.rfind("https://", 0) == 0) {
-    return fail("https is not available: ChDash has no TLS client. Send to a collector over http (a sidecar or a local agent)");
+    return fail("https is not available: the OTLP export has no TLS client. Send to a collector over http (a sidecar or a local agent)");
   }
   if (text.rfind("http://", 0) != 0) return fail("must start with http://");
   std::string_view rest = text.substr(7);

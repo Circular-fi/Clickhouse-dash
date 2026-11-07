@@ -3,7 +3,7 @@ name: Conformance
 # The conformance runner of ProcurAuth (access-conformance, role pep) against the release binary of ChDash (docs/conformance.md).
 # The job builds the binary as the release does, and runs tests/conformance/run.sh. The script fails only for a failed case that
 # tests/conformance/expected.txt does not list.
-# The ProcurAuth repository is private: the secret PROCURAUTH_READ_TOKEN holds a token with read access to it (contents: read).
+# The ProcurAuth repository is public: the job checks it out without a secret.
 # On request (Actions > Conformance > Run workflow), and on a pull request that changes the access code or the files of the run.
 on:
   workflow_dispatch:
@@ -13,6 +13,10 @@ on:
       - "src/access_*.hpp"
       - "src/server_access.cpp"
       - "src/api_resources.cpp"
+      - "src/api_mcp.cpp"
+      - "src/mcp_*.cpp"
+      - "src/mcp_*.hpp"
+      - "src/pdp_transport.cpp"
       - "src/config_keys.def"
       - "tests/conformance/**"
       - "tests/config/access.conformance.hcl"
@@ -28,8 +32,6 @@ concurrency:
 jobs:
   conformance:
     name: ProcurAuth runner against ChDash (linux amd64)
-    # A pull request from a fork has no secret: the job does not run for it.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -42,7 +44,6 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           repository: SCcagg5/procurauth
-          token: ${{ secrets.PROCURAUTH_READ_TOKEN }}
           path: procurauth
           persist-credentials: false
 

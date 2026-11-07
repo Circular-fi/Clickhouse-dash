@@ -105,6 +105,7 @@ Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, c
   ctx.user_limits.timeout_seconds = timeout;
   ctx.user_limits.max_memory_bytes = config.max_memory_bytes;
   ctx.user_limits.max_rows_to_read = config.max_rows_to_read;
+  ctx.user_limits.max_bytes_to_read = config.max_bytes_to_read;
   ctx.user_limits.key_id = key.id;
   ctx.user_limits.tool = tool;
   // Schema tools: the key's row cap does not cut them (the scope filters after the read).

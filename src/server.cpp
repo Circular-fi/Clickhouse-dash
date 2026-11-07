@@ -969,6 +969,7 @@ RequestContext Server::make_context(const httplib::Request& req, bool with_deadl
   context.caller_id = outer.caller_id;
   context.caller_tool = outer.caller_tool;
   context.caller_agent = outer.caller_agent;
+  context.mcp_ceilings = outer.mcp_ceilings;
   context.route = req.path;
   context.request_id = req.get_header_value("X-Request-Id");
   context.limits = request_limits(req, with_deadline);
@@ -1023,6 +1024,14 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
   caller.caller_agent = mcp_comment_caller(request.agent_caller);
   caller.route = request.path;
   caller.limits = ChQueryScope::current_copy();
+  // The ceilings of the call in the identity mode: the route applies them to its statements (ProcurAuth 7.4).
+  const auto ceiling = [](const std::optional<int64_t>& value) { return value && *value > 0 ? static_cast<uint64_t>(*value) : uint64_t{0}; };
+  caller.mcp_ceilings.max_rows_read = ceiling(request.ceilings.max_rows_read);
+  caller.mcp_ceilings.max_read_size = ceiling(request.ceilings.max_bytes_read);
+  caller.mcp_ceilings.max_rows = ceiling(request.ceilings.max_rows);
+  caller.mcp_ceilings.max_result_size = ceiling(request.ceilings.max_result_bytes);
+  caller.mcp_ceilings.max_duration = ceiling(request.ceilings.max_duration_seconds);
+  caller.mcp_ceilings.max_memory = ceiling(request.ceilings.max_memory_bytes);
   RequestScope scope(std::move(caller));
   try {
     if (!http_.dispatch(req, res)) {

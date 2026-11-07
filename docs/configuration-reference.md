@@ -357,7 +357,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 | Key | Type | Default | Range | Use |
 |---|---|---|---|---|
 | `enabled` | boolean | `false` |  | Send the SERVER span of each MCP request, a child span for each ClickHouse statement of the call, the call log, and the CLIENT span of each call to the PDP of the access block to an OTLP/HTTP receiver (JSON encoding). It needs otlp_endpoint. |
-| `otlp_endpoint` | text |  | http://host[:port][/path] | The base URL of the OTLP/HTTP receiver. The spans go to <base>/v1/traces and the call log to <base>/v1/logs. Only http: ChDash has no TLS client. It is required when enabled is true. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
+| `otlp_endpoint` | text |  | http://host[:port][/path] | The base URL of the OTLP/HTTP receiver. The spans go to <base>/v1/traces and the call log to <base>/v1/logs. Only http: the OTLP export has no TLS client. It is required when enabled is true. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
 | `otlp_endpoint_env` | environment variable name |  | letters, digits and _ | The variable that holds the value of otlp_endpoint. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
 | `otlp_endpoint_file` | file path |  |  | The file that holds the value of otlp_endpoint, without its last line end. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
 | `service_name` | text | `chdash` |  | The service.name of the resource of the spans and the log records: 1 to 255 bytes, no control character. |

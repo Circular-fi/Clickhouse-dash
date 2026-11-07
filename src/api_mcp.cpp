@@ -322,6 +322,7 @@ public:
     guard.timeout_seconds = limits.timeout_seconds;
     guard.max_memory_bytes = limits.max_memory_bytes;
     guard.max_rows_to_read = limits.max_rows_to_read;
+    guard.max_bytes_to_read = limits.max_bytes_to_read;
     guard.sql_bytes = static_cast<int64_t>(sql.size());
     // agent.caller of the call links the cost of the statement to the agent. See docs/mcp.md, "Guard rails of each query".
     guard.log_comment = "chdash-mcp key=" + limits.key_id + (limits.agent_caller.empty() ? std::string() : " caller=" + mcp_comment_caller(limits.agent_caller));

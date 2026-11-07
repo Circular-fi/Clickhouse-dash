@@ -4,7 +4,7 @@ This document uses ASD-STE100 Simplified Technical English.
 
 ChDash is a service of ProcurAuth, a profile of AuthZEN 1.0 (`procurauth-protocol.md`). ProcurAuth defines the resources (section 4), the action document and the route of the options (section 5), the limits and the ceilings (sections 6 and 7), the identity token (section 9), the duties of a PEP (section 10) and the reasons (section 11). The tool `access-conformance` of ProcurAuth tests the behaviour of ChDash as a PEP ([conformance.md](conformance.md)).
 
-The rules of the pages (the navigation and the hidden hosts) are the choice of ChDash. They follow section 11 of the MCP server contract (`mcp-server-contract/SPEC.md`, "Access of humans (AuthZEN)"). This document applies to the pages and to the API of ChDash. It does not apply to the MCP endpoint `POST /mcp`: the agents use the keys of the `mcp` block ([mcp.md](mcp.md)).
+The rules of the pages (the navigation and the hidden hosts) are the choice of ChDash. They follow section 11 of the MCP server contract (`mcp-server-contract/SPEC.md`, "Access of humans (AuthZEN)"). This document applies to the pages and to the API of ChDash. For the MCP endpoint `POST /mcp`, refer to [The MCP endpoint](#the-mcp-endpoint): in the mode `identity`, the identity token and the PDP decide each request, and in the mode `keys`, the agents use the keys of the `mcp` block ([mcp.md](mcp.md)).
 
 ## Principle
 
@@ -410,14 +410,14 @@ Every value is below 2^53. A reader that uses floating point numbers reads each 
 | `query.run.read`, `query.run.write`, `query.export` | All six. |
 | `explorer.read` | `max_rows`, `max_rows_read`, `max_duration`, `max_memory`. |
 | `system.read`, `observability.read` | `max_rows_read`, `max_rows`, `max_duration`. |
-| `library.read`, `library.write`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read` | None. |
+| `library.read`, `library.write`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read`, `mcp.session` | None. |
 
-An action lists its ceilings only when the action is published. The MCP endpoint applies no ceiling yet. An MCP key never has more than its creator, and a `true` answer for the creator with a ceiling is `false` for the key.
+An action lists its ceilings only when the action is published. In the mode `identity`, the MCP endpoint applies the declared ceilings of the action of each tool ([mcp.md](mcp.md#ceilings)). In the mode `keys`, an MCP key never has more than its creator. A `true` answer for the creator with a ceiling is `false` for the key.
 
 ### How ChDash applies a ceiling
 
 1. The rule of the route asks the PDP. ChDash keeps the ceilings of the `true` answer of the action that guards the route. An export keeps the ceilings of `query.export` and of the class of its SQL.
-2. One function, `apply_ceilings`, lowers the bounds of a statement. Four places call it: the run of the Query page (`QuerySession`), the statements of the pages (`request_limits`), Deep Analyze (`user_sql_limits`) and the export stream.
+2. One function, `apply_ceilings`, lowers the bounds of a statement. Four places call it: the run of the Query page (`QuerySession`), the statements of the pages (`request_limits`), Deep Analyze (`user_sql_limits`) and the export stream. A route that an MCP tool calls in the mode `identity` gets the ceilings of the call ([mcp.md](mcp.md#ceilings)).
 3. The ceiling lowers the matching bound. The value that ClickHouse gets is the lowest of the ceiling, the bound of the configuration and the settings profile of the runner user. A ceiling never makes a bound looser.
 4. A ceiling that lowers a bound also sets the overflow mode `throw` when the route sets none. The run then fails with a clear error and gives no cut result.
 5. `max_memory` has no backstop in ChDash. The settings profile of the ClickHouse user enforces it, with the setting `max_memory_usage`. To limit the memory of a statement that sets its own `max_memory_usage`, use a constraint in the profile.

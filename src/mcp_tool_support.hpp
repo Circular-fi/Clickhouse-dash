@@ -68,6 +68,8 @@ struct Ctx {
   uint64_t rows_out = 0;
   // The identity mode, for list_hosts: the hosts that the person can see. Not set: every host that the key reaches.
   std::optional<std::vector<std::string>> visible_hosts;
+  // The identity mode: the ceilings of the call. An API tool gives them to the route that it calls (McpApiRequest::ceilings).
+  McpCeilings ceilings;
 };
 
 // The hosts that the key may use.

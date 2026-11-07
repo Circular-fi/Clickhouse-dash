@@ -496,6 +496,8 @@ void test_exporter_batches() {
     }
     return false;
   }, std::chrono::milliseconds(3000)));
+  // The receiver can hold the body before the exporter counts it: wait for the count.
+  CHECK(eventually([&] { return exporter.log_stats().exported == 1u; }, std::chrono::milliseconds(2000)));
   CHECK_EQ(exporter.log_stats().exported, 1u);
   CHECK_EQ(exporter.span_stats().dropped_queue_full, 0u);
   exporter.shutdown(std::chrono::milliseconds(1000));

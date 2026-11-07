@@ -1,5 +1,6 @@
 #include "mcp_subject_access.hpp"
 
+#include "access_ceilings.hpp"
 #include "access_pages.hpp"
 #include "log.hpp"
 #include "mcp_api_tools.hpp"
@@ -156,10 +157,13 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
     case AccessOutcome::Denied:
     case AccessOutcome::BudgetExceeded: return McpAccess::Denied;
   }
-  // A true answer with a ceiling that MCP cannot apply is false (ProcurAuth 7.5).
+  // A true answer with a ceiling that MCP cannot apply is false (ProcurAuth 7.5). MCP applies the ceilings that the document declares for
+  // the action of the tool, as the pages do. The server already checks this for a question on a node; a question with the match "subtree"
+  // (a call without a host) gets the same check here.
   McpCeilings ceilings;
   std::string refused;
-  if (!mcp_ceilings_of(decision.limits, &ceilings, &refused)) {
+  if (!access_ceilings_enforceable(decision.limits, question->action, features_, &refused) ||
+      !mcp_ceilings_of(decision.limits, &ceilings, &refused)) {
     log_event(LogLevel::Warn, "access.ceiling_unenforceable",
               {{"action", question->action}, {"resource", access_resource_path(question->resource)}, {"ceiling", refused.substr(0, 128)}});
     return McpAccess::Denied;

@@ -25,6 +25,9 @@
     },
     "answer_cache": false,
     "options_type": "host",
+    "mcp": {
+      "path": "/mcp"
+    },
     "operations": {
       "use_plain": {
         "method": "GET",
@@ -58,6 +61,21 @@
         "method": "GET",
         "path": "/api/query-library?host_id=conf",
         "action": "library.read"
+      },
+      "mcp_call_plain": {
+        "tool": "list_databases",
+        "action": "explorer.read",
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "arguments": {
+          "host": "conf"
+        }
       }
     }
   },

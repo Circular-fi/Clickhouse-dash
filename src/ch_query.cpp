@@ -635,6 +635,9 @@ ChMcpSettings ch_mcp_settings(const ChMcpLimits& limits, const ChSettingsProfile
   if (limits.max_rows_to_read > 0 && lowers(static_cast<uint64_t>(limits.max_rows_to_read), profile.max_rows_to_read)) {
     add("max_rows_to_read", std::to_string(limits.max_rows_to_read));
   }
+  if (limits.max_bytes_to_read > 0 && lowers(static_cast<uint64_t>(limits.max_bytes_to_read), profile.max_bytes_to_read)) {
+    add("max_bytes_to_read", std::to_string(limits.max_bytes_to_read));
+  }
   if (!limits.log_comment.empty()) add("log_comment", limits.log_comment);
   return out;
 }

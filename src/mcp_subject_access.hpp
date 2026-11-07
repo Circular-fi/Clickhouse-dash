@@ -47,7 +47,7 @@ public:
   // gives host_required without a read).
   std::optional<AccessQuestion> call_question(const McpToolInfo& tool, const rapidjson::Value& arguments) const;
   // The decision of a call. For Allowed, `call` receives the ceilings (the lowest of the actions of the tool) and, for list_hosts, the
-  // hosts that the person can see. A true answer with a ceiling that MCP cannot apply is Denied (ProcurAuth 7.5).
+  // hosts that the person can see. A true answer with a ceiling that the action of the tool does not declare is Denied (ProcurAuth 7.5).
   McpAccess call(const std::string& subject, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call);
 
 private:

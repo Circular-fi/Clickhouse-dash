@@ -2,7 +2,8 @@
 # The runner acts as the edge, the PDP and the client. The script mounts the work directory at /conformance: it holds the public keys
 # of the test edge (identity-keys.json), the credential of the PDP (pdp-token) and the password of ClickHouse (ch-password).
 # The cache of the decisions is off (pdp.cache_ttl = 0s), so each request of a case makes its own question. The values of the identity
-# block (issuer, audience, header, max_age, clock_skew) are the values of tests/conformance/profile.json. MCP is off.
+# block (issuer, audience, header, max_age, clock_skew) are the values of tests/conformance/profile.json. MCP is on in the identity mode,
+# so the runner can test the MCP binding: the identity token decides each request of POST /mcp.
 server {
   listen_host = "0.0.0.0"
   listen_port = 8080
@@ -38,6 +39,13 @@ query_library {
   writable = true
 }
 
+# The identity mode of MCP (docs/mcp.md, "The identity mode"). The operation mcp_call_plain of the profile is the tool list_databases on
+# the host conf: the action explorer.read on that host.
+mcp {
+  enabled   = true
+  auth_mode = "identity"
+}
+
 # One host, with the runner account. GET /api/explorer/functions?host_id=conf is the use of explorer.read on this host.
 clickhouse {
   host {
@@ -46,5 +54,7 @@ clickhouse {
     runner_password_file = "/conformance/ch-password"
     system_uri           = "clickhouse://chdash@clickhouse-conformance:9000"
     system_password_file = "/conformance/ch-password"
+    mcp_uri              = "clickhouse://chdash@clickhouse-conformance:9000"
+    mcp_password_file    = "/conformance/ch-password"
   }
 }

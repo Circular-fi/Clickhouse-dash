@@ -24,6 +24,7 @@ struct McpDbLimits {
   int64_t timeout_seconds = 30;
   int64_t max_memory_bytes = 1073741824;
   int64_t max_rows_to_read = 0;  // 0 = none
+  int64_t max_bytes_to_read = 0; // 0 = none. Only a ceiling of the identity mode sets it (max_read_size).
   std::string key_id;            // for log_comment and the query_id
   std::string tool;              // the tool of the call: the query_id of its statements (mcp_cost.hpp)
   // agent.caller of the baggage of the call (mcp_trace.hpp). It is the log_comment of the statements.
@@ -80,6 +81,8 @@ struct McpApiRequest {
   std::string key_id;           // the key that made the call: the audit and the label of the statements
   std::string tool;             // the tool that made the call: with the key, the query_id of the statements (mcp_cost.hpp)
   std::string agent_caller;     // agent.caller of the call: the log_comment of the statements
+  // The identity mode: the ceilings of the call. The route applies them to its statements (ProcurAuth 7.4).
+  McpCeilings ceilings;
 };
 
 struct McpApiResponse {
@@ -194,6 +197,8 @@ struct McpToolsConfig {
   int64_t max_sql_bytes = 65536;
   int64_t max_memory_bytes = 1073741824;
   int64_t max_rows_to_read = 0;
+  // 0 = none. The configuration has no key for it: only a ceiling of the identity mode (max_read_size) sets it.
+  int64_t max_bytes_to_read = 0;
 };
 
 // Schema tools read this many rows of the system tables. The key's own row cap does not apply here.

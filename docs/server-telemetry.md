@@ -47,7 +47,7 @@ telemetry {
 
 ChDash uses OTLP/HTTP with the JSON encoding of OTLP. It does not use the protobuf encoding. Each export is one `POST` with `Content-Type: application/json`. A trace id and a span id are lower-case hexadecimal text, and a 64-bit integer is a string, as the OTLP JSON encoding tells.
 
-ChDash has no TLS client. Thus the endpoint must use `http`, and an `https` endpoint stops the start. Send the data to a collector on the same host or in the same pod (a sidecar), and let that collector send it on with TLS. ChDash sends no authentication header and does not compress the body.
+The OTLP export has no TLS client. Thus the endpoint must use `http`, and an `https` endpoint stops the start. Send the data to a collector on the same host or in the same pod (a sidecar), and let that collector send it on with TLS. ChDash sends no authentication header and does not compress the body.
 
 The resource of each item has these attributes:
 

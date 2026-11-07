@@ -125,6 +125,7 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   request.key_id = ctx.key.id;
   request.tool = info.name;
   request.agent_caller = ctx.user_limits.agent_caller;
+  request.ceilings = ctx.ceilings;
 
   if (const auto it = args.FindMember("params"); it != args.MemberEnd() && !it->value.IsNull()) {
     if (!it->value.IsObject()) fail("invalid_argument", "params must be an object of query parameters");

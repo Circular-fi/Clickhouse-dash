@@ -46,9 +46,11 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
     limited_config->max_rows_to_read = mcp_apply_ceiling(limited_config->max_rows_to_read, c.max_rows_read, nullptr, true);
     limited_config->max_memory_bytes = mcp_apply_ceiling(limited_config->max_memory_bytes, c.max_memory_bytes);
     limited_config->max_result_bytes = mcp_apply_ceiling(limited_config->max_result_bytes, c.max_result_bytes);
+    limited_config->max_bytes_to_read = mcp_apply_ceiling(limited_config->max_bytes_to_read, c.max_bytes_read, nullptr, true);
   }
   Ctx ctx = make_ctx(limited_key ? *limited_key : key, limited_config ? *limited_config : config_, db_, tool);
   ctx.visible_hosts = info.visible_hosts;
+  ctx.ceilings = info.ceilings;
   // The agent of the call goes into the log_comment of each statement (api_mcp.cpp, ClickHouseMcpDatabase).
   for (McpDbLimits* limits : {&ctx.user_limits, &ctx.schema_limits, &ctx.system_limits, &ctx.system_schema_limits}) limits->agent_caller = info.agent_caller;
   ctx.api = api_;

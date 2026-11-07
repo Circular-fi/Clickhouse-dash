@@ -601,7 +601,9 @@ bool Server::access_read_only() const {
 
 AccessCeilings Server::access_ceilings() const {
   const AccessRequestState& state = access_state();
-  if (!state.enforced || current_request_context().is_mcp()) return AccessCeilings{};
+  // A route that an MCP tool calls applies the ceilings of the call (identity mode); a key of ChDash has none.
+  if (current_request_context().is_mcp()) return current_request_context().mcp_ceilings;
+  if (!state.enforced) return AccessCeilings{};
   return state.ceilings.resolve(state.sql_class);
 }
 

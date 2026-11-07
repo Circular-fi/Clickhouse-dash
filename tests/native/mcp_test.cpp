@@ -6162,17 +6162,28 @@ void test_identity_key_and_ceilings() {
   CHECK(odd.name.find('\x01') == std::string::npos);
   CHECK(!mcp_key_is_identity(a_key({"*"}, {"*"})));
 
-  // The ceilings: five names, the lowest value, a name that MCP cannot apply, a value below 1.
+  // The ceilings: the six names of the document, the lowest value, a name that MCP cannot apply, a value below 1.
   McpCeilings c;
   std::string refused;
-  CHECK(mcp_ceilings_of({{"max_rows", 5}, {"max_duration", 3}, {"max_rows_read", 100}, {"max_memory", 1 << 20}, {"max_result_size", 2048}}, &c, &refused));
+  CHECK(mcp_ceilings_of({{"max_rows", 5}, {"max_duration", 3}, {"max_rows_read", 100}, {"max_memory", 1 << 20}, {"max_result_size", 2048},
+                         {"max_read_size", 4096}}, &c, &refused));
   CHECK(c.max_rows && *c.max_rows == 5 && c.max_duration_seconds && *c.max_duration_seconds == 3);
   CHECK(c.max_rows_read && *c.max_rows_read == 100 && c.max_memory_bytes && *c.max_memory_bytes == (1 << 20));
   CHECK(c.max_result_bytes && *c.max_result_bytes == 2048);
+  CHECK(c.max_bytes_read && *c.max_bytes_read == 4096);
   CHECK(c.any());
   CHECK(!McpCeilings().any());
-  CHECK(!mcp_ceilings_of({{"max_read_size", 5}}, &c, &refused));
+  CHECK(mcp_ceilings_of({{"max_read_size", 5}}, &c, &refused) && c.any() && *c.max_bytes_read == 5);
+  CHECK(!mcp_ceilings_of({{"max_read_size", 0}}, &c, &refused));
   CHECK_EQ(refused, std::string("max_read_size"));
+  {
+    McpCeilings a;
+    a.max_bytes_read = 100;
+    McpCeilings b;
+    b.max_bytes_read = 40;
+    a.lower(b);
+    CHECK(*a.max_bytes_read == 40);
+  }
   CHECK(!mcp_ceilings_of({{"max_rows", 0}}, &c, &refused));
   CHECK_EQ(refused, std::string("max_rows"));
   CHECK(!mcp_ceilings_of({{"max_conformance_unknown", 5}}, &c, &refused));
@@ -6309,12 +6320,33 @@ void test_identity_access() {
   McpCallInfo carol;
   CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &carol) == McpAccess::Allowed);
   CHECK(carol.ceilings.max_rows && *carol.ceilings.max_rows == 7 && carol.ceilings.max_duration_seconds && *carol.ceilings.max_duration_seconds == 3);
+  // explorer.read declares max_rows, max_rows_read, max_duration and max_memory (ProcurAuth 7.5): another ceiling is a denial.
   pdp.limits["explorer.read"] = {{"max_read_size", 1000}};
   McpCallInfo refused;
   CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &refused) == McpAccess::Denied);
   CHECK(!refused.ceilings.any());
+  pdp.limits["explorer.read"] = {{"max_result_size", 1000}};
+  CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &refused) == McpAccess::Denied);
+  // The same check for a question with the match "subtree" (a call without a host).
+  CHECK(access.call("carol", *mcp_find_tool("list_tables"), none, &refused) == McpAccess::Denied);
   pdp.limits["explorer.read"] = {{"max_rows", 0}};
   CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &refused) == McpAccess::Denied);
+  pdp.limits["explorer.read"] = {{"max_rows_read", 50}, {"max_memory", 4096}};
+  McpCallInfo reads;
+  CHECK(access.call("carol", *mcp_find_tool("list_tables"), args_of(R"({"host":"prod"})"), &reads) == McpAccess::Allowed);
+  CHECK(*reads.ceilings.max_rows_read == 50 && *reads.ceilings.max_memory_bytes == 4096);
+  // query.run.read declares the six ceilings: run_query gets each of them.
+  pdp.grants["carol"] = {"explorer.read@service:db", "query.run.read@service:db"};
+  pdp.limits["query.run.read"] = {{"max_rows_read", 11}, {"max_read_size", 12}, {"max_rows", 13}, {"max_result_size", 14}, {"max_duration", 15},
+                                  {"max_memory", 16}};
+  McpCallInfo six;
+  CHECK(access.call("carol", *mcp_find_tool("run_query"), args_of(R"({"host":"prod","sql":"select 1"})"), &six) == McpAccess::Allowed);
+  CHECK(*six.ceilings.max_rows_read == 11 && *six.ceilings.max_bytes_read == 12 && *six.ceilings.max_rows == 13);
+  CHECK(*six.ceilings.max_result_bytes == 14 && *six.ceilings.max_duration_seconds == 15 && *six.ceilings.max_memory_bytes == 16);
+  // mcp.session declares no ceiling: list_hosts with a ceiling is a denial.
+  pdp.grants["carol"].push_back("mcp.session@service:db");
+  pdp.limits["mcp.session"] = {{"max_rows", 5}};
+  CHECK(access.call("carol", *mcp_find_tool("list_hosts"), none, &refused) == McpAccess::Denied);
   pdp.limits.clear();
 
   // list_hosts: the hosts that the person can see (the navigation questions for the subject).
@@ -6525,9 +6557,11 @@ void test_identity_tools() {
   info.ceilings.max_rows_read = 500;
   info.ceilings.max_memory_bytes = 4096;
   info.ceilings.max_result_bytes = 2048;
+  info.ceilings.max_bytes_read = 8192;
   db.calls.clear();
   tools.call_tool_for(key, "run_query", sql, 0, info);
   CHECK(!db.calls.empty());
+  CHECK_EQ(db.calls.back().limits.max_bytes_to_read, int64_t(8192));  // the configuration has no bound: the ceiling is the bound
   CHECK_EQ(db.calls.back().limits.max_rows, int64_t(2));
   CHECK_EQ(db.calls.back().limits.timeout_seconds, int64_t(3));
   CHECK_EQ(db.calls.back().limits.max_rows_to_read, int64_t(500));  // the ceiling is lower than the configuration
@@ -6542,6 +6576,7 @@ void test_identity_tools() {
   // No ceiling: the limits of the configuration.
   tools.call_tool_for(key, "run_query", sql, 0, McpCallInfo{});
   CHECK_EQ(db.calls.back().limits.max_rows, int64_t(1000));
+  CHECK_EQ(db.calls.back().limits.max_bytes_to_read, int64_t(0));
 
   // list_hosts shows the hosts that the PDP made visible.
   McpToolsConfig two = tools_config();
@@ -6763,6 +6798,7 @@ void test_api_tools() {
     CHECK_EQ(api.calls[0].method, std::string("GET"));
     CHECK_EQ(api.calls[0].path, std::string("/api/explorer/catalog"));
     CHECK_EQ(query_of(api.calls[0]), std::string("database=otel&refresh=1&host_id=prod\x1f" "mcp"));
+    CHECK(!api.calls[0].ceilings.any());  // a key of ChDash has no ceiling
     CHECK(db.calls.empty());  // no SQL of the MCP user: the route has its own
     CHECK_EQ(api.calls[0].tool, std::string("explorer_catalog"));  // the statements of the route are named for the key and the tool
     CHECK_EQ(api.calls[0].key_id, all.id);
@@ -6774,6 +6810,24 @@ void test_api_tools() {
     // No params at all is fine.
     call(tools, all, "system_overview", "{}");
     CHECK_EQ(query_of(api.calls[2]), std::string("host_id=prod\x1f" "mcp"));
+  }
+  // The identity mode: an API tool gives the six ceilings of the call to the route that it calls (RequestContext::mcp_ceilings).
+  {
+    McpCallInfo info;
+    info.ceilings.max_rows_read = 21;
+    info.ceilings.max_bytes_read = 22;
+    info.ceilings.max_rows = 23;
+    info.ceilings.max_result_bytes = 24;
+    info.ceilings.max_duration_seconds = 25;
+    info.ceilings.max_memory_bytes = 26;
+    const rapidjson::Document args = args_of(R"({"params":{"database":"otel"}})");
+    const McpToolOutcome o = tools.call_tool_for(all, "explorer_catalog", args, 0, info);
+    CHECK(!o.is_error);
+    const McpCeilings& sent = api.calls.back().ceilings;
+    CHECK(*sent.max_rows_read == 21 && *sent.max_bytes_read == 22 && *sent.max_rows == 23);
+    CHECK(*sent.max_result_bytes == 24 && *sent.max_duration_seconds == 25 && *sent.max_memory_bytes == 26);
+    CHECK_EQ(api.calls.back().timeout_seconds, int64_t(25));
+    CHECK_EQ(api.calls.back().max_bytes, int64_t(24));
   }
 
   // A {name} of the path is a param, in the address and not in the query string; it must be plain.

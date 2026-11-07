@@ -14,7 +14,7 @@ void lower_member(std::optional<int64_t>* mine, const std::optional<int64_t>& ot
 } // namespace
 
 bool McpCeilings::any() const {
-  return max_rows || max_duration_seconds || max_rows_read || max_memory_bytes || max_result_bytes;
+  return max_rows || max_duration_seconds || max_rows_read || max_memory_bytes || max_result_bytes || max_bytes_read;
 }
 
 void McpCeilings::lower(const McpCeilings& other) {
@@ -23,6 +23,7 @@ void McpCeilings::lower(const McpCeilings& other) {
   lower_member(&max_rows_read, other.max_rows_read);
   lower_member(&max_memory_bytes, other.max_memory_bytes);
   lower_member(&max_result_bytes, other.max_result_bytes);
+  lower_member(&max_bytes_read, other.max_bytes_read);
 }
 
 bool mcp_ceilings_of(const PdpLimits& limits, McpCeilings* out, std::string* refused) {
@@ -34,6 +35,7 @@ bool mcp_ceilings_of(const PdpLimits& limits, McpCeilings* out, std::string* ref
     else if (name == "max_rows_read") member = &found.max_rows_read;
     else if (name == "max_memory") member = &found.max_memory_bytes;
     else if (name == "max_result_size") member = &found.max_result_bytes;
+    else if (name == "max_read_size") member = &found.max_bytes_read;
     // An unknown name, and a value below the minimum of every ceiling (1), cannot be applied.
     if (!member || raw < 1) {
       if (refused) *refused = name;

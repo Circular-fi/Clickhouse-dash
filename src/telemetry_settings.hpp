@@ -38,7 +38,7 @@ std::optional<int64_t> parse_duration_ms(std::string_view text);
 // The text of a duration in the largest unit that gives an integer ("15s", not "15000ms").
 std::string duration_text(int64_t ms);
 
-// The parts of an endpoint of the file: http://host[:port][/path]. Only http: ChDash has no TLS client. On an error, nullopt, and
+// The parts of an endpoint of the file: http://host[:port][/path]. Only http: the OTLP export has no TLS client. On an error, nullopt, and
 // `error` says what is wrong.
 struct OtlpEndpoint {
   std::string host;
