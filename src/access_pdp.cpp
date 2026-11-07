@@ -562,8 +562,9 @@ PdpEndpoints PdpClient::endpoints() {
 std::chrono::milliseconds PdpClient::usage_timeout() {
   const PdpEndpoints known = endpoints();
   if (!known.usage_max_seconds) return options_.timeout;
-  // "Longer than the longest time": one second more.
-  const auto longer = std::chrono::seconds(std::min<uint64_t>(*known.usage_max_seconds, 3600) + 1);
+  // "Longer than the longest time": one second more. discover() keeps no value above options_.usage_max_seconds (at most 3600 from the
+  // configuration), so the published time applies as it is: nothing lowers it.
+  const auto longer = std::chrono::seconds(static_cast<int64_t>(*known.usage_max_seconds) + 1);
   return std::max(options_.timeout, std::chrono::duration_cast<std::chrono::milliseconds>(longer));
 }
 
@@ -620,6 +621,16 @@ PdpDiscoveryResult PdpClient::discover(const PdpCallContext& context) {
   if (!parse_metadata(http.body, identifier, &endpoints, &error)) {
     result.state = PdpDiscoveryState::Invalid;
     result.message = error;
+    return result;
+  }
+  // ProcurAuth 6.9, 10.6: the PEP waits longer than the time that the PDP publishes. The configuration bounds this wait: a longer time is
+  // not lowered to fit, the document cannot be used (owner decision of 2026-11-07).
+  if (endpoints.usage_max_seconds && *endpoints.usage_max_seconds > options_.usage_max_seconds) {
+    result.state = PdpDiscoveryState::Invalid;
+    result.message = "procurauth_usage_max_seconds of the metadata is " + std::to_string(*endpoints.usage_max_seconds) +
+                     ", above access.pdp.usage_max_seconds (" + std::to_string(options_.usage_max_seconds) +
+                     "): ChDash does not wait so long for an answer to a question with context.usage. Set access.pdp.usage_max_seconds to " +
+                     std::to_string(*endpoints.usage_max_seconds) + " or more (at most 3600), or lower the time that the PDP publishes";
     return result;
   }
   {
@@ -752,7 +763,8 @@ std::vector<std::vector<size_t>> PdpClient::plan_chunks(const std::string& subje
 }
 
 bool PdpClient::ask_chunk(const std::string& subject, const std::vector<AccessQuestion>& questions, const std::vector<size_t>& ask,
-                          const PdpEndpoints& endpoints, const PdpCallContext& context, std::vector<AccessDecision>* out) {
+                          const PdpEndpoints& endpoints, const PdpCallContext& context, std::chrono::milliseconds timeout,
+                          std::vector<AccessDecision>* out) {
   std::vector<AccessQuestion> asked;
   asked.reserve(ask.size());
   for (const size_t i : ask) asked.push_back(questions[i]);
@@ -764,13 +776,13 @@ bool PdpClient::ask_chunk(const std::string& subject, const std::vector<AccessQu
 
   call.start_unix_nano = otlp_now_unix_nano();
   const auto started = std::chrono::steady_clock::now();
-  PdpHttpResult result = transport_->post(call.path, request_body(subject, asked), headers, options_.timeout);
+  PdpHttpResult result = transport_->post(call.path, request_body(subject, asked), headers, timeout);
   const auto elapsed = std::chrono::steady_clock::now() - started;
   call.end_unix_nano = otlp_now_unix_nano();
   call.status = result.status;
 
   std::vector<PdpAnswer> decisions;
-  call.error = check_result(result, elapsed, context, call.path, options_.timeout);
+  call.error = check_result(result, elapsed, context, call.path, timeout);
   if (call.error.empty() && !parse_answer(result.body, asked.size(), &decisions)) call.error = "the answer is not a valid AuthZEN answer";
 
   const bool answered = result.error.empty();
@@ -789,7 +801,7 @@ bool PdpClient::ask_chunk(const std::string& subject, const std::vector<AccessQu
                {"evaluations", static_cast<uint64_t>(call.evaluations)}});
   }
   if (on_call_) on_call_(call);
-  return answered && elapsed <= options_.timeout;
+  return answered && elapsed <= timeout;
 }
 
 std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const std::vector<AccessQuestion>& questions,
@@ -827,21 +839,52 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
       known = endpoints();
     }
     const auto chunks = plan_chunks(subject, questions, ask, known);
+    // A call of several requests (ProcurAuth 10.7a, or more than max_evaluations questions) has one deadline for all its requests
+    // (access.pdp.batch_timeout). Each request keeps the timeout of one request, and no request waits past the deadline.
+    const bool split = chunks.size() > 1;
+    const auto deadline = std::chrono::steady_clock::now() + options_.batch_timeout;
     bool skip = false;
+    bool expired = false;
     size_t skipped = 0;
     for (const auto& chunk : chunks) {
-      if (skip) {
-        // The PDP gave no answer to the request before. The next request would wait for the timeout again.
+      if (skip || expired) {
+        // The PDP gave no answer to the request before, or the deadline of the call passed. The next request would wait again.
         for (const size_t i : chunk) out[i] = failed_decision();
         skipped += chunk.size();
         continue;
       }
-      if (!ask_chunk(subject, questions, chunk, known, context, &out)) skip = true;
+      std::chrono::milliseconds timeout = options_.timeout;
+      if (split) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+          expired = true;
+          for (const size_t i : chunk) out[i] = failed_decision();
+          skipped += chunk.size();
+          continue;
+        }
+        // The last request before the deadline gets the time that remains, not the whole timeout.
+        if (left < timeout) timeout = left;
+      }
+      if (!ask_chunk(subject, questions, chunk, known, context, timeout, &out)) {
+        skip = true;
+        if (split && std::chrono::steady_clock::now() >= deadline) expired = true;
+      }
     }
     if (skipped > 0) {
       log_event(LogLevel::Warn, "access.pdp_failed",
-                {{"request_id", context.request_id}, {"path", ""}, {"status", 0}, {"error", "not sent: the PDP gave no answer to a request of this call"},
+                {{"request_id", context.request_id}, {"path", ""}, {"status", 0},
+                 {"error", expired ? "not sent: the call reached access.pdp.batch_timeout" : "not sent: the PDP gave no answer to a request of this call"},
                  {"evaluations", static_cast<uint64_t>(skipped)}});
+    }
+    if (expired) {
+      // The deadline cut the call: no decision of the call is given, also the answered ones and the kept ones. The route answers 503, never
+      // a part of the answers. The answers that came stay in the cache: they are valid answers of the PDP.
+      for (auto& decision : out) decision = failed_decision();
+      log_event(LogLevel::Warn, "access.pdp_failed",
+                {{"request_id", context.request_id}, {"path", ""}, {"status", 0},
+                 {"error", "the call of " + std::to_string(chunks.size()) + " requests went past access.pdp.batch_timeout (" +
+                               std::to_string(options_.batch_timeout.count()) + "ms): every question of the call fails"},
+                 {"evaluations", static_cast<uint64_t>(questions.size())}});
     }
   }
 

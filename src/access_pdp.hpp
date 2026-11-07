@@ -281,6 +281,13 @@ struct PdpOptions {
   // The largest number of questions in one request to the PDP. A batch with more questions goes in several requests, in order. The
   // metadata of the PDP can lower it (procurauth_evaluations_max_items).
   size_t max_evaluations = 100;
+  // The longest time of all the requests of one call of decide() that goes in more than one request (access.pdp.batch_timeout). Each request
+  // keeps `timeout`, and no request goes past this deadline. When the deadline cuts the call, every question of the call fails: a call
+  // never gives a part of its answers. A call of one request has only `timeout`.
+  std::chrono::milliseconds batch_timeout{2000};
+  // The highest procurauth_usage_max_seconds of the metadata that the client accepts (access.pdp.usage_max_seconds). A document with a
+  // larger value cannot be used (discover gives Invalid): nothing lowers the published time.
+  uint64_t usage_max_seconds = 120;
   // The path of the base URL ("" or "/path"). It starts every path that the client builds from the default endpoints.
   std::string base_path;
   // true: the client reads the metadata of the PDP (AuthZEN 1.0, l.1317) before its first question. `identifier` is the base URL as the
@@ -341,7 +348,8 @@ public:
   // The decisions of `subject` for `questions`, in their order. The questions that the cache does not answer go to the PDP in requests of
   // at most max_evaluations questions (and within the maxima of the metadata), sent in order. A request that fails gives a failed
   // decision to its questions only. After a request that got no answer (a timeout or a connection error), the later requests of the call
-  // are not sent: each of their questions is failed, without a new wait.
+  // are not sent: each of their questions is failed, without a new wait. A call of several requests has one deadline, batch_timeout: a
+  // request never waits past it, and when the deadline cuts the call, every decision of the call is failed (also the answered ones).
   std::vector<AccessDecision> decide(const std::string& subject, const std::vector<AccessQuestion>& questions, const PdpCallContext& context);
 
   // The question of one use of an action that lists a budget (ProcurAuth 6.4): ONE Access Evaluation with context.usage = {"units": 1}.
@@ -357,12 +365,13 @@ public:
 
   // One attempt to read the metadata of the PDP (AuthZEN 1.0, l.1327-1334). Loaded and Absent set the endpoints of the client; the other
   // states keep them. The server calls it at the start: Invalid stops the start, Unreachable is a warning. With PdpOptions::discovery,
-  // decide() also calls it before a question while no metadata is known (at most once each second), and again after one hour.
+  // decide() also calls it before a question while no metadata is known (at most once each second), and again after one hour. A document
+  // with procurauth_usage_max_seconds above PdpOptions::usage_max_seconds is Invalid: the message names the key, the value and the limit.
   PdpDiscoveryResult discover(const PdpCallContext& context);
   // The endpoints that apply now (the defaults before a discovery).
   PdpEndpoints endpoints();
-  // The wait for a question with context.usage (ProcurAuth 6.9, 10.6): longer than procurauth_usage_max_seconds when the PDP publishes
-  // it, never shorter than the timeout.
+  // The wait for a question with context.usage (ProcurAuth 6.9, 10.6): procurauth_usage_max_seconds plus one second when the PDP publishes
+  // it, never shorter than the timeout. The published value is never above PdpOptions::usage_max_seconds (discover), so nothing lowers it.
   std::chrono::milliseconds usage_timeout();
   // The reading of a metadata document: false, and `error` says why, when it cannot be used. `identifier` is the base URL of the
   // configuration. An absent endpoint of evaluation or evaluations, an endpoint of another origin, a policy_decision_point that is not
@@ -419,10 +428,10 @@ private:
   void cache_store(std::string key, const PdpAnswer& answer, std::chrono::steady_clock::time_point now);
   void cache_erase(CacheList::iterator it);
 
-  // One request of decide(): the questions `ask` (the indices into `questions`) go in one call. It sets out[] and the cache. It returns
-  // false when the PDP gave no answer (a timeout or a connection error).
+  // One request of decide(): the questions `ask` (the indices into `questions`) go in one call, with the deadline `timeout`. It sets out[]
+  // and the cache. It returns false when the PDP gave no answer in time (a timeout or a connection error).
   bool ask_chunk(const std::string& subject, const std::vector<AccessQuestion>& questions, const std::vector<size_t>& ask,
-                 const PdpEndpoints& endpoints, const PdpCallContext& context, std::vector<AccessDecision>* out);
+                 const PdpEndpoints& endpoints, const PdpCallContext& context, std::chrono::milliseconds timeout, std::vector<AccessDecision>* out);
   // The groups of questions of one call, each within the maxima.
   std::vector<std::vector<size_t>> plan_chunks(const std::string& subject, const std::vector<AccessQuestion>& questions, const std::vector<size_t>& ask,
                                                const PdpEndpoints& endpoints) const;

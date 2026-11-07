@@ -14,6 +14,8 @@
 #   7. a metadata document of another PDP         the start stops with a message that names access.pdp.url
 #   8. ca_file or verify with an http URL         the start stops with a message that names the two keys
 #   9. the PDP is down at the start               the server starts, GET /api/version gives 503, and then 200 when the PDP starts
+#  10. procurauth_usage_max_seconds above access.pdp.usage_max_seconds: the start stops with a message that names the key, the value and
+#      the limit (nothing is lowered to fit); at the limit, the server starts and answers 200
 # The binary needs the TLS client (CHDASH_TLS): a binary built without it fails the case 1 and the test says so.
 set -euo pipefail
 
@@ -245,6 +247,18 @@ wait_pdp pdp-tls
 if [[ "$(wait_status "$port" 200)" == 200 ]]; then ok "9 the PDP is up again: GET /api/version gives 200"; else
   fail "9 expected 200 after the PDP came back"; docker logs "$cid" 2>&1 | tail -8 | cut -c1-400 >&2
 fi
+
+# 10. the limit of the wait of a question with context.usage (owner decision of 2026-11-07).
+pdp_exec pdp-tls "import json
+body = json.dumps({'default': True, 'metadata_extra': {'procurauth_usage_max_seconds': 121}}).encode()
+request = urllib.request.Request('https://pdp-tls:8443/control/answer', data=body, headers={'Content-Type': 'application/json'})
+urllib.request.urlopen(request, context=ctx, timeout=3).read()" >/dev/null
+expect_start_error "10a the metadata publishes 121 s, the limit is 120 s" '    url     = "https://pdp-tls:8443"
+    ca_file = "/certs/ca.crt"
+    usage_max_seconds = 120' 'procurauth_usage_max_seconds of the metadata is 121, above access.pdp.usage_max_seconds (120)'
+expect_status "10b the metadata publishes 121 s, the limit is 121 s" '    url     = "https://pdp-tls:8443"
+    ca_file = "/certs/ca.crt"
+    usage_max_seconds = 121' 200 '"usage_max_seconds":121'
 
 if (( failures > 0 )); then echo "FAILED: $failures case(s)" >&2; exit 1; fi
 echo "OK: TLS to the PDP"

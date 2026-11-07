@@ -176,6 +176,8 @@ void Server::init_access() {
   options.token = settings.pdp_token;
   options.timeout = std::chrono::milliseconds(settings.pdp_timeout_ms);
   options.cache_ttl = std::chrono::milliseconds(settings.pdp_cache_ttl_ms);
+  options.batch_timeout = std::chrono::milliseconds(settings.pdp_batch_timeout_ms);
+  options.usage_max_seconds = static_cast<uint64_t>(settings.pdp_usage_max_seconds);
   const OtlpEndpoint endpoint = settings.pdp_endpoint;
   // The CLIENT span of each call to the PDP (contract 11.7), child of the span of the request when it has a traceparent.
   auto on_call = [this, endpoint](const PdpCall& call) {

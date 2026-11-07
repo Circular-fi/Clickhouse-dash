@@ -334,6 +334,8 @@ std::vector<EffectiveValue> effective_config(const AppConfig& cfg) {
         else if (name == "access.pdp.search") out.add(name, cfg.access.pdp_search ? "true" : "false");
         else if (name == "access.pdp.timeout") out.add(name, duration_text(cfg.access.pdp_timeout_ms));
         else if (name == "access.pdp.cache_ttl") out.add(name, duration_text(cfg.access.pdp_cache_ttl_ms));
+        else if (name == "access.pdp.batch_timeout") out.add(name, duration_text(cfg.access.pdp_batch_timeout_ms));
+        else if (name == "access.pdp.usage_max_seconds") out.add(name, std::to_string(cfg.access.pdp_usage_max_seconds));
         break;
     }
   }

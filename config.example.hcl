@@ -353,6 +353,8 @@ access {
     # timeout  = "500ms"                    # no answer in this time: the request gets 503
     # cache_ttl = "30s"                     # 0s: no cache. A failure is never kept.
     # search   = false                      # true: the AuthZEN Resource Search lists the databases, if the PDP announces it
+    # batch_timeout = "2s"                  # all the requests of one split call; not less than timeout; past it: 503
+    # usage_max_seconds = 120               # the highest procurauth_usage_max_seconds of the metadata; above it the start stops
   }
 }
 

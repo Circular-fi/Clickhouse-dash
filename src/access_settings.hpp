@@ -48,6 +48,10 @@ struct AccessSettings {
   std::string pdp_token;
   int64_t pdp_timeout_ms = 500;
   int64_t pdp_cache_ttl_ms = 30 * 1000;
+  // The deadline of all the requests of one call that goes in more than one request (docs/access.md, "Decisions"). Not less than pdp_timeout_ms.
+  int64_t pdp_batch_timeout_ms = 2 * 1000;
+  // The highest procurauth_usage_max_seconds of the metadata of the PDP that ChDash accepts (docs/access.md, "Metadata of the PDP").
+  int64_t pdp_usage_max_seconds = 120;
 
   bool enforced() const { return mode == AccessMode::Authzen; }
 };

@@ -2059,6 +2059,71 @@ void test_pdp_use_waits_for_the_pdp() {
   CHECK(!fake->calls.back().once && fake->calls.back().timeout.count() == 500);
 }
 
+// access.pdp.usage_max_seconds (owner decision of 2026-11-07): the published time applies as it is up to the limit, and a document above the
+// limit cannot be used. Nothing lowers the published time to fit.
+void test_pdp_usage_wait_limit() {
+  const auto metadata = [](uint64_t seconds) {
+    return R"({"policy_decision_point":"http://pdp.test","access_evaluation_endpoint":"http://pdp.test/access/v1/evaluation",)"
+           R"("access_evaluations_endpoint":"http://pdp.test/access/v1/evaluations","procurauth_usage_max_seconds":)" +
+           std::to_string(seconds) + "}";
+  };
+  const auto client_for = [](UseTransport** fake, const std::string& document, uint64_t limit) {
+    auto transport = std::make_unique<UseTransport>();
+    *fake = transport.get();
+    (*fake)->metadata = document;
+    (*fake)->script = {ok(R"({"decision":true,"context":{"usage":{"units":1}}})")};
+    PdpOptions options;
+    options.timeout = std::chrono::milliseconds(500);
+    options.cache_ttl = std::chrono::seconds(0);
+    options.discovery = true;
+    options.identifier = "http://pdp.test";
+    options.usage_max_seconds = limit;
+    return std::make_unique<PdpClient>(options, std::move(transport));
+  };
+  const AccessQuestion use{"query.run.read", access_host_resource("db", "prod")};
+  UseTransport* fake = nullptr;
+  // The value of the limit is accepted, and the wait is one second more: no value is cut (the former code cut at 3600).
+  {
+    auto client = client_for(&fake, metadata(120), 120);
+    CHECK(client->discover(PdpCallContext{}).state == PdpDiscoveryState::Loaded);
+    CHECK_EQ(client->usage_timeout().count(), int64_t(121000));
+    auto most = client_for(&fake, metadata(3600), 3600);
+    CHECK(most->discover(PdpCallContext{}).state == PdpDiscoveryState::Loaded);
+    CHECK_EQ(most->usage_timeout().count(), int64_t(3601000));
+    CHECK(most->decide_use("alice", use, PdpCallContext{}).allowed);
+    CHECK_EQ(fake->calls.back().timeout.count(), int64_t(3601000));
+  }
+  // One second above the limit: the document cannot be used. The message names the key, the value of the metadata and the limit.
+  {
+    auto client = client_for(&fake, metadata(121), 120);
+    const PdpDiscoveryResult found = client->discover(PdpCallContext{});
+    CHECK(found.state == PdpDiscoveryState::Invalid);
+    CHECK(found.message.find("procurauth_usage_max_seconds of the metadata is 121") != std::string::npos);
+    CHECK(found.message.find("access.pdp.usage_max_seconds (120)") != std::string::npos);
+    // Nothing is sent with this document: the question of a use fails (503), and no request goes to the PDP.
+    const AccessDecision decision = client->decide_use("alice", use, PdpCallContext{});
+    CHECK(decision.failed && !decision.allowed);
+    CHECK(fake->calls.empty());
+    CHECK(client->decide("alice", {use}, PdpCallContext{}).front().failed);
+    CHECK(fake->calls.empty());
+    // The wait was not changed to the limit: the client keeps no value of this document.
+    CHECK_EQ(client->usage_timeout().count(), int64_t(500));
+  }
+  // A large published time and a small limit: refused, never lowered.
+  {
+    auto client = client_for(&fake, metadata(86400), 3600);
+    const PdpDiscoveryResult found = client->discover(PdpCallContext{});
+    CHECK(found.state == PdpDiscoveryState::Invalid && found.message.find("86400") != std::string::npos);
+  }
+  // Without the member, the limit does not apply and the wait is the timeout.
+  {
+    auto client = client_for(&fake, R"({"policy_decision_point":"http://pdp.test","access_evaluation_endpoint":"http://pdp.test/access/v1/evaluation",)"
+                                     R"("access_evaluations_endpoint":"http://pdp.test/access/v1/evaluations"})", 1);
+    CHECK(client->discover(PdpCallContext{}).state == PdpDiscoveryState::Loaded);
+    CHECK_EQ(client->usage_timeout().count(), int64_t(500));
+  }
+}
+
 // The use of a run (access_run_use): the questions, their order, and the refusals.
 struct RunScript {
   std::map<std::string, AccessDecision> plain;
@@ -2406,10 +2471,12 @@ int main() {
   RUN(test_budgets_in_the_document);
   RUN(test_pdp_use);
   RUN(test_pdp_use_waits_for_the_pdp);
+  RUN(test_pdp_usage_wait_limit);
   RUN(test_run_use);
   RUN(test_options_parser);
   RUN(test_options_page);
   RUN(pdp_cases::test_pdp_chunks);
+  RUN(pdp_cases::test_pdp_batch_deadline);
   RUN(pdp_cases::test_pdp_metadata);
   RUN(pdp_cases::test_pdp_item_error);
   RUN(pdp_cases::test_pdp_search);

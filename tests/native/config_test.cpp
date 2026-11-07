@@ -666,6 +666,40 @@ void test_access_block() {
   // The Resource Search is off by default (docs/access.md, "Resource Search"). The key is a boolean of the file only.
   CHECK(!defaults.access.pdp_search);
   CHECK_EQ(source(defaults, "access.pdp.search"), std::string("default|false"));
+  // The deadline of a split call and the limit of the wait of a use (owner decision of 2026-11-07): closed keys, documented defaults, no
+  // value changed to fit, and the contradiction with timeout stops the start.
+  {
+    CHECK_EQ(defaults.access.pdp_batch_timeout_ms, int64_t(2000));
+    CHECK_EQ(defaults.access.pdp_usage_max_seconds, int64_t(120));
+    CHECK_EQ(source(defaults, "access.pdp.batch_timeout"), std::string("default|2s"));
+    CHECK_EQ(source(defaults, "access.pdp.usage_max_seconds"), std::string("default|120"));
+    const AppConfig set = load(authzen(identity, pdp + "\n batch_timeout = \"5s\"\n usage_max_seconds = 600"));
+    CHECK_EQ(set.access.pdp_batch_timeout_ms, int64_t(5000));
+    CHECK_EQ(set.access.pdp_usage_max_seconds, int64_t(600));
+    CHECK_EQ(source(set, "access.pdp.batch_timeout"), std::string("file|5s"));
+    CHECK_EQ(source(set, "access.pdp.usage_max_seconds"), std::string("file|600"));
+    CHECK_EQ(load(authzen(identity, pdp + "\n usage_max_seconds = 3600")).access.pdp_usage_max_seconds, int64_t(3600));
+    CHECK_EQ(load(authzen(identity, pdp + "\n timeout = \"1s\"\n batch_timeout = \"1s\"")).access.pdp_batch_timeout_ms, int64_t(1000));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n usage_max_seconds = 0")), "access.pdp.usage_max_seconds must be between 1 and 3600 (whole seconds), not 0"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n usage_max_seconds = 3601")), "access.pdp.usage_max_seconds must be between 1 and 3600 (whole seconds), not 3601"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n usage_max_seconds = \"120\"")), "access.pdp.usage_max_seconds must be an integer"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n batch_timeout = \"6m\"")), "access.pdp.batch_timeout must be between 10ms and 5m, not \"6m\""));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n batch_timeout = 2")), "access.pdp.batch_timeout"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n batch_timeout = \"2s\"\n batch_timeout = \"3s\"")), "duplicate attribute 'batch_timeout'"));
+    // A deadline of the whole call below the timeout of one request: the two keys contradict each other. The default 2s also contradicts a
+    // longer timeout: the message says that the value is the default, and nothing is changed to fit.
+    const std::string shorter = error_of(authzen(identity, pdp + "\n timeout = \"1s\"\n batch_timeout = \"500ms\""));
+    CHECK(contains(shorter, "access.pdp.batch_timeout (500ms) and access.pdp.timeout (1s) contradict each other"));
+    CHECK(contains(shorter, "Set access.pdp.batch_timeout to 1s or more"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n timeout = \"5s\"")), "access.pdp.batch_timeout (2s, the default) and access.pdp.timeout (5s) contradict each other"));
+    // The effective configuration shows the two values.
+    bool batch = false, usage = false;
+    for (const auto& value : config::effective_config(set)) {
+      if (value.name == "access.pdp.batch_timeout") batch = value.value == "5s" && value.source == "file";
+      if (value.name == "access.pdp.usage_max_seconds") usage = value.value == "600" && value.source == "file";
+    }
+    CHECK(batch && usage);
+  }
   {
     const AppConfig searching = load(authzen(identity, pdp + "\n search = true"));
     CHECK(searching.access.pdp_search);

@@ -1069,7 +1069,10 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   }
 
   // pdp { }
-  validate_object(*pdp, "access.pdp", {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl", "ca_file", "verify", "search"}, {});
+  validate_object(*pdp, "access.pdp",
+                  {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl", "ca_file", "verify", "search", "batch_timeout",
+                   "usage_max_seconds"},
+                  {});
   const auto url = read_value_forms(*pdp, "url", "access.pdp");
   if (!url) throw std::runtime_error("access.pdp needs the address of the PDP: give one of url, url_env and url_file");
   {
@@ -1139,6 +1142,22 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   cfg.value_sources["access.pdp.token"] = token.source;
   duration(*pdp, "access.pdp", "timeout", 10, 60 * 1000, &out.pdp_timeout_ms);
   duration(*pdp, "access.pdp", "cache_ttl", 0, 3600 * 1000, &out.pdp_cache_ttl_ms);
+  duration(*pdp, "access.pdp", "batch_timeout", 10, 5 * 60 * 1000, &out.pdp_batch_timeout_ms);
+  if (out.pdp_batch_timeout_ms < out.pdp_timeout_ms) {
+    // The deadline of a call of several requests is shorter than one request: the first request could not use its timeout.
+    const bool batch_from_file = pdp->attrs.count("batch_timeout") != 0;
+    throw std::runtime_error("access.pdp.batch_timeout (" + duration_text(out.pdp_batch_timeout_ms) + (batch_from_file ? "" : ", the default") +
+                             ") and access.pdp.timeout (" + duration_text(out.pdp_timeout_ms) +
+                             ") contradict each other: batch_timeout is the time of all the requests of one call, so it cannot be shorter than the "
+                             "time of one request. Set access.pdp.batch_timeout to " + duration_text(out.pdp_timeout_ms) + " or more");
+  }
+  if (const auto seconds = int_attr(*pdp, "usage_max_seconds", "access.pdp")) {
+    if (*seconds < 1 || *seconds > 3600) {
+      throw std::runtime_error("access.pdp.usage_max_seconds must be between 1 and 3600 (whole seconds), not " + std::to_string(*seconds));
+    }
+    out.pdp_usage_max_seconds = *seconds;
+    cfg.value_sources["access.pdp.usage_max_seconds"] = "file";
+  }
 
   // The service must be reachable only through the edge (docs/access.md, "Network"): all the interfaces is a warning, not an error.
   {

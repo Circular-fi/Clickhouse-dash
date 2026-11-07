@@ -36,6 +36,8 @@ access {
     token_file = "/run/secrets/db_pdp_token"                  # or token_env
     timeout    = "500ms"
     cache_ttl  = "30s"
+    batch_timeout     = "2s"
+    usage_max_seconds = 120
   }
 }
 ```
@@ -56,6 +58,8 @@ access {
 | `pdp.ca_file` | the store of the system | An `https` URL only. A file of PEM certificates: the CAs that ChDash trusts for the PDP. It replaces the store of the system. |
 | `pdp.verify` | `true` | An `https` URL only. `false` turns off the check of the certificate. The start then writes a `config.warning`. |
 | `pdp.search` | `false` | `true` uses the Resource Search of the PDP to list databases. It needs the metadata member `search_resource_endpoint` too. Refer to [Resource Search](#resource-search). |
+| `pdp.batch_timeout` | `2s` | The longest time of all the requests of one call that ChDash splits into several requests. From `10ms` to `5m`, and not less than `pdp.timeout`. Refer to [Decisions](#decisions). |
+| `pdp.usage_max_seconds` | `120` | The highest `procurauth_usage_max_seconds` of the metadata of the PDP that ChDash accepts. A whole number from 1 to 3600. Refer to [Metadata of the PDP](#metadata-of-the-pdp). |
 
 These items stop the start:
 
@@ -66,8 +70,9 @@ These items stop the start:
 - A JWK Set with a private member (`d`), with a `kty` or `crv` that ChDash does not accept, or with two keys of the same `kid`.
 - An `https` URL in a build without the TLS client. The message names the CMake option `-DCHDASH_TLS=ON`.
 - `pdp.ca_file` or `pdp.verify` with an `http` URL. They act on TLS only, so they contradict the URL.
+- A `pdp.batch_timeout` below `pdp.timeout`, also the default `2s` with a `pdp.timeout` above it. The two keys contradict each other: the message names them, gives their values and tells the value to set.
 - A `pdp.ca_file` that is not a readable file with at least one PEM certificate.
-- A metadata document of the PDP that ChDash cannot use (refer to [Metadata of the PDP](#metadata-of-the-pdp)). The message names `access.pdp.url`.
+- A metadata document of the PDP that ChDash cannot use (refer to [Metadata of the PDP](#metadata-of-the-pdp)). The message names `access.pdp.url`. A document with `procurauth_usage_max_seconds` above `pdp.usage_max_seconds` is such a document: the message also names `access.pdp.usage_max_seconds`, the value of the metadata and the limit.
 - A token of the PDP that holds a space, a control character or more than 4096 bytes. The error does not show the token.
 - With `mode = "authzen"`, a `clickhouse.host` name that has more than 256 bytes or is not UTF-8. The name is the id of a host for the PDP (refer to [Resources and hosts](#resources-and-hosts)).
 
@@ -334,6 +339,7 @@ Rules:
 - The resource of each question follows the table of [Resources and hosts](#resources-and-hosts). The Query page and the export name no database: for them ChDash asks for the host.
 - Each call has `Authorization: Bearer <pdp token>`, `X-Request-ID` (the request id of the request that asks) and a `traceparent`.
 - **Bounded batches.** One request holds at most 100 questions. A call with more questions goes in several requests, in order. A PDP can publish a lower maximum of items and a maximum of bytes for one request (ProcurAuth 10.7a): ChDash obeys both. A request that fails gives a failure to its own questions only. When a request gets no answer (a timeout or a connection error), ChDash does not send the later requests of the call. Each of their questions is a failure. This avoids one wait for each request.
+- **One deadline for a split call.** A call of several requests has one deadline, `pdp.batch_timeout` (`2s` by default), from the start of its first request. Each request waits `pdp.timeout` at most, and never past the deadline: the last request gets the time that remains. When the deadline cuts the call, ChDash sends no further request, and every question of the call is a failure, also the questions that the PDP answered and the questions that the cache answered. Thus the route answers `503`. It never allows a part of an operation on a part of the answers. The answers that came stay in the cache, so the next call asks only the rest. The log has the line `access.pdp_failed` with the cause. A call of one request has only `pdp.timeout`.
 - **Fail closed.** No answer before `pdp.timeout`, a connection error, a status that is not `200`, a body that is larger than 256 KiB, and a body that is not a valid answer make each question of the call a failure. A failure is `false`, but it is not a denial: the route answers `503` (refer to [Enforcement](#enforcement)). ChDash writes the line `access.pdp_failed` and never keeps a failure. A status `401` or `403` of the PDP is also a failure: the PDP refuses the credential of ChDash. ChDash then also writes the line `access.pdp_credential_refused`.
 - A decision can have a `context` object. A `context` that is not an object makes the answer not valid. ChDash reads these members of `context` (ProcurAuth 6.12, 7.3, 11.1) and ignores the other members:
   - `reason` of a `false` decision: `unknown_subject`, `invalid_resource`, `invalid_request` or `budget_exceeded`. Another value means "no permission". ChDash uses `unknown_subject`, and only this reason, to make an MCP key of that subject an orphan ([mcp.md](mcp.md#orphan-keys-and-their-adoption)).
@@ -586,7 +592,7 @@ With `pdp.cache_ttl = "0s"`, ChDash keeps nothing.
 
 ### No second try
 
-ChDash never sends a question with `context.usage` again (ProcurAuth 10.6). The client of the PDP sends it with `post_once`: the transport does not send it again after a kept connection that the PDP closed, and ChDash does not send it after a timeout, a lost answer or a connection error. The PDP can have counted the use. The units of a lost answer stay counted, and the route answers `503`. The wait for the answer is longer than `procurauth_usage_max_seconds` of the metadata of the PDP, and never shorter than `pdp.timeout` ([Metadata of the PDP](#metadata-of-the-pdp)). The log line `access.decision` of a use has `usage` true, the `units` and `retry_after`.
+ChDash never sends a question with `context.usage` again (ProcurAuth 10.6). The client of the PDP sends it with `post_once`: the transport does not send it again after a kept connection that the PDP closed, and ChDash does not send it after a timeout, a lost answer or a connection error. The PDP can have counted the use. The units of a lost answer stay counted, and the route answers `503`. The wait for the answer is one second more than `procurauth_usage_max_seconds` of the metadata of the PDP, and never shorter than `pdp.timeout` ([Metadata of the PDP](#metadata-of-the-pdp)). `pdp.usage_max_seconds` bounds the published time: ChDash never lowers it to fit. The log line `access.decision` of a use has `usage` true, the `units` and `retry_after`.
 
 ### Choices of ChDash
 
@@ -684,6 +690,7 @@ At the start, ChDash reads `GET <origin>/.well-known/authzen-configuration[<path
 - A valid document gives the endpoints `access_evaluation_endpoint` and `access_evaluations_endpoint` (both required by ChDash), and `search_resource_endpoint` (optional). A member that ChDash does not know is ignored (AuthZEN 1.0, l.1342).
 - `policy_decision_point` must be `pdp.url` (a slash at the end does not count) (AuthZEN 1.0, l.1364). Each endpoint must have the scheme, the host and the port of `pdp.url`. Thus the token goes to this origin only.
 - The members `procurauth_usage_max_seconds`, `procurauth_idle_max_seconds`, `procurauth_evaluations_max_bytes` and `procurauth_evaluations_max_items` (ProcurAuth 6.9, 10.7, 10.7a) are whole numbers from 1. ChDash uses them for the idle time, the wait of a question with `context.usage` (one second more than the published time, never less than `pdp.timeout`) and the size of a request.
+- `procurauth_usage_max_seconds` must not be above `pdp.usage_max_seconds` (`120` by default). Thus the wait is never longer than this limit plus one second, or `pdp.timeout` when it is longer. ChDash never lowers the published time to fit (decision of 2026-11-07). A higher value at the start stops the start. The message names `access.pdp.usage_max_seconds`, the value of the metadata and the limit. Raise the key (3600 at most), or lower the time of the PDP. A higher value in a document that ChDash reads after the start makes this document not valid: the questions fail (`503`) until a good document comes. Without the member, the wait is `pdp.timeout`. The portal 5.0.2 does not publish the member.
 - A document that cannot be used stops the start. The message names `access.pdp.url` and the cause.
 - A PDP that does not answer at the start does not stop the start: the portal can restart after ChDash. ChDash writes the line `access.pdp_metadata_failed`. Until it reads the metadata, each question fails (503), without a request to the PDP. ChDash tries again at a question, at most once each second.
 - A good document is read again after one hour. When this fails, the old document stays in use. A document that is not valid then is not used: questions fail until a good document comes.
@@ -740,6 +747,7 @@ The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run 
 | The budgets (ProcurAuth 6.4, 6.11, 6.12, 10.1, 10.6; MCP binding 3.4, 3.6a, 5.3, 5.4) | `tests/native/access_test.cpp` (`test_budgets_in_the_document`, `test_pdp_use`, `test_pdp_use_waits_for_the_pdp`, `test_run_use`), `tests/native/mcp_test.cpp` (`test_identity_budgets`), `tests/backend-functional/test_access.py` (the tests `test_a_run_sends_one_question_with_usage_and_no_same_question_without_it`, `test_budget_exceeded_gives_429_with_retry_after_for_a_run`, `test_a_failure_of_the_question_with_usage_gives_503_and_it_is_sent_one_time` and `test_the_stream_of_an_export_takes_the_unit_and_the_run_takes_none`), `tests/backend-functional/test_mcp_identity.py` (the tests `test_u18...` to `test_u95...` on the budgets) and the cases of the ProcurAuth runner U04, U19, U21, U22, U24, U32, U33, U58, U62, U63, U67, U68 (`tests/conformance`) |
 | The budget `queries` of the creator of an MCP key of the mode `keys` (decision of 2026-11-07) | `tests/native/mcp_test.cpp` (`test_creator_budgets`): one question with `context.usage` on the host of the call for each tool of `query.run.read`, none without it, `budget_exceeded`, `503` for a failure, no unit for the other tools; `test_a_query_tool_of_an_mcp_key_takes_a_unit_of_the_budget_of_its_creator` of `test_access.py` |
 | A request with a ceiling neither reads nor fills a shared cache of a page (decision of 2026-11-07) | `tests/native/cache_acl_test.cpp` (`ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps`, `ddl_text_cache_a_request_with_a_ceiling_reads_every_text_and_keeps_none`), and `test_a_request_with_a_ceiling_neither_reads_nor_fills_the_shared_cache_of_a_page` of `test_access.py` |
+| The deadline of a split batch and the limit of the wait of a use (decision of 2026-11-07) | `tests/native/pdp_transport_cases.hpp` (`test_pdp_batch_deadline`), `tests/native/access_test.cpp` (`test_pdp_usage_wait_limit`), `tests/native/config_test.cpp` (the keys `access.pdp.batch_timeout` and `access.pdp.usage_max_seconds`), and the case 10 of `tests/tls/pdp.sh` (the start stops above the limit) |
 | The reason `unknown_subject` (ProcurAuth 11.1) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).

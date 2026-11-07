@@ -244,6 +244,88 @@ inline void test_pdp_chunks() {
   }
 }
 
+// ---- the deadline of a split call (access.pdp.batch_timeout, owner decision of 2026-11-07) ------------------------------------------
+
+inline void test_pdp_batch_deadline() {
+  PdpCallContext context;
+  context.request_id = "deadline";
+  // A slow PDP answers each request in 150 ms. 500 questions go in five requests. The deadline of the call is 400 ms: two requests end in
+  // time, the third one gets the 100 ms that remain and gets no answer in time. The fourth and the fifth requests are not sent, and every
+  // question of the call fails, also the 200 that the PDP answered: never a part of the answers.
+  {
+    auto transport = std::make_unique<ScriptTransport>();
+    ScriptTransport* fake = transport.get();
+    std::vector<std::chrono::milliseconds> waits;
+    std::mutex waits_mu;
+    struct Slow : PdpTransport {
+      ScriptTransport* inner;
+      std::vector<std::chrono::milliseconds>* waits;
+      std::mutex* mu;
+      PdpHttpResult post(const std::string& path, const std::string& body, const std::vector<std::pair<std::string, std::string>>& headers,
+                         std::chrono::milliseconds timeout) override {
+        {
+          std::lock_guard<std::mutex> lock(*mu);
+          waits->push_back(timeout);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        return inner->post(path, body, headers, timeout);
+      }
+    };
+    auto slow = std::make_unique<Slow>();
+    slow->inner = fake;
+    slow->waits = &waits;
+    slow->mu = &waits_mu;
+    PdpOptions options = chunk_options();
+    options.timeout = std::chrono::milliseconds(300);
+    options.batch_timeout = std::chrono::milliseconds(400);
+    options.cache_ttl = std::chrono::milliseconds(60000);
+    PdpClient client(options, std::move(slow));
+    const auto out = client.decide("alice", many_questions(500), context);
+    CHECK_EQ(fake->calls.size(), size_t(3));
+    bool all_failed = true;
+    for (const auto& d : out) all_failed = all_failed && d.failed && !d.allowed;
+    CHECK(all_failed);
+    // Each request waits the timeout of one request at most, and the last one only the time that remains before the deadline.
+    CHECK(waits.size() == 3 && waits[0].count() == 300 && waits[1].count() <= 300 && waits[2].count() <= 100 && waits[2].count() > 0);
+    // The answers that came are valid answers: the cache keeps them, and the next call asks only the rest, within its own deadline.
+    CHECK_EQ(client.cached_entries(), size_t(200));
+    // The answers of the cache alone are not a call of several requests: the next call of the first 200 questions needs no request.
+    const auto first = many_questions(500);
+    const auto kept = client.decide("alice", std::vector<AccessQuestion>(first.begin(), first.begin() + 200), context);
+    CHECK(kept[0].allowed && kept[199].allowed && !kept[0].failed && fake->calls.size() == 3);
+  }
+  // A split call that ends before the deadline gives every answer.
+  {
+    auto transport = std::make_unique<ScriptTransport>();
+    ScriptTransport* fake = transport.get();
+    PdpOptions options = chunk_options();
+    options.batch_timeout = std::chrono::milliseconds(2000);
+    PdpClient client(options, std::move(transport));
+    const auto out = client.decide("alice", many_questions(500), context);
+    CHECK_EQ(fake->calls.size(), size_t(5));
+    bool all_allowed = true;
+    for (const auto& d : out) all_allowed = all_allowed && d.allowed && !d.failed;
+    CHECK(all_allowed);
+  }
+  // A call of one request has only the timeout of one request: the deadline of a split call does not apply to it.
+  {
+    struct Late : PdpTransport {
+      PdpHttpResult post(const std::string&, const std::string& body, const std::vector<std::pair<std::string, std::string>>&,
+                         std::chrono::milliseconds timeout) override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+        PdpHttpResult out = ScriptTransport::all_true(ScriptTransport::Call{"POST", "", body});
+        out.error = timeout.count() == 300 ? "" : "the wait was not the timeout";
+        return out;
+      }
+    };
+    PdpOptions options = chunk_options();
+    options.batch_timeout = std::chrono::milliseconds(50);
+    PdpClient client(options, std::make_unique<Late>());
+    const auto out = client.decide("alice", many_questions(100), context);
+    CHECK(out[0].allowed && !out[0].failed && out[99].allowed);
+  }
+}
+
 // ---- E4: the metadata ----------------------------------------------------------------------------------------------------------
 
 inline std::string metadata_doc(const std::string& pdp, const std::string& extra = "") {
