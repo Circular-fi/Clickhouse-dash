@@ -61,7 +61,9 @@ public:
   McpCreatorState state(const McpKey& key);
   // The first action of `tool` that the PDP refuses to the creator of the key, or an empty string when the creator may call it.
   // A key with no creator gives "creator".
-  std::string tool_refused_action(const McpKey& key, const McpToolInfo& tool);
+  // `*ceiling` (when not null) receives the name of the ceiling that made the refused answer false: a key cannot apply a ceiling. It is
+  // empty for a plain denial.
+  std::string tool_refused_action(const McpKey& key, const McpToolInfo& tool, std::string* ceiling = nullptr);
   // Forget the kept state of a key (after an adoption or a delete).
   void forget(const std::string& key_id);
 

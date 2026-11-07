@@ -172,6 +172,8 @@ std::map<std::string, TableInfo> load_table_infos(
     const std::string& database,
     const std::vector<std::string>& tables) {
   std::map<std::string, TableInfo> out;
+  // These reads of the schema are statements of ChDash, not of a person: the ceilings of the grant never apply.
+  ChInternalScope internal;
   const std::string db = quote_string(database);
   const std::string names = in_list(tables);
 

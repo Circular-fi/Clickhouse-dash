@@ -88,6 +88,8 @@ std::string monitor_grant_hint(const std::string& table, const std::string& user
 bool detect_monitor_capabilities(ChExecutor& system, MonitorCapabilities& out, std::string* error) {
   out = MonitorCapabilities{};
   out.detected_at_ms = monitor_now_ms();
+  // The probe of the capabilities is a statement of ChDash, not of a person: the ceilings of the grant never apply.
+  ChInternalScope internal;
   try {
     system.select("SELECT toString(currentUser())" + monitor_settings_sql(5, 10, 1), [&](const clickhouse::Block& block) {
       if (block.GetRowCount() > 0) out.system_user = text(block, 0, 0);

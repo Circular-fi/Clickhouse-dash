@@ -183,10 +183,15 @@ bool load_explorer_graph(
   // into a fake "unavailable" state.
   section_error.clear();
   bool refresh_table_exists = false;
-  const bool refresh_probe_loaded = try_select(system, graph_refresh_probe_sql(),
-      [&](const clickhouse::Block& block) {
-        if (block.GetRowCount()) refresh_table_exists = truthy(block_string_at(block, 0, 0));
-      }, &section_error);
+  bool refresh_probe_loaded = false;
+  {
+    // The probe of a capability of the server is a statement of ChDash, not of a person: the ceilings of the grant never apply.
+    ChInternalScope internal;
+    refresh_probe_loaded = try_select(system, graph_refresh_probe_sql(),
+        [&](const clickhouse::Block& block) {
+          if (block.GetRowCount()) refresh_table_exists = truthy(block_string_at(block, 0, 0));
+        }, &section_error);
+  }
   if (!refresh_probe_loaded) {
     if (!degrade_on_denied("refreshable_view_capability", section_error, out)) {
       if (error) *error = "Refreshable-view capability query failed: " + section_error;

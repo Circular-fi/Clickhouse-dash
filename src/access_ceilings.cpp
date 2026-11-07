@@ -182,6 +182,7 @@ void access_enforce_ceilings(const std::string& request_id, const std::vector<Ac
               {{"request_id", request_id}, {"action", questions[i].action}, {"resource", access_resource_path(questions[i].resource)},
                {"ceiling", refused.substr(0, 128)}});
     decision.allowed = false;
+    decision.ceiling_refused = refused;
     decision.reason = PdpReason::None;
     decision.limits.clear();
     decision.usage_units.reset();

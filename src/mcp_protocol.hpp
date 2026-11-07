@@ -47,6 +47,9 @@ inline constexpr int kRpcUnsupportedVersion = -32022;  // HTTP 400: data.support
 
 // The fixed messages of the refusals of the service. They copy no value of the request (binding 5.6).
 inline constexpr const char* kMcpForbiddenMessage = "forbidden";
+// The mode keys: the creator of the key holds a grant with a limit that a key cannot apply. The message is fixed and names no value.
+inline constexpr const char* kMcpKeyCeilingMessage =
+    "forbidden: the grant of the creator of this key has a limit that a key cannot apply. Use the identity mode of MCP";
 inline constexpr const char* kMcpUnavailableMessage = "the access check is not available";
 inline constexpr const char* kMcpUnknownToolMessage = "Unknown tool";
 inline constexpr const char* kMcpUnknownMethodMessage = "method not found";
@@ -74,6 +77,10 @@ struct McpCallInfo {
   McpCeilings ceilings;
   // The identity mode, for list_hosts: the hosts that the person can see. Not set: every host that MCP reaches.
   std::optional<std::vector<std::string>> visible_hosts;
+  // The mode keys: the creator of the key holds a grant with a ceiling, and a key cannot apply a ceiling (ProcurAuth 7.5). tool_permitted
+  // gives Denied and sets this to the name of the ceiling. The protocol then answers 403 with -32001 and a fixed message, not the answer for
+  // an unknown tool. The name goes to the log only.
+  std::string ceiling_refused;
 };
 
 struct McpServerInfo {

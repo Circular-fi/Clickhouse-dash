@@ -232,7 +232,7 @@ endif()
 if (CHDASH_BUILD_CH_QUERY_TESTS)
   # The settings of a statement, its scope, and the state of its connection; the cases that need a server
   # run when CHDASH_TEST_CLICKHOUSE_URI names one.
-  add_executable(chdash_ch_query_test ../tests/native/ch_query_test.cpp ch_query.cpp ch_client_pool.cpp ch_uri.cpp)
+  add_executable(chdash_ch_query_test ../tests/native/ch_query_test.cpp ch_query.cpp ch_client_pool.cpp ch_uri.cpp allowed_objects.cpp)
   target_include_directories(chdash_ch_query_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_ch_query_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR})
   set(THREADS_PREFER_PTHREAD_FLAG ON)

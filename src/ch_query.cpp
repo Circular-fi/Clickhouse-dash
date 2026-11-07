@@ -563,7 +563,50 @@ std::vector<std::pair<std::string, std::string>> ch_query_settings(
   return out;
 }
 
+ChQueryLimits ch_internal_limits(ChQueryLimits limits) {
+  if (limits.before_ceilings) {
+    const ChQueryBounds& bounds = *limits.before_ceilings;
+    limits.max_execution_time_s = bounds.max_execution_time_s;
+    limits.timeout_overflow_mode = bounds.timeout_overflow_mode;
+    limits.max_memory_usage = bounds.max_memory_usage;
+    limits.max_rows_to_read = bounds.max_rows_to_read;
+    limits.max_bytes_to_read = bounds.max_bytes_to_read;
+    limits.read_overflow_mode = bounds.read_overflow_mode;
+    limits.max_result_rows = bounds.max_result_rows;
+    limits.max_result_bytes = bounds.max_result_bytes;
+    limits.result_overflow_mode = bounds.result_overflow_mode;
+    limits.before_ceilings.reset();
+  }
+  limits.ceilings = AccessCeilings{};
+  limits.internal = true;
+  return limits;
+}
+
+ChInternalScope::ChInternalScope() {
+  const ChQueryLimits* current = ChQueryScope::current();
+  // Outside every scope, and inside an internal scope, there is nothing to remove.
+  if (!current || current->internal) return;
+  // A scope without a ceiling also gets the inner scope: the flag tells the code that the statements are internal.
+  scope_.emplace(ch_internal_limits(*current));
+}
+
 void apply_ceilings(const AccessCeilings& ceilings, ChQueryLimits& limits) {
+  // An internal statement ignores the ceilings (ChInternalScope).
+  if (limits.internal) return;
+  // The first ceiling keeps the bounds as they were, so that an internal statement of the scope can go back to them.
+  if (ceilings.any() && !limits.before_ceilings) {
+    ChQueryBounds before;
+    before.max_execution_time_s = limits.max_execution_time_s;
+    before.timeout_overflow_mode = limits.timeout_overflow_mode;
+    before.max_memory_usage = limits.max_memory_usage;
+    before.max_rows_to_read = limits.max_rows_to_read;
+    before.max_bytes_to_read = limits.max_bytes_to_read;
+    before.read_overflow_mode = limits.read_overflow_mode;
+    before.max_result_rows = limits.max_result_rows;
+    before.max_result_bytes = limits.max_result_bytes;
+    before.result_overflow_mode = limits.result_overflow_mode;
+    limits.before_ceilings = std::move(before);
+  }
   // The scope keeps the ceilings: the statements that ChDash builds count against them (StatementCeilings).
   limits.ceilings = access_ceilings_lowest(limits.ceilings, ceilings);
   // The lower of two bounds. 0 means that a side has no bound.

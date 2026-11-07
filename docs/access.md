@@ -417,7 +417,7 @@ An action lists its ceilings only when the action is published. In the mode `ide
 ### How ChDash applies a ceiling
 
 1. The rule of the route asks the PDP. ChDash keeps the ceilings of the `true` answer of the action that guards the route. An export keeps the ceilings of `query.export` and of the class of its SQL.
-2. One function, `apply_ceilings`, lowers the bounds of a statement. Four places call it: the run of the Query page (`QuerySession`), the statements of the pages (`request_limits`), Deep Analyze (`user_sql_limits`) and the export stream. A route that an MCP tool calls in the mode `identity` gets the ceilings of the call ([mcp.md](mcp.md#ceilings)).
+2. One function, `apply_ceilings`, lowers the bounds of a statement. It does nothing for an internal statement ([Statements that a ceiling bounds](#statements-that-a-ceiling-bounds)). Four places call it: the run of the Query page (`QuerySession`), the statements of the pages (`request_limits`), Deep Analyze (`user_sql_limits`) and the export stream. A route that an MCP tool calls in the mode `identity` gets the ceilings of the call ([mcp.md](mcp.md#ceilings)).
 3. The ceiling lowers the matching bound. The value that ClickHouse gets is the lowest of the ceiling, the bound of the configuration and the settings profile of the runner user. A ceiling never makes a bound looser.
 4. A ceiling that lowers a bound also sets the overflow mode `throw` when the route sets none. The run then fails with a clear error and gives no cut result.
 5. `max_memory` has no backstop in ChDash. The settings profile of the ClickHouse user enforces it, with the setting `max_memory_usage`. To limit the memory of a statement that sets its own `max_memory_usage`, use a constraint in the profile.
@@ -436,6 +436,24 @@ A run that goes past a ceiling ends with an `error` event that has the code in t
 The statements that ChDash writes for the pages (Explorer, System, Traces, Logs, Metrics, the metadata of the editor) have the same backstop, because many of them carry their own `SETTINGS` clause. Each statement counts the rows and bytes read, the rows of its result and its time. Past a ceiling it ends, and the route answers as for the ClickHouse code of the same meaning (`<page>_scan_limit` or `<page>_timeout`, [operations.md](operations.md#errors)). The pages have no backstop for `max_result_size`: its setting is the only bound there. The progress packets of ClickHouse give the rows and bytes read, so a statement that reads very little can end before a packet arrives.
 
 The pages keep shared caches of their answers (the Explorer, the System page). An answer that comes from a cache runs no statement, so no ceiling applies to it. A ceiling bounds the work that the request does itself.
+
+### Statements that a ceiling bounds
+
+A ceiling bounds the work of the person. It does not bound the work that ChDash does for itself. ChDash marks each statement of its own as internal. An internal statement ignores every ceiling, and `apply_ceilings` does nothing for it. A statement keeps the bounds of the configuration, the deadline of the request and the settings profile of the ClickHouse user.
+
+| Statement | The ceilings apply |
+|---|---|
+| The SQL of the person: the run of the Query page, an export, Deep Analyze | Yes. |
+| The statements that a page runs to show data: the Explorer (catalog, graph, table card and data preview), the System page, Traces, Logs, Metrics | Yes. |
+| The discovery of the ACL (`CHECK GRANT`, `SHOW`, the zero-row probes and `DESCRIBE`), for the Explorer, the System page, exports, analysis and MCP | No. |
+| The probes of the capabilities of the server (the tables and the columns of `system` that the System page needs, the refreshable views of the Explorer graph) | No. |
+| The reads of the schema for the editor (`GET /api/meta`: keywords, functions, databases, tables, columns) | No. |
+| The lookup of `system.query_log` for the execution of a run, the reads of the tables of the signals of OpenTelemetry, and `SYSTEM FLUSH LOGS` | No. |
+| The probe of the settings profile of a connection, and the checks of the health runner | No. They have no scope of a request, so no ceiling reaches them. |
+
+The rule is in the code. A scope of statements has the flag `internal` (`ChQueryLimits::internal`). The object `ChInternalScope` sets it for the statements that follow in the same thread. The builder of an internal statement opens this object. It never opens it for the SQL of a person or for a statement that shows data.
+
+A low ceiling of `explorer.read` therefore lets the Explorer find the objects that the runner may read. The ceiling then bounds the data statements of the page, and the page answers with its own scan or time error (`<page>_scan_limit`). The page does not answer `503` with `acl_discovery_failed`, because a retry cannot help in that case. A `503 acl_discovery_failed` always means that ClickHouse did not answer the discovery.
 
 ### Read and write
 
