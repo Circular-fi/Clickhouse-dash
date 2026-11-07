@@ -663,6 +663,16 @@ void test_access_block() {
   CHECK_EQ(source(defaults, "access.identity.max_age"), std::string("default|5m"));
   CHECK_EQ(source(defaults, "access.pdp.timeout"), std::string("default|500ms"));
   CHECK_EQ(source(defaults, "access.pdp.cache_ttl"), std::string("default|30s"));
+  // The Resource Search is off by default (docs/access.md, "Resource Search"). The key is a boolean of the file only.
+  CHECK(!defaults.access.pdp_search);
+  CHECK_EQ(source(defaults, "access.pdp.search"), std::string("default|false"));
+  {
+    const AppConfig searching = load(authzen(identity, pdp + "\n search = true"));
+    CHECK(searching.access.pdp_search);
+    CHECK_EQ(source(searching, "access.pdp.search"), std::string("file|true"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n search = \"yes\"")), "access.pdp.search must be a boolean"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n search = true\n search = false")), "duplicate attribute 'search'"));
+  }
   // The keys and the token from the environment.
   ::setenv("CHDASH_TEST_IDENTITY_KEYS", pem.c_str(), 1);
   ::setenv("CHDASH_TEST_PDP_TOKEN", "env-token", 1);

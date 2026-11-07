@@ -43,6 +43,8 @@ struct AccessSettings {
   // https only. An empty file is the store of the system.
   std::string pdp_ca_file;
   bool pdp_verify = true;
+  // true: use the Resource Search of the PDP to list databases (docs/access.md, "Resource Search"). Default false.
+  bool pdp_search = false;
   std::string pdp_token;
   int64_t pdp_timeout_ms = 500;
   int64_t pdp_cache_ttl_ms = 30 * 1000;

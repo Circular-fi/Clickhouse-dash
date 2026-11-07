@@ -8,6 +8,7 @@
 // Run:   ./build/chdash_access_test   (exit code 0 = every check passed)
 
 #include "native_check.hpp"
+#include "access_search_cases.hpp"
 #include "pdp_transport_cases.hpp"
 
 #include "access_actions.hpp"
@@ -1993,6 +1994,11 @@ int main() {
   RUN(pdp_cases::test_pdp_metadata);
   RUN(pdp_cases::test_pdp_item_error);
   RUN(pdp_cases::test_pdp_search);
+  RUN(search_cases::test_search_not_used);
+  RUN(search_cases::test_search_union_and_request);
+  RUN(search_cases::test_search_covered_by_the_host);
+  RUN(search_cases::test_search_fallbacks);
+  RUN(search_cases::test_search_intersection_and_pages);
   RUN(pdp_cases::test_pdp_transport);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

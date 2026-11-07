@@ -87,7 +87,9 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   if (!database_filter.empty()) names.push_back(database_filter);
   // A failure of the PDP gives 503, never an empty catalog or a 403 (ProcurAuth 10.3).
   bool failed = false;
-  const auto readable = access_readable_databases({"explorer.read"}, route.host_id, names, &failed);
+  // With the Resource Search of the PDP (access.pdp.search, docs/access.md), one search replaces the questions of the databases. A
+  // request that names a database always asks the PDP with an evaluation (match node), as the rule of the route does.
+  const auto readable = access_readable_databases({"explorer.read"}, route.host_id, names, &failed, database_filter.empty());
   if (failed) return access_unavailable(res, "explorer.read");
   if (readable) {
     if (!database_filter.empty() && readable->count(database_filter) == 0) return access_forbidden(res, "explorer.read");

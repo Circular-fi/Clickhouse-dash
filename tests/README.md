@@ -404,6 +404,8 @@ The test also checks the cache of the decisions and `readonly = 1` for a run wit
 | `ACCESS_BASE_URL` | `config/access.authzen.hcl` (compose service `chdash_access`): `access.mode = "authzen"`, two hosts on the same ClickHouse, a cache of 1 s, MCP with a static key, and the OTLP export to its own receiver |
 | `MCP_IDENTITY_BASE_URL` | `config/mcp.identity.hcl` (compose service `chdash_mcp_identity`): `mcp.auth_mode = "identity"`, two hosts, the fake PDP of `ACCESS_PDP_URL`, a cache of 1 s |
 | `ACCESS_PDP_URL` | the fake PDP (compose service `access_pdp`, `otel-fixture/fake_pdp.py`): it keeps each request that it receives (`GET /control/received`) and answers what a test asks (`POST /control/answer`: a default, actions to deny or allow, and `deny_subjects`, the subjects that it does not know). An entry `action@host:local` covers the host `local` and each database of it: the prefix rule of the grants (contract 11.4). With the match `subtree`, an entry below the resource also gives `true` (addendum 1) |
+| `ACCESS_SEARCH_BASE_URL` | `config/access.search.hcl` (compose service `chdash_access_search`): `access.pdp.search = true`, two hosts, a cache of 1 s, and the PDP of `ACCESS_SEARCH_PDP_URL` |
+| `ACCESS_SEARCH_PDP_URL` | a second fake PDP (compose service `access_pdp_search`) whose metadata announces `search_resource_endpoint` (`FAKE_PDP_SEARCH`). `/control/answer` has `search`: `pages`, `by_action` and `status` |
 | `ACCESS_OTLP_URL` | the fake OTLP receiver of that instance (compose service `access_otlp_receiver`) |
 | `ACCESS_LOGS_CMD` | optional: a command that prints the log of `chdash_access`, for the decision records |
 

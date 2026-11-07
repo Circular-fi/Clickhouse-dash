@@ -2,6 +2,7 @@
 
 #include "access_actions.hpp"
 #include "access_pdp.hpp"
+#include "access_search.hpp"
 #include "access_settings.hpp"
 #include "acl_service.hpp"
 #include "admission.hpp"
@@ -479,8 +480,15 @@ private:
   // `actions` on the host and on each database of the host. A database passes when one action is true on it or on the host (a grant
   // on the service covers the host). Return nullopt when every database passes: no check applies, or an action is true on the host.
   // *failed (when not null) receives true when a decision of the batch failed: the caller then answers 503 (access_unavailable).
+  // `use_search` true: when the search is on (access_search_visible_databases), one search for each action replaces the questions of the
+  // databases. A database that the search did not return stays denied. The caller sets it false for a request that names a database.
   std::optional<std::unordered_set<std::string>> access_readable_databases(const std::vector<const char*>& actions, const std::string& host_id,
-                                                                          const std::vector<std::string>& databases, bool* failed = nullptr);
+                                                                          const std::vector<std::string>& databases, bool* failed = nullptr,
+                                                                          bool use_search = false);
+  // The databases of the host `host_id` from the Resource Search of the PDP (access_search.hpp), for the subject of this request. The
+  // result is Unused when access.pdp.search is false, the metadata does not announce the search, no check applies, or this is a call of
+  // MCP. The caller then sends the evaluations. A Fallback means the same, after the log event access.search_fallback.
+  AccessSearchOutcome access_search_visible_databases(const std::vector<std::string>& actions, const std::string& host_id);
   // Return the decision of `action` on the service for the subject of this request.
   // The page uses it to show or hide a control. Return true when no check applies.
   bool access_permits(const char* action);

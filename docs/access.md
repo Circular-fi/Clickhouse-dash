@@ -55,6 +55,7 @@ access {
 | `pdp.cache_ttl` | `30s` | The longest time that ChDash keeps an answer of the PDP. From `0s` (no cache) to `1h`. |
 | `pdp.ca_file` | the store of the system | An `https` URL only. A file of PEM certificates: the CAs that ChDash trusts for the PDP. It replaces the store of the system. |
 | `pdp.verify` | `true` | An `https` URL only. `false` turns off the check of the certificate. The start then writes a `config.warning`. |
+| `pdp.search` | `false` | `true` uses the Resource Search of the PDP to list databases. It needs the metadata member `search_resource_endpoint` too. Refer to [Resource Search](#resource-search). |
 
 These items stop the start:
 
@@ -273,6 +274,7 @@ The Explorer lists only the databases on which the human holds `explorer.read`:
 
 - The catalog, the storage map and the graph (`GET /api/explorer/catalog`, `/storage` and `/graph`) have the rule `explorer.read` on the host, with the match `subtree`. A grant on the host, above it or on one of its databases lets the route run.
 - The route then keeps only the readable databases. One batch asks `explorer.read` with the match `node` on the host and on each database of the answer. A decision on the host that is `true` keeps every database. Without it, a database stays when its own decision is `true`. The cache of the PDP serves these questions.
+- With `pdp.search = true`, one Resource Search for `explorer.read` can replace the questions of the databases of the catalog (refer to [Resource Search](#resource-search)).
 - A request that names a database (the parameter `database` of the catalog, the table card, the definition of a graph object) asks `node` on that database. A database that the human cannot read gets `403`, as before.
 - The catalog, the storage map and the graph never show the name, the tables or the edges of a database that is not readable. The related objects, the targets and the SQL texts of a table card follow the same rule (they show `[HIDDEN]`).
 - The list of functions names no database: it keeps the rule `explorer.read` on the host with the match `node`.
@@ -297,6 +299,7 @@ Rules:
 - A parameter that occurs two times, a value with a bad escape, a missing `type`, a bad `limit`, a bad `after`, a bad `parent`, and a `type` that is not a child of the type of the `parent` give `400`.
 - The answer is `{"items": [{"id", "label", "has_children"}], "next": <cursor or null>}`. The hosts have `has_children` true. The databases have it false. The list is sorted by id without the case of the ASCII letters. The `label` has 60 characters at most. The cursor is the last id that the route examined, in base64url.
 - A child is visible when the PDP gives `true`, with the match `subtree`, for one published action whose resource types hold the type of the child. For a host: each published action that takes a host. For a database: `query.run.read`, `query.run.write` and `explorer.read`. A grant on the node, above it or below it is enough. The route asks no question with a usage.
+- With `pdp.search = true`, one search for each action can replace the questions of the databases (refer to [Resource Search](#resource-search)). Then the route pages the result on its own.
 - One request asks the PDP 200 questions at most. When the bound is reached, the answer holds the items found so far and a `next` cursor. The answer can then have no item and a `next` value: ask again with `after`.
 - The databases come from `SHOW DATABASES` with the runner account of the host. The route removes `system` and `information_schema`. ChDash keeps the list for 30 seconds. The list is the same for every human. The decisions are not in it.
 - ChDash runs `SHOW DATABASES` only for a host that the human can see. A host that does not exist or that the human cannot see gives an answer with no item.
@@ -563,7 +566,35 @@ At the start, ChDash reads `GET <origin>/.well-known/authzen-configuration[<path
 
 ### Resource Search
 
-`PdpClient::search_resources` is the client of the Resource Search (AuthZEN 1.0, l.1151-1210). It works only when the metadata has `search_resource_endpoint`. It sends the subject, the action, the type of the resource without an `id` (l.1166-1167) and the chain in `resource.properties.ancestors`. It follows `page.next_token` (l.916-960) until the token is empty. It stops after 10 pages or 1000 ids and marks the result as truncated. A result of another type, a page that is not valid, or a token that comes again is a failure. No route calls this function yet.
+The Resource Search is an option. ChDash uses it only for the lists of databases: the route of the options (type `database`) and the catalog of the Explorer. It never uses it for a decision on one resource.
+
+The client is `PdpClient::search_resources`. It sends the subject, the action, the type of the resource without an `id` (AuthZEN 1.0, l.1166) and the chain in `resource.properties.ancestors`. It follows `page.next_token` (l.916-960) until the token is empty. It stops after 10 pages or 1000 ids and marks the result as cut. A result of another type, a page that is not valid, or a token that comes again is a failure.
+
+ChDash uses the search only when both conditions are true:
+
+- The configuration has `access.pdp.search = true`. The default is `false`.
+- The metadata of the PDP names `search_resource_endpoint` (l.1296-1299). Without this member, the PDP is not capable of the search, and ChDash sends the evaluations.
+
+The first condition is there for a reason. A search that is scoped to one host is an extension. A search request in AuthZEN 1.0 has the members `subject`, `action`, `resource`, `context` and `page` (l.1157-1172). It has no scope, and `properties.ancestors` is not a member that the API defines. Issue #761 of the AuthZEN repository, which is open, proposes a scoped search. ProcurAuth 14 says that its protocol does not define it. ProcurAuth has no metadata member that announces a scoped search. So `search_resource_endpoint` alone does not say that the PDP applies the chain. Set `pdp.search = true` only for a PDP that you know applies it.
+
+A PDP that ignores `properties.ancestors` returns the same ids for every host. ChDash handles this case: it keeps only the ids that are databases of the host (`SHOW DATABASES` with the runner account). A person who may see a database of host A is then not shown a database of the same name on host B by the search alone. Use a PDP that applies the chain when the grants differ between hosts with the same database names.
+
+The steps for one list, for one host:
+
+1. For each published action whose resource types hold `database`, ChDash asks the PDP one evaluation on the host with the match `node`. The route of the options uses each such action. The catalog uses `explorer.read`. The PDP applies the chain, so a grant on the host or on the service gives `true`. One `true` answer makes every database of the host visible, and ChDash sends no search. A search returns only the ids that the PDP knows, so it could not show this case.
+2. Otherwise ChDash sends one search for each of these actions, with the type `database` and the ancestors `[service, host]`. The ancestors are the same as in an evaluation.
+3. The result is the union of the ids of all the actions. A database that is not in the union stays hidden. ChDash does not ask the PDP again for it.
+4. ChDash intersects the union with the databases that exist on the host. The route of the options pages this set on its own, with the same order, `q`, `limit` and cursor as without the search. The PDP result is a set, so a page cannot repeat or skip an id when the PDP changes the order of its answer.
+
+A request that names a database does not use the search. It asks the PDP with an evaluation and the match `node`, as without the search.
+
+ChDash falls back to the evaluations of each database, for this request only, in these cases:
+
+- The search fails (no answer, a status that is not 200, a page that is not valid).
+- A bound cuts the result (10 pages or 1000 ids for one action). The beginning of a set is not the set.
+- A decision of step 1 fails.
+
+For each fallback, ChDash writes the log event `access.search_fallback` with `request_id`, `host` and `reason`. A failed search never gives an empty list and never gives `503` alone: the evaluations then decide, and they give `503` when the PDP gives no valid answer (ProcurAuth 10.3). ChDash does not cache a search. At the start, `access.search_mode` tells whether the metadata announces the endpoint.
 
 ## Signature code
 

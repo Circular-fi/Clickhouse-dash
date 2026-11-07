@@ -243,6 +243,10 @@ void Server::init_access() {
       }
     }
   }
+  // access.pdp.search = true needs the announced endpoint too (docs/access.md, "Resource Search"). The log tells which way the lists take.
+  if (settings.pdp_search) {
+    log_event(LogLevel::Info, "access.search_mode", {{"configured", true}, {"announced", !pdp_->endpoints().search_resource.empty()}});
+  }
   // The decisions of a subject that is not the subject of the request: the creator of an MCP key of the page, and the subject of an MCP
   // request in the identity mode. Each decision keeps AccessDecision::failed: a failure of the PDP is not a denial (ProcurAuth 10.3).
   // `can_apply` false: the path applies no ceiling, so a true answer with a ceiling is false (ProcurAuth 7.5).
@@ -527,7 +531,8 @@ bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQ
 
 std::optional<std::unordered_set<std::string>> Server::access_readable_databases(const std::vector<const char*>& actions,
                                                                                 const std::string& host_id,
-                                                                                const std::vector<std::string>& databases, bool* failed) {
+                                                                                const std::vector<std::string>& databases, bool* failed,
+                                                                                bool use_search) {
   if (failed) *failed = false;
   const AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return std::nullopt;
@@ -535,6 +540,20 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
   std::unordered_set<std::string> seen;
   for (const auto& database : databases) {
     if (seen.insert(database).second) names.push_back(database);
+  }
+  if (use_search) {
+    std::vector<std::string> search_actions;
+    for (const char* action : actions) search_actions.emplace_back(action);
+    const AccessSearchOutcome found = access_search_visible_databases(search_actions, host_id);
+    if (found.kind == AccessSearchKind::Covered) return std::nullopt;
+    if (found.kind == AccessSearchKind::Ids) {
+      // The ids of the PDP, and only the databases that exist on the host (the PDP can return the ids of another host).
+      std::unordered_set<std::string> out;
+      for (const auto& name : names) {
+        if (found.ids.count(name) != 0) out.insert(name);
+      }
+      return out;
+    }
   }
   // One batch: each action on the host (a grant on the service covers it), then each action on each database of the host.
   const AccessResource host = access_resource_of(host_id, std::string());
@@ -560,6 +579,12 @@ std::optional<std::unordered_set<std::string>> Server::access_readable_databases
     }
   }
   return out;
+}
+
+AccessSearchOutcome Server::access_search_visible_databases(const std::vector<std::string>& actions, const std::string& host_id) {
+  const AccessRequestState& state = access_state();
+  if (!pdp_ || !state.enforced || state.subject.empty() || current_request_context().is_mcp()) return AccessSearchOutcome{};
+  return access_search_databases(*pdp_, cfg_.access.pdp_search, cfg_.access.audience, host_id, state.subject, actions, state.call);
 }
 
 std::vector<AccessDecision> Server::access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database) {
