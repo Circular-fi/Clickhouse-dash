@@ -610,6 +610,7 @@ An MCP key of the mode `keys` holds no identity token. Its creator is the person
 - One call takes one unit at most. An API tool calls its route in the process, and the route asks the PDP nothing.
 - A refused use gives the answers of [mcp.md](mcp.md#budgets-of-the-keys): the tool error `budget_exceeded` with `retry_after` for a spent budget, HTTP `503` for no valid answer.
 - The tools of the other actions take no unit. These actions list no budget.
+- ChDash keeps the state of a key for `pdp.cache_ttl`, and it gets this state from one batch without `context.usage` before it reads the body. When the state expires at a call of a tool of `query.run.read`, this batch can thus go before the question of the use in the same request: the owner accepts this exception to ProcurAuth 10.1 (decision of 2026-11-07).
 
 ## Navigation
 
