@@ -3,6 +3,7 @@
 #include "access_resource.hpp"
 #include "access_settings.hpp"
 
+#include "access_pdp.hpp"
 #include "ch_uri.hpp"
 #include "config_schema.hpp"
 #include "config_secret.hpp"
@@ -1050,21 +1051,57 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   }
 
   // pdp { }
-  validate_object(*pdp, "access.pdp", {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl"}, {});
+  validate_object(*pdp, "access.pdp", {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl", "ca_file", "verify"}, {});
   const auto url = read_value_forms(*pdp, "url", "access.pdp");
   if (!url) throw std::runtime_error("access.pdp needs the address of the PDP: give one of url, url_env and url_file");
-  if (url->value.rfind("https://", 0) == 0) {
-    throw std::runtime_error("access.pdp.url (" + url->source + ") https is not available: ChDash has no TLS client. Use http on a private network that only ChDash and the PDP reach (docs/access.md), not \"" +
-                             url->value + "\"");
-  }
   {
     std::string error;
-    const auto endpoint = otlp_parse_endpoint(url->value, &error);
-    if (!endpoint) throw std::runtime_error("access.pdp.url (" + url->source + ") " + error + ", not \"" + url->value + "\"");
-    out.pdp_endpoint = *endpoint;
+    const auto parsed = parse_pdp_url(url->value, &error);
+    if (!parsed) throw std::runtime_error("access.pdp.url (" + url->source + ") " + error + ", not \"" + url->value + "\"");
+    // The link to the PDP carries the token of this server and every decision. ProcurAuth 10, step 4: it MUST be secured.
+    if (parsed->https && !pdp_tls_available()) {
+      throw std::runtime_error("access.pdp.url (" + url->source + ") https needs a build with TLS. The release binaries have it; a build from the source needs "
+                               "-DCHDASH_TLS=ON (tools/build_openssl.sh builds OpenSSL). The value is \"" + url->value + "\"");
+    }
+    out.pdp_endpoint.host = parsed->host;
+    out.pdp_endpoint.port = parsed->port;
+    out.pdp_endpoint.base_path = parsed->base_path;
+    out.pdp_https = parsed->https;
   }
   out.pdp_url = url->value;
   cfg.value_sources["access.pdp.url"] = url->source;
+  if (const auto verify = bool_attr(*pdp, "verify", "access.pdp")) {
+    out.pdp_verify = *verify;
+    cfg.value_sources["access.pdp.verify"] = "file";
+  }
+  if (const auto ca_file = string_attr(*pdp, "ca_file", "access.pdp")) {
+    if (ca_file->empty()) throw std::runtime_error("access.pdp.ca_file must be the path of a file of PEM certificates, not \"\"");
+    out.pdp_ca_file = *ca_file;
+    cfg.value_sources["access.pdp.ca_file"] = "file";
+  }
+  if (!out.pdp_https) {
+    // The two keys act on TLS only: with http they would look like a protection and would give none.
+    for (const char* key : {"ca_file", "verify"}) {
+      if (pdp->attrs.count(key) != 0) {
+        throw std::runtime_error(std::string("access.pdp.") + key + " and access.pdp.url (" + url->source + ") contradict each other: " + key +
+                                 " needs an https URL, and the URL is \"" + url->value + "\"");
+      }
+    }
+    if (!pdp_host_is_loopback(out.pdp_endpoint.host)) {
+      cfg.warnings.push_back("access.pdp.url (" + url->source + ") is http and the host \"" + out.pdp_endpoint.host +
+                             "\" is not this machine: the token of this server and every decision go in clear text. Use an https URL, "
+                             "or a network that only this server and the PDP reach (docs/access.md, \"Transport\")");
+    }
+  } else {
+    if (!out.pdp_ca_file.empty()) {
+      const std::string problem = pdp_check_ca_file(out.pdp_ca_file);
+      if (!problem.empty()) throw std::runtime_error("access.pdp.ca_file must name a readable file of PEM certificates; the value is \"" + out.pdp_ca_file + "\": " + problem);
+    }
+    if (!out.pdp_verify) {
+      cfg.warnings.push_back("access.pdp.verify = false: ChDash does not verify the certificate of the PDP, so anyone on the network can read the token of this "
+                             "server and the decisions, and can answer in place of the PDP. Use it only to test");
+    }
+  }
   const auto token_ref = find_secret_ref(*pdp, "token", "access.pdp");
   if (!token_ref) throw std::runtime_error("access.pdp needs the token of this server at the PDP: give token_env or token_file");
   const SecretValue token = read_secret(*token_ref, "access.pdp");
