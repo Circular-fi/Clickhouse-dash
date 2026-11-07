@@ -1,4 +1,8 @@
-"""The access of humans (docs/access.md; MCP server contract section 11, conformance cases U02 to U10).
+"""The access of humans (docs/access.md; ProcurAuth protocol 3 to 11, and section 11 of the MCP server contract for the pages).
+
+The names of the tests say what they check. The former ids u01 to u10 belong to the old contract, not to the series U of the
+ProcurAuth conformance cases. A comment above a test gives the ProcurAuth case id only when the behaviour is the same. The runner
+of ProcurAuth tests the PEP behaviour itself: tests/conformance/run.sh (docs/conformance.md).
 
 Instances (the tests skip without them; in the official run, CHDASH_REQUIRE_FIXTURES=1 makes a missing one a failure):
 - ACCESS_BASE_URL: tests/config/access.authzen.hcl (the compose service chdash_access), in the authzen mode, with two hosts on the
@@ -6,10 +10,10 @@ Instances (the tests skip without them; in the official run, CHDASH_REQUIRE_FIXT
 - ACCESS_PDP_URL: the fake PDP (tests/otel-fixture/fake_pdp.py, the compose service access_pdp). The tests set its answers and read
   what it received. It applies the prefix rule of the grants: "action@host:local" covers the host local and its databases.
 - ACCESS_OTLP_URL: the fake OTLP receiver of that server (the compose service access_otlp_receiver), for the CLIENT spans.
-- ACCESS_LOGS_CMD (optional): a command that prints the log of that server, for the decision records (U10).
+- ACCESS_LOGS_CMD (optional): a command that prints the log of that server, for the decision records.
 
 The identity tokens are signed here with the test keys (identity_tokens.py); the server has their public keys
-(tests/config/secrets/access-identity-keys.pem). U01 (no access block) is a unit test (tests/native/config_test.cpp) and a start of
+(tests/config/secrets/access-identity-keys.pem). The start without an access block is a unit test (tests/native/config_test.cpp) and a start of
 the binary below when MCP_STARTUP_CMD is set.
 """
 from __future__ import annotations
@@ -127,11 +131,12 @@ def database_resource(host: str, database: str) -> dict:
     return {"type": "database", "id": database, "properties": {"ancestors": [SERVICE, {"type": "host", "id": host}]}}
 
 
-# ---- U02, U03, U04: the identity token ----------------------------------------------------------------------------------
+# ---- the identity token ----------------------------------------------------------------------------------
 
 
+# Old id u02. No ProcurAuth case id: the old contract lists the routes that need a token.
 @needs_access
-def test_u02_a_request_without_a_token_gets_401():
+def test_a_request_without_a_token_gets_401():
     for path in (SYSTEM, "/api/version", "/api/hosts", "/query", "/static/app_common.js"):
         response = call("GET", path, tok=None)
         assert response.status_code == 401, (path, response.status_code)
@@ -142,8 +147,9 @@ def test_u02_a_request_without_a_token_gets_401():
     assert "Location" not in response.headers
 
 
+# Old id u03. It covers ProcurAuth U03 (signature), U42 (typ) and U50 (kid), and other defects of 9.4.
 @needs_access
-def test_u03_a_token_that_is_not_valid_gets_401():
+def test_a_token_that_is_not_valid_gets_401():
     now = int(time.time())
     other = Ed25519Key(bytes(32))
     bad = {
@@ -175,8 +181,9 @@ def test_u03_a_token_that_is_not_valid_gets_401():
         assert response.status_code == 200, (name, response.status_code, response.text)
 
 
+# Old id u04. No ProcurAuth case id.
 @needs_access
-def test_u04_a_token_in_a_cookie_or_a_query_parameter_gets_401():
+def test_a_token_outside_the_identity_header_gets_401():
     valid = token()
     response = SESSION.get(f"{BASE_URL}{SYSTEM}", cookies={HEADER: valid}, timeout=30)
     assert response.status_code == 401
@@ -195,11 +202,12 @@ def test_u04_a_token_in_a_cookie_or_a_query_parameter_gets_401():
     connection.close()
 
 
-# ---- U05: the list of actions -------------------------------------------------------------------------------------------
+# ---- the document of the actions -------------------------------------------------------------------------------------------
 
 
+# Old id u05. It covers ProcurAuth U13 (path and no token) and the checks of U16 on the members of the document.
 @needs_access
-def test_u05_the_actions_are_published_without_a_token():
+def test_the_actions_are_published_without_a_token():
     response = call("GET", "/.well-known/procurauth/actions", tok=None)
     assert response.status_code == 200
     doc = response.json()
@@ -233,8 +241,9 @@ def test_u05_the_actions_are_published_without_a_token():
     assert call("GET", "/livez", tok=None).status_code == 200
 
 
+# Old id u05 (second test). No ProcurAuth case id: the protocol has one path, and the old path is a choice of ChDash.
 @needs_access
-def test_u05_the_former_path_of_the_document_has_no_route():
+def test_the_former_path_of_the_document_has_no_route():
     # There is no alias: the former path answers 404, with a token and without one.
     assert call("GET", "/.well-known/access-actions", tok=None).status_code == 404
     assert call("GET", "/.well-known/access-actions").status_code == 404
@@ -242,7 +251,7 @@ def test_u05_the_former_path_of_the_document_has_no_route():
 
 @needs_access
 def test_the_route_of_the_options_lists_the_hosts_and_the_databases_that_the_pdp_allows():
-    # The route needs the token (U75).
+    # The route needs the token (ProcurAuth U75).
     assert call("GET", "/.well-known/procurauth/resources?type=host", tok=None).status_code == 401
     # A person with explorer.read on one database of local sees the host local, and in it that database only.
     answer(default=False, allow=["explorer.read@host:local/database:chdash_ui"])
@@ -255,7 +264,7 @@ def test_the_route_of_the_options_lists_the_hosts_and_the_databases_that_the_pdp
     assert databases.status_code == 200, databases.text
     assert [i["id"] for i in databases.json()["items"]] == ["chdash_ui"], databases.text
     assert call("GET", "/.well-known/procurauth/resources?parent=host%3Aother&type=database", tok=tok).json()["items"] == []
-    # The questions have the match subtree, the type of the child and the chain of its ancestors (U70, U83).
+    # The questions have the match subtree, the type of the child and the chain of its ancestors (ProcurAuth U70, U83).
     questions = [e for e in asked("explorer.read") if e["subject"]["id"] == "options-tenant" and e["resource"]["type"] == "database"]
     assert questions and all(e["context"].get("match") == "subtree" for e in questions), questions
     # A search keeps the databases whose id holds the text; a limit of one gives one item at most.
@@ -265,17 +274,18 @@ def test_the_route_of_the_options_lists_the_hosts_and_the_databases_that_the_pdp
     # The system databases are not listed.
     listed = {i["id"] for i in call("GET", "/.well-known/procurauth/resources?parent=host%3Alocal&type=database&limit=50", tok=tok).json()["items"]}
     assert "system" not in listed and "information_schema" not in listed and "INFORMATION_SCHEMA" not in listed
-    # The bad requests of 5.7 give 400 (U76 to U80); an unknown parameter is ignored (U81).
+    # The bad requests of 5.7 give 400 (ProcurAuth U76 to U80); an unknown parameter is ignored (U81).
     for query in ("", "type=host&type=host", "type=host&limit=0", "type=host&limit=abc", "parent=host%3Alocal&type=host", "parent=%zz&type=host"):
         assert call("GET", f"/.well-known/procurauth/resources?{query}", tok=tok).status_code == 400, query
     assert call("GET", "/.well-known/procurauth/resources?type=host&x_unknown=1", tok=tok).status_code == 200
 
 
-# ---- U06, U07, U08, U09: the decisions ----------------------------------------------------------------------------------
+# ---- the decisions ----------------------------------------------------------------------------------
 
 
+# Old id u06. It covers ProcurAuth U01 (subject) and U02 (chain of the resource) on the System route.
 @needs_access
-def test_u06_the_pdp_receives_the_subject_the_action_and_the_host():
+def test_the_pdp_receives_the_subject_the_action_and_the_host():
     response = call("GET", SYSTEM, tok=token("bob"))
     assert response.status_code == 200, response.text
     requests_ = received()
@@ -290,8 +300,9 @@ def test_u06_the_pdp_receives_the_subject_the_action_and_the_host():
     assert evaluation["resource"] == host_resource("local")
 
 
+# Old id u07. No ProcurAuth case id: the 403 body (error_code, action) is a choice of ChDash.
 @needs_access
-def test_u07_a_false_decision_gives_403_with_the_action_and_a_true_one_200():
+def test_a_false_decision_gives_403_with_the_action_and_a_true_one_200():
     answer(deny=["system.read"])
     response = call("GET", SYSTEM)
     assert response.status_code == 403
@@ -311,8 +322,9 @@ def assert_pdp_unavailable(response: requests.Response, action: str) -> None:
     assert body["error_code"] == "pdp_unavailable" and body["retryable"] is True and body["action"] == action, body
 
 
+# Old id u08. It covers ProcurAuth U06 (error status), U64 (no answer) and U65 (status 401).
 @needs_access
-def test_u08_no_answer_or_an_error_of_the_pdp_gives_503():
+def test_no_answer_or_an_error_of_the_pdp_gives_503():
     answer(status=500)
     assert_pdp_unavailable(call("GET", SYSTEM), "system.read")
     # A refusal of the credential of the server by the PDP is a failure too, not a denial.
@@ -373,8 +385,9 @@ def test_a_true_answer_with_a_ceiling_that_chdash_cannot_apply_is_a_denial():
     assert call("GET", SYSTEM).status_code == 403
 
 
+# Old id u09. No ProcurAuth case id: the protocol lets a PEP keep answers (10.1), and the cases do not test the TTL of ChDash.
 @needs_access
-def test_u09_a_change_of_the_answer_applies_after_cache_ttl_at_most():
+def test_a_change_of_the_answer_applies_after_cache_ttl_at_most():
     assert call("GET", SYSTEM).status_code == 200
     pdp("/control/answer", {"deny": ["system.read"]})
     deadline = time.monotonic() + CACHE_TTL + 1.0
@@ -387,8 +400,9 @@ def test_u09_a_change_of_the_answer_applies_after_cache_ttl_at_most():
     assert status == 403
 
 
+# Old id u10. No ProcurAuth case id: the log is a choice of ChDash.
 @needs_access
-def test_u10_the_log_has_each_decision():
+def test_the_log_has_each_decision():
     if not LOGS_CMD:
         pytest.skip("ACCESS_LOGS_CMD is not set")
     answer(deny=["system.read"])
@@ -842,7 +856,7 @@ def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
 
 @needs_access
 def test_a_creator_without_permissions_keeps_the_key():
-    # User decision 2026-10-18 (contract 11.5, case U11): a false decision with no reason means "no permission". The creator still
+    # User decision 2026-10-18 (contract 11.5): a false decision with no reason means "no permission". The creator still
     # exists: the key is not an orphan, nobody can adopt it, and each tool of a refused action is refused one by one.
     answer(default=True)
     made = make_mcp_key(token("stayer"), f"kept-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases"], ["chdash_ui"])
@@ -983,8 +997,9 @@ def test_the_call_to_the_pdp_is_a_client_span_child_of_the_request():
     assert any(r["traceparent"] == f"00-{trace_id}-{span['spanId']}-01" for r in received())
 
 
+# Old id u01. No ProcurAuth case id (U01 of ProcurAuth is the subject of the question).
 @pytest.mark.skipif(not STARTUP_CMD, reason="MCP_STARTUP_CMD is not set")
-def test_u01_a_configuration_without_an_access_block_does_not_start():
+def test_a_configuration_without_an_access_block_does_not_start():
     with tempfile.TemporaryDirectory() as tmp:
         os.chmod(tmp, 0o755)
         seen = tmp if STARTUP_CONFIG_DIR == "{dir}" else STARTUP_CONFIG_DIR
