@@ -6,7 +6,7 @@
 //   access {
 //     mode = "authzen"                 # or "open"
 //     identity { header, issuer, audience, public_keys | public_keys_env | public_keys_file, max_age, clock_skew }
-//     pdp      { url | url_env | url_file, token_env | token_file, timeout, cache_ttl }
+//     pdp      { url | url_env | url_file, token_env | token_file, timeout, cache_ttl, ca_file, verify }
 //   }
 
 #include "access_identity.hpp"
@@ -37,7 +37,12 @@ struct AccessSettings {
   int64_t clock_skew_ms = 60 * 1000;
   // pdp { }
   std::string pdp_url;
+  // The parts of pdp_url. pdp_endpoint.port is 443 for an https URL without a port.
   OtlpEndpoint pdp_endpoint;
+  bool pdp_https = false;
+  // https only. An empty file is the store of the system.
+  std::string pdp_ca_file;
+  bool pdp_verify = true;
   std::string pdp_token;
   int64_t pdp_timeout_ms = 500;
   int64_t pdp_cache_ttl_ms = 30 * 1000;

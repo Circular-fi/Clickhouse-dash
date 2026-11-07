@@ -26,6 +26,21 @@ the headers that matter and the body). The tests set its answers and read what i
                              (ProcurAuth 8.1). A false answer has no limits (7.6). Example:
                              {"limits": {"query.run.read": {"max_rows": 100}, "query.run.read@host:local": {"max_rows": 10}}}.
     GET  /healthz            200
+    GET  /.well-known/authzen-configuration
+                             404 by default (a PDP without metadata). With FAKE_PDP_PUBLIC_URL (the base URL that the clients
+                             use, for example "https://pdp:8443") it gives the metadata of AuthZEN 1.0 (l.1271-1366): the endpoints under
+                             that URL, and the members procurauth_* that /control/answer "metadata_extra" holds. "metadata": false
+                             in /control/answer gives 404 again; "metadata": {...} gives that whole document.
+    POST /access/v1/search/resource
+                             the Resource Search of AuthZEN 1.0 (l.1151-1210): /control/answer "search": {"pages": [["a", "b"], ["c"]]}
+                             gives each page of ids as results of the type that the request names; page.next_token is "p<N>" and the
+                             request page.token "p<N>" asks page N. The metadata names this endpoint only when "search" is set.
+
+The PDP echoes the X-Request-ID of a request in its response (AuthZEN 1.0, l.1449-1451) unless /control/answer has
+"echo_request_id": false.
+
+TLS: FAKE_PDP_TLS_CERT and FAKE_PDP_TLS_KEY (PEM files) make the server speak https. The handshake runs in the thread of the connection, so a
+client that does not speak TLS never blocks the other clients. FAKE_PDP_HOST is the address that the server binds (default 0.0.0.0).
 
 Each evaluation follows the rules of contract 11.4: the chain of the resource (properties.ancestors and the resource) must start with
 the service of the PDP (FAKE_PDP_SERVICE, default "db") and follow the parents; a resource without ancestors is read as
@@ -39,6 +54,7 @@ FAKE_PDP_PORT (default 8181).
 
 import json
 import os
+import ssl
 import threading
 import time
 from collections import deque
@@ -52,8 +68,10 @@ SERVICE = os.environ.get("FAKE_PDP_SERVICE", "db")
 
 LOCK = threading.Lock()
 RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
+PUBLIC_URL = os.environ.get("FAKE_PDP_PUBLIC_URL", "").rstrip("/")
 DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
-                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}, "limits": {}}
+                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}, "metadata": True, "metadata_extra": {},
+                  "search": None, "echo_request_id": True, "limits": {}}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
@@ -156,11 +174,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A002 - the name of the base class
         return
 
-    def reply(self, status: int, payload) -> None:
+    def reply(self, status: int, payload, echo: bool = False) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        request_id = self.headers.get("X-Request-ID")
+        if echo and request_id:
+            self.send_header("X-Request-ID", request_id)
         self.end_headers()
         self.wfile.write(body)
 
@@ -174,6 +195,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - the name of the base class
         if self.path == "/healthz":
             return self.reply(200, {"ok": True})
+        if self.path.startswith("/.well-known/authzen-configuration"):
+            with LOCK:
+                answer = dict(ANSWER)
+            if answer["metadata"] is False or not (PUBLIC_URL or isinstance(answer["metadata"], dict)):
+                return self.reply(404, {"error": "no metadata"})
+            if isinstance(answer["metadata"], dict):
+                return self.reply(200, answer["metadata"])
+            document = {
+                "policy_decision_point": PUBLIC_URL,
+                "access_evaluation_endpoint": f"{PUBLIC_URL}/access/v1/evaluation",
+                "access_evaluations_endpoint": f"{PUBLIC_URL}/access/v1/evaluations",
+            }
+            if answer["search"]:
+                document["search_resource_endpoint"] = f"{PUBLIC_URL}/access/v1/search/resource"
+            document.update(answer["metadata_extra"] or {})
+            return self.reply(200, document)
         if self.path == "/control/received":
             with LOCK:
                 return self.reply(200, {"requests": list(RECEIVED)})
@@ -195,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
                 ANSWER = dict(DEFAULT_ANSWER)
                 ANSWER.update({k: v for k, v in body.items() if k in DEFAULT_ANSWER})
             return self.reply(200, {"ok": True})
-        if self.path not in ("/access/v1/evaluation", "/access/v1/evaluations"):
+        if self.path not in ("/access/v1/evaluation", "/access/v1/evaluations", "/access/v1/search/resource"):
             return self.reply(404, {"error": "not found"})
         with LOCK:
             RECEIVED.append(
@@ -215,8 +252,11 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(answer["delay_ms"] / 1000.0)
         if answer["status"] != 200:
             return self.reply(int(answer["status"]), {"error": "test status"})
+        echo = bool(answer["echo_request_id"])
+        if self.path == "/access/v1/search/resource":
+            return self.reply(200, search(answer, body), echo)
         if self.path == "/access/v1/evaluation":
-            return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource"), body.get("context")))
+            return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource"), body.get("context")), echo)
         out = []
         for item in body.get("evaluations") or []:
             subject = item.get("subject") or body.get("subject")
@@ -225,12 +265,44 @@ class Handler(BaseHTTPRequestHandler):
             # AuthZEN 1.0, 7.1: the context of an item replaces the default context of the batch.
             context = item["context"] if "context" in item else body.get("context")
             out.append(decide(subject, action, resource, context))
-        return self.reply(200, {"evaluations": out})
+        return self.reply(200, {"evaluations": out}, echo)
+
+
+def search(answer: dict, body: dict) -> dict:
+    """The page of a Resource Search: the ids of the page named by page.token ("p<N>"), as results of the type of the request."""
+    pages = (answer["search"] or {}).get("pages") or [[]]
+    token = str(((body.get("page") or {}).get("token")) or "")
+    index = int(token[1:]) if token.startswith("p") and token[1:].isdigit() else 0
+    if index >= len(pages):
+        return {"results": []}
+    kind = str((body.get("resource") or {}).get("type", ""))
+    out = {"results": [{"type": kind, "id": ident} for ident in pages[index]]}
+    out["page"] = {"next_token": f"p{index + 1}" if index + 1 < len(pages) else ""}
+    return out
+
+
+class TlsServer(ThreadingHTTPServer):
+    """An https server: the handshake happens at the first read, in the thread of the connection."""
+
+    context: ssl.SSLContext
+
+    def get_request(self):
+        sock, address = self.socket.accept()
+        return self.context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), address
 
 
 def main() -> None:
     port = int(os.environ.get("FAKE_PDP_PORT", "8181"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    host = os.environ.get("FAKE_PDP_HOST", "0.0.0.0")
+    cert, key = os.environ.get("FAKE_PDP_TLS_CERT"), os.environ.get("FAKE_PDP_TLS_KEY")
+    if cert or key:
+        if not (cert and key):
+            raise SystemExit("FAKE_PDP_TLS_CERT and FAKE_PDP_TLS_KEY go together")
+        server = TlsServer((host, port), Handler)
+        server.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server.context.load_cert_chain(cert, key)
+    else:
+        server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     server.serve_forever()
 

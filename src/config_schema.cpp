@@ -329,6 +329,8 @@ std::vector<EffectiveValue> effective_config(const AppConfig& cfg) {
         else if (name == "access.identity.clock_skew") out.add(name, duration_text(cfg.access.clock_skew_ms));
         else if (name == "access.pdp.url") out.add(name, cfg.access.pdp_url);
         else if (name == "access.pdp.token_env") out.add_secret("access.pdp.token");
+        else if (name == "access.pdp.ca_file") out.add(name, cfg.access.pdp_ca_file.empty() ? std::string("the store of the system") : cfg.access.pdp_ca_file);
+        else if (name == "access.pdp.verify") out.add(name, cfg.access.pdp_verify ? "true" : "false");
         else if (name == "access.pdp.timeout") out.add(name, duration_text(cfg.access.pdp_timeout_ms));
         else if (name == "access.pdp.cache_ttl") out.add(name, duration_text(cfg.access.pdp_cache_ttl_ms));
         break;

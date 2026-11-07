@@ -47,10 +47,12 @@ access {
 | `identity.public_keys` | (required) | The public keys of the issuer: PEM or a JWK Set (refer to [Public keys](#public-keys)). 1 to 16 keys. It has the forms `public_keys`, `public_keys_env` and `public_keys_file`. Give exactly one. |
 | `identity.max_age` | `5m` | The longest life of a token (`exp - iat`). From `1s` to `24h`. |
 | `identity.clock_skew` | `60s` | The tolerance for the clock of the issuer (refer to [Identity token](#identity-token)). From `0s` to `5m`, in whole seconds. `0s` means no tolerance. |
-| `pdp.url` | (required) | The base URL of the PDP: `http://host[:port][/path]`. It has the forms `url`, `url_env` and `url_file`. Give exactly one. |
+| `pdp.url` | (required) | The base URL of the PDP: `http[s]://host[:port][/path]`. It has the forms `url`, `url_env` and `url_file`. Give exactly one. Refer to [Transport](#transport). |
 | `pdp.token_env`, `pdp.token_file` | (required) | The token of this server at the PDP. It is a secret: give exactly one of the two forms. A token in clear text (`token = "..."`) stops the start. |
-| `pdp.timeout` | `500ms` | The time of one request to the PDP. From `10ms` to `1m`. |
+| `pdp.timeout` | `500ms` | The time of one request to the PDP, from the connect to the end of the answer. From `10ms` to `1m`. |
 | `pdp.cache_ttl` | `30s` | The longest time that ChDash keeps an answer of the PDP. From `0s` (no cache) to `1h`. |
+| `pdp.ca_file` | the store of the system | An `https` URL only. A file of PEM certificates: the CAs that ChDash trusts for the PDP. It replaces the store of the system. |
+| `pdp.verify` | `true` | An `https` URL only. `false` turns off the check of the certificate. The start then writes a `config.warning`. |
 
 These items stop the start:
 
@@ -59,7 +61,10 @@ These items stop the start:
 - `mode = "authzen"` without the `identity` block or the `pdp` block, or without one of their required keys.
 - A key text that does not hold only Ed25519 or P-256 public keys, or a P-256 point that is not on the curve.
 - A JWK Set with a private member (`d`), with a `kty` or `crv` that ChDash does not accept, or with two keys of the same `kid`.
-- An `https` URL. ChDash has no TLS client (refer to [Deviation from AuthZEN: no TLS](#deviation-from-authzen-no-tls)).
+- An `https` URL in a build without the TLS client. The message names the CMake option `-DCHDASH_TLS=ON`.
+- `pdp.ca_file` or `pdp.verify` with an `http` URL. They act on TLS only, so they contradict the URL.
+- A `pdp.ca_file` that is not a readable file with at least one PEM certificate.
+- A metadata document of the PDP that ChDash cannot use (refer to [Metadata of the PDP](#metadata-of-the-pdp)). The message names `access.pdp.url`.
 - A token of the PDP that holds a space, a control character or more than 4096 bytes. The error does not show the token.
 - With `mode = "authzen"`, a `clickhouse.host` name that has more than 256 bytes or is not UTF-8. The name is the id of a host for the PDP (refer to [Resources and hosts](#resources-and-hosts)).
 
@@ -313,18 +318,20 @@ POST {pdp.url}/access/v1/evaluation
 }
 ```
 
-For more than one question, ChDash sends one batch to `POST {pdp.url}/access/v1/evaluations`, with the subject at the top and the action and the resource of each evaluation. The answer is `{"decision": true|false}`, or `{"evaluations": [{"decision": ...}, ...]}` in the order of the questions.
+For more than one question, ChDash sends a batch to `POST {pdp.url}/access/v1/evaluations`, with the subject at the top and the action and the resource of each evaluation. The answer is `{"decision": true|false}`, or `{"evaluations": [{"decision": ...}, ...]}` in the order of the questions. The paths above are the default endpoints. The metadata of the PDP can name other endpoints ([Metadata of the PDP](#metadata-of-the-pdp)).
 
 Rules:
 
 - The resource of each question follows the table of [Resources and hosts](#resources-and-hosts). The Query page and the export name no database: for them ChDash asks for the host.
 - Each call has `Authorization: Bearer <pdp token>`, `X-Request-ID` (the request id of the request that asks) and a `traceparent`.
-- **Fail closed.** No answer before `pdp.timeout`, a connection error, a status that is not `200`, a body that is larger than 256 KiB, and a body that is not a valid answer make each question of the call a failure. A failure is `false`, but it is not a denial: the route answers `503` (refer to [Enforcement](#enforcement)). ChDash writes the line `access.pdp_failed` and never keeps a failure. A status `401` or `403` of the PDP is also a failure: the PDP refuses the credential of ChDash.
+- **Bounded batches.** One request holds at most 100 questions. A call with more questions goes in several requests, in order. A PDP can publish a lower maximum of items and a maximum of bytes for one request (ProcurAuth 10.7a): ChDash obeys both. A request that fails gives a failure to its own questions only. When a request gets no answer (a timeout or a connection error), ChDash does not send the later requests of the call. Each of their questions is a failure. This avoids one wait for each request.
+- **Fail closed.** No answer before `pdp.timeout`, a connection error, a status that is not `200`, a body that is larger than 256 KiB, and a body that is not a valid answer make each question of the call a failure. A failure is `false`, but it is not a denial: the route answers `503` (refer to [Enforcement](#enforcement)). ChDash writes the line `access.pdp_failed` and never keeps a failure. A status `401` or `403` of the PDP is also a failure: the PDP refuses the credential of ChDash. ChDash then also writes the line `access.pdp_credential_refused`.
 - A decision can have a `context` object. A `context` that is not an object makes the answer not valid. ChDash reads these members of `context` (ProcurAuth 6.12, 7.3, 11.1) and ignores the other members:
   - `reason` of a `false` decision: `unknown_subject`, `invalid_resource`, `invalid_request` or `budget_exceeded`. Another value means "no permission". ChDash uses `unknown_subject`, and only this reason, to make an MCP key of that subject an orphan ([mcp.md](mcp.md#orphan-keys-and-their-adoption)).
   - `retry_after` of a `false` decision with `budget_exceeded`: a whole number of seconds, 1 or more. Without a valid `retry_after`, the answer is not valid.
   - `limits` of a `true` decision: an object of ceilings, each with a whole number from 0. Another type, a negative number, a fraction or a name two times makes the answer not valid. ChDash ignores `limits` on a `false` decision (ProcurAuth 7.6).
   - `usage.units` of a `true` decision: 0 or 1. Another value makes the answer not valid.
+  - `error` of an item (AuthZEN 1.0, l.866-903): an object with `status` (a whole number) and `message` (a text). ChDash writes both in the line `access.decision` as `error_status` and `error_message` (200 bytes at most). It never sends them to the client. A form that is not this one is ignored and does not make the answer not valid.
 - A member that is not valid in one evaluation makes the whole body not valid. Thus each question of the call is a failure.
 - ChDash keeps the whole answer of the PDP for `pdp.cache_ttl` at most: the decision, the reason and the ceilings. The key is the subject, the action, the path of the resource (the service, the host and the database) and the match. Thus the same database name on two hosts has two answers. A change of the policy applies after `cache_ttl` at most.
 - ChDash never keeps a failure, and never keeps an answer with `usage.units` above 0. It can keep an answer with `usage.units` equal to 0. It keeps a `false` answer with `budget_exceeded` for the lower of `retry_after` and `cache_ttl`.
@@ -475,9 +482,9 @@ Rules:
 
 ## Logs and traces
 
-- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `match` (`node` or `subtree`), `decision`, `source` (`pdp`, `cache` or `error`), `reason` (`unknown_subject`, `invalid_resource`, `invalid_request`, `budget_exceeded`, `other`, or empty) and `failed` (`true` when the PDP gave no valid answer). The line never holds a token. `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
+- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `match` (`node` or `subtree`), `decision`, `source` (`pdp`, `cache` or `error`), `reason` (`unknown_subject`, `invalid_resource`, `invalid_request`, `budget_exceeded`, `other`, or empty) and `failed` (`true` when the PDP gave no valid answer), and `error_status` and `error_message` when the item has a `context.error`. The line never holds a token. `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
 - The access log (`http.request`) has the field `subject` (`-` when there is none).
-- When the `telemetry` block is on, each call to the PDP is a CLIENT span `POST /access/v1/evaluation` or `POST /access/v1/evaluations`. Its parent is the span of the `traceparent` of the request; without one, the span starts a trace. The call sends the context of this span to the PDP (`traceparent`). Refer to [server-telemetry.md](server-telemetry.md#the-client-span-of-the-pdp).
+- When the `telemetry` block is on, each call to the PDP is a CLIENT span `POST /access/v1/evaluation` or `POST /access/v1/evaluations`. Its parent is the span of the `traceparent` of the request; without one, the span starts a trace. The call sends the context of this span to the PDP (`traceparent`). The path of the span is the whole path of the request. Refer to [server-telemetry.md](server-telemetry.md#the-client-span-of-the-pdp).
 
 ## The MCP endpoint
 
@@ -485,13 +492,54 @@ Rules:
 
 A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use, on the host of the key (and on its databases for the tools of the data). The key keeps its creator. `tools/list` shows only the tools whose actions the creator holds (one batch for each key and each `pdp.cache_ttl`). `tools/call` asks the PDP for the actions of the called tool only. A key with no creator, or whose creator the PDP does not know (the reason `unknown_subject`), gets the `401` of a key that does not exist until a person adopts it ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). A creator who gets `false` without this reason still exists: the key keeps this creator, and each tool of a refused action is refused. A key of the configuration is not checked.
 
-## Deviation from AuthZEN: no TLS
+## Transport
 
-AuthZEN requires a secure connection to the PDP. ChDash has no TLS client, so `pdp.url` must use `http`. The deployment must limit the network between ChDash and the PDP to these two programs (for example a network of the containers that only they join, or the loopback of one pod). Keep the PDP endpoints off the network of the reverse proxy.
+The link between ChDash and the PDP carries the token of this server and each decision. ProcurAuth 10, step 4 says that the PEP MUST secure this link (AuthZEN 1.0, l.1739). ChDash secures it with TLS.
+
+ChDash had no TLS client up to version 1.2.0. From version 1.2.1 it has one for ClickHouse (refer to [configuration.md](configuration.md#tls-to-clickhouse)). The PDP link uses the same static OpenSSL, in `src/pdp_transport.cpp`.
+
+### https
+
+- Use an `https` URL in `pdp.url`. The release binaries have the TLS client. A build from the source needs `-DCHDASH_TLS=ON`. A build without it stops the start with a message that names this option.
+- ChDash verifies the certificate chain and the host name of the URL (RFC 6125). For an IP address in the URL, it checks the IP entries of the certificate. The lowest TLS version is 1.2.
+- `pdp.ca_file` names a file of PEM certificates. It replaces the store of the system. Without it, ChDash reads the store in the directory of the OpenSSL of the build (`/etc/ssl`). ChDash never reads `SSL_CERT_FILE` or `SSL_CERT_DIR`: the configuration file is the only source.
+- `pdp.verify = false` turns off the check of the chain and of the name. ChDash then writes a `config.warning` at each start. Use it only to test.
+- A request that fails in the TLS handshake is a failure of the PDP (503). The log line `access.pdp_failed` gives the cause, for example the certificate that is not valid.
+- `tests/tls/pdp.sh` tests these cases with Docker: a verified chain and name, an unknown CA, a name that is not in the certificate, `verify = false`, and an `http` URL to an `https` port.
+
+### http
+
+An `http` URL is accepted. When the host is not `localhost`, `127.0.0.0/8` or `::1`, ChDash writes a `config.warning` at each start. It says that the token and the decisions go in clear text. Use `http` only on a network that only ChDash and the PDP reach (for example a network of the containers that only they join, or the loopback of one pod). Keep the PDP endpoints off the network of the reverse proxy.
+
+### Connections and the deadline
+
+- ChDash keeps up to 4 idle connections to the PDP open (ProcurAuth 10.7). A request takes an idle connection, or opens a new one. A connection with `Connection: close` or with no length is not kept.
+- ChDash closes an idle connection after 5 seconds. When the metadata has `procurauth_idle_max_seconds`, it closes after half of that time.
+- Each request has one deadline, `pdp.timeout`. It covers the connect, the TLS handshake, the write and the read together. The lookup of a name has no deadline of its own.
+- A connection that the PDP closed while it was idle is found before the write. When a kept connection fails before the first byte of the answer, ChDash sends a question once more on a new connection, in the same deadline. It never does this for a question with `context.usage` (ProcurAuth 10.6).
+- ChDash reads at most 1 MiB of an answer, and never follows a redirect.
+- The PDP echoes `X-Request-ID` (AuthZEN 1.0, l.1449-1451). When it does not, or when the value is not the one that ChDash sent, ChDash writes the warning `access.pdp_request_id` (at most once each minute). The answer stays valid.
+
+### Metadata of the PDP
+
+At the start, ChDash reads `GET <origin>/.well-known/authzen-configuration[<path>]`. The well-known string goes between the host and the path of `pdp.url` (AuthZEN 1.0, l.1317). ChDash sends no token with this request.
+
+- A status `404` means that the PDP has no metadata. ChDash uses the default endpoints `<pdp.url>/access/v1/evaluation` and `<pdp.url>/access/v1/evaluations`. It does not use Resource Search.
+- A valid document gives the endpoints `access_evaluation_endpoint` and `access_evaluations_endpoint` (both required by ChDash), and `search_resource_endpoint` (optional). A member that ChDash does not know is ignored (AuthZEN 1.0, l.1342).
+- `policy_decision_point` must be `pdp.url` (a slash at the end does not count) (AuthZEN 1.0, l.1364). Each endpoint must have the scheme, the host and the port of `pdp.url`. Thus the token goes to this origin only.
+- The members `procurauth_usage_max_seconds`, `procurauth_idle_max_seconds`, `procurauth_evaluations_max_bytes` and `procurauth_evaluations_max_items` (ProcurAuth 6.9, 10.7, 10.7a) are whole numbers from 1. ChDash uses them for the idle time, the wait of a question with `context.usage` (one second more than the published time, never less than `pdp.timeout`) and the size of a request.
+- A document that cannot be used stops the start. The message names `access.pdp.url` and the cause.
+- A PDP that does not answer at the start does not stop the start: the portal can restart after ChDash. ChDash writes the line `access.pdp_metadata_failed`. Until it reads the metadata, each question fails (503), without a request to the PDP. ChDash tries again at a question, at most once each second.
+- A good document is read again after one hour. When this fails, the old document stays in use. A document that is not valid then is not used: questions fail until a good document comes.
+- The start writes `access.pdp_metadata` with the endpoints that apply.
+
+### Resource Search
+
+`PdpClient::search_resources` is the client of the Resource Search (AuthZEN 1.0, l.1151-1210). It works only when the metadata has `search_resource_endpoint`. It sends the subject, the action, the type of the resource without an `id` (l.1166-1167) and the chain in `resource.properties.ancestors`. It follows `page.next_token` (l.916-960) until the token is empty. It stops after 10 pages or 1000 ids and marks the result as truncated. A result of another type, a page that is not valid, or a token that comes again is a failure. No route calls this function yet.
 
 ## Signature code
 
-The build has no OpenSSL: the release binary is a static musl executable. ChDash verifies the signatures with two small C libraries that the build fetches by commit (`src/CMakeLists.txt`): Monocypher 4.0.2 for Ed25519 and micro-ecc for P-256. ChDash only verifies signatures with public keys. `src/signature_verify.cpp` is the one place that calls these libraries.
+The code of the signatures does not use OpenSSL. ChDash verifies the signatures with two small C libraries that the build fetches by commit (`src/CMakeLists.txt`): Monocypher 4.0.2 for Ed25519 and micro-ecc for P-256. ChDash only verifies signatures with public keys. `src/signature_verify.cpp` is the one place that calls these libraries.
 
 ## Tests
 

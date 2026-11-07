@@ -8,6 +8,7 @@
 // Run:   ./build/chdash_access_test   (exit code 0 = every check passed)
 
 #include "native_check.hpp"
+#include "pdp_transport_cases.hpp"
 
 #include "access_actions.hpp"
 #include "access_ceilings.hpp"
@@ -1971,6 +1972,11 @@ int main() {
   RUN(test_ceilings_follow_the_published_actions);
   RUN(test_options_parser);
   RUN(test_options_page);
+  RUN(pdp_cases::test_pdp_chunks);
+  RUN(pdp_cases::test_pdp_metadata);
+  RUN(pdp_cases::test_pdp_item_error);
+  RUN(pdp_cases::test_pdp_search);
+  RUN(pdp_cases::test_pdp_transport);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

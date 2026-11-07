@@ -187,7 +187,8 @@ void Server::init_access() {
     span.attributes.push_back(OtlpAttribute::string("http.request.method", "POST"));
     span.attributes.push_back(OtlpAttribute::string("server.address", endpoint.host));
     span.attributes.push_back(OtlpAttribute::integer("server.port", endpoint.port));
-    span.attributes.push_back(OtlpAttribute::string("url.path", endpoint.base_path + call.path));
+    // call.path is the whole path: the path of the base URL and then the path of the endpoint.
+    span.attributes.push_back(OtlpAttribute::string("url.path", call.path));
     span.attributes.push_back(OtlpAttribute::integer("authzen.evaluations", static_cast<int64_t>(call.evaluations)));
     if (call.status > 0) span.attributes.push_back(OtlpAttribute::integer("http.response.status_code", call.status));
     if (!call.error.empty()) {
@@ -197,8 +198,50 @@ void Server::init_access() {
     }
     telemetry_->add_spans({std::move(span)});
   };
-  pdp_ = std::make_unique<PdpClient>(std::move(options), make_http_pdp_transport(endpoint.host, endpoint.port, endpoint.base_path),
-                                     std::move(on_call));
+  options.base_path = endpoint.base_path;
+  options.discovery = true;
+  options.identifier = settings.pdp_url;
+  PdpTransportOptions transport_options;
+  transport_options.url.https = settings.pdp_https;
+  transport_options.url.host = endpoint.host;
+  transport_options.url.port = endpoint.port;
+  transport_options.url.base_path = endpoint.base_path;
+  transport_options.ca_file = settings.pdp_ca_file;
+  transport_options.verify = settings.pdp_verify;
+  std::string transport_error;
+  std::unique_ptr<PdpTransport> transport = make_pdp_transport(transport_options, &transport_error);
+  if (!transport) throw std::runtime_error("access.pdp.url: " + transport_error);
+  pdp_ = std::make_unique<PdpClient>(std::move(options), std::move(transport), std::move(on_call));
+  // The metadata of the PDP (ProcurAuth 10.7, 10.7a). A document that cannot be used stops the start. A PDP that does not answer does not:
+  // the portal can restart after this server, so the client reads the metadata again at its first question.
+  {
+    PdpCallContext start;
+    start.request_id = "start";
+    const PdpDiscoveryResult found = pdp_->discover(start);
+    switch (found.state) {
+      case PdpDiscoveryState::Invalid:
+        throw std::runtime_error("access.pdp.url (" + settings.pdp_url + "): the metadata of the PDP cannot be used: " + found.message);
+      case PdpDiscoveryState::Unreachable:
+        log_event(LogLevel::Warn, "access.pdp_metadata_failed", {{"request_id", start.request_id}, {"invalid", false}, {"error", found.message}});
+        break;
+      case PdpDiscoveryState::Absent:
+        log_event(LogLevel::Info, "access.pdp_metadata", {{"source", "default"}});
+        break;
+      case PdpDiscoveryState::Loaded: {
+        const PdpEndpoints known = pdp_->endpoints();
+        log_event(LogLevel::Info, "access.pdp_metadata",
+                  {{"source", "document"},
+                   {"evaluation", known.evaluation},
+                   {"evaluations", known.evaluations},
+                   {"search_resource", known.search_resource},
+                   {"evaluations_max_items", known.evaluations_max_items.value_or(0)},
+                   {"evaluations_max_bytes", known.evaluations_max_bytes.value_or(0)},
+                   {"usage_max_seconds", known.usage_max_seconds.value_or(0)},
+                   {"idle_max_seconds", known.idle_max_seconds.value_or(0)}});
+        break;
+      }
+    }
+  }
   // The MCP keys of the page never have more than their creator (docs/mcp.md, "Keys and the access of humans"). The state of a key is
   // kept for pdp.cache_ttl, as the answers of the PDP are.
   if (mcp_keys_) {

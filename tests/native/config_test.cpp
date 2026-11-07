@@ -6,6 +6,7 @@
 //        cmake --build build --target chdash_config_test
 // Run:   ./build/chdash_config_test   (exit code 0 = every check passed)
 
+#include "access_pdp.hpp"
 #include "config.hpp"
 #include "config_schema.hpp"
 #include "ch_uri.hpp"
@@ -15,6 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -689,8 +691,74 @@ void test_access_block() {
   CHECK(contains(error_of(authzen(identity + "\n max_age = \"0s\"", pdp)), "access.identity.max_age must be between 1s and 24h, not \"0s\""));
   CHECK(contains(error_of(authzen(identity + "\n other = 1", pdp)), "access.identity: unknown attribute other"));
   CHECK(contains(error_of(authzen(identity, " token_file = \"" + dir + "/pdp-token\"")), "give one of url, url_env and url_file"));
-  CHECK(contains(error_of(authzen(identity, " url = \"https://pdp\"\n token_file = \"" + dir + "/pdp-token\"")), "https is not available"));
-  CHECK(contains(error_of(authzen(identity, " url = \"pdp:80\"\n token_file = \"" + dir + "/pdp-token\"")), "access.pdp.url (file) must start with http://, not \"pdp:80\""));
+  CHECK(contains(error_of(authzen(identity, " url = \"pdp:80\"\n token_file = \"" + dir + "/pdp-token\"")),
+                 "access.pdp.url (file) must start with http:// or https://, not \"pdp:80\""));
+  {
+    // TLS to the PDP (docs/access.md, "Transport"): an https URL needs a build with the TLS client.
+    const std::string token_line = "\n token_file = \"" + dir + "/pdp-token\"";
+    const std::string https_url = " url = \"https://pdp.example:8443/base\"";
+    if (!pdp_tls_available()) {
+      const std::string refused = error_of(authzen(identity, https_url + token_line));
+      CHECK(contains(refused, "access.pdp.url (file) https needs a build with TLS"));
+      CHECK(contains(refused, "-DCHDASH_TLS=ON"));
+    } else {
+      const AppConfig tls = load(authzen(identity, https_url + token_line));
+      CHECK(tls.access.pdp_https);
+      CHECK_EQ(tls.access.pdp_endpoint.host, std::string("pdp.example"));
+      CHECK_EQ(tls.access.pdp_endpoint.port, 8443);
+      CHECK_EQ(tls.access.pdp_endpoint.base_path, std::string("/base"));
+      CHECK(tls.access.pdp_verify && tls.access.pdp_ca_file.empty());
+      CHECK_EQ(source(tls, "access.pdp.verify"), std::string("default|true"));
+      CHECK_EQ(source(tls, "access.pdp.ca_file"), std::string("default|the store of the system"));
+      // An https URL without a port has the port 443; an IPv6 address keeps its brackets out of the host.
+      CHECK_EQ(load(authzen(identity, " url = \"https://pdp.example\"" + token_line)).access.pdp_endpoint.port, 443);
+      const AppConfig v6 = load(authzen(identity, " url = \"https://[::1]:9443\"" + token_line));
+      CHECK_EQ(v6.access.pdp_endpoint.host, std::string("::1"));
+      CHECK_EQ(v6.access.pdp_endpoint.port, 9443);
+      // No warning for a verified https link.
+      for (const auto& warning : tls.warnings) CHECK(!contains(warning, "access.pdp"));
+      // verify = false is the value of the file, with a warning.
+      const AppConfig unverified = load(authzen(identity, https_url + token_line + "\n verify = false"));
+      CHECK(!unverified.access.pdp_verify);
+      CHECK_EQ(source(unverified, "access.pdp.verify"), std::string("file|false"));
+      CHECK(std::any_of(unverified.warnings.begin(), unverified.warnings.end(), [](const std::string& w) { return contains(w, "access.pdp.verify = false"); }));
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = \"no\"")), "access.pdp.verify must be a boolean"));
+      // ca_file: a readable file with a certificate. An empty text, a missing file, a file without a certificate and a bad value stop the start.
+      write_file(dir + "/pdp-ca.pem",
+                 "-----BEGIN CERTIFICATE-----\nMIIBijCCAS+gAwIBAgIUR1dHE+FNg5b40FpV48U7ZKM6cqgwCgYIKoZIzj0EAwIw\nGTEXMBUGA1UEAwwOY2hkYXNoLXRlc3QtY2EwIBcNMjYxMTA3MDIwOTM2WhgPMjEy\n"
+                 "NjEwMTQwMjA5MzZaMBkxFzAVBgNVBAMMDmNoZGFzaC10ZXN0LWNhMFkwEwYHKoZI\nzj0CAQYIKoZIzj0DAQcDQgAENe49x+07z8IfrN/yzdmk7BRTx0D8NNswhTZYu2YI\n"
+                 "efUs5inObleXRy8qVvtwSaZhoQKdHf3TYCGoltc1fYa6o6NTMFEwHQYDVR0OBBYE\nFN+EtbMw00do02QBHSQDufFLYVVgMB8GA1UdIwQYMBaAFN+EtbMw00do02QBHSQD\n"
+                 "ufFLYVVgMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSQAwRgIhAOLGijBg\nW8ROAdVLv6t2gMj4pQRk7FoqKm+L3w9vOnM+AiEAobBSWL0lkkKApuYy6qN95sph\n"
+                 "obCpOkN5ciMdYwNP1kc=\n-----END CERTIFICATE-----\n");
+      const AppConfig with_ca = load(authzen(identity, https_url + token_line + "\n ca_file = \"" + dir + "/pdp-ca.pem\""));
+      CHECK_EQ(with_ca.access.pdp_ca_file, dir + "/pdp-ca.pem");
+      CHECK_EQ(source(with_ca, "access.pdp.ca_file"), "file|" + dir + "/pdp-ca.pem");
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n ca_file = \"\"")), "access.pdp.ca_file must be the path of a file of PEM certificates"));
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n ca_file = \"" + dir + "/missing.pem\"")),
+                     "access.pdp.ca_file must name a readable file of PEM certificates; the value is \"" + dir + "/missing.pem\""));
+      write_file(dir + "/pdp-ca-bad.pem", "this is not a certificate\n");
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n ca_file = \"" + dir + "/pdp-ca-bad.pem\"")),
+                     "access.pdp.ca_file must name a readable file of PEM certificates"));
+    }
+    // ca_file and verify act on TLS only: with http they contradict the URL.
+    CHECK(contains(error_of(authzen(identity, pdp + "\n verify = true")), "access.pdp.verify and access.pdp.url (file) contradict each other"));
+    CHECK(contains(error_of(authzen(identity, pdp + "\n ca_file = \"/x\"")), "access.pdp.ca_file and access.pdp.url (file) contradict each other"));
+    // A http link to a host that is not this machine sends the token in clear text: a warning. The loopback has none.
+    const auto pdp_warnings = [&](const std::string& url) {
+      size_t count = 0;
+      for (const auto& warning : load(authzen(identity, " url = \"" + url + "\"" + token_line)).warnings) {
+        if (contains(warning, "clear text")) ++count;
+      }
+      return count;
+    };
+    CHECK_EQ(pdp_warnings("http://pdp:4182"), size_t(1));
+    CHECK_EQ(pdp_warnings("http://localhost:4182"), size_t(0));
+    CHECK_EQ(pdp_warnings("http://127.0.0.1:4182/base"), size_t(0));
+    CHECK_EQ(pdp_warnings("http://127.1.2.3"), size_t(0));
+    CHECK_EQ(pdp_warnings("http://[::1]:4182"), size_t(0));
+    CHECK_EQ(pdp_warnings("http://10.0.0.5:4182"), size_t(1));
+    CHECK_EQ(pdp_warnings("http://127.0.0.1.example.org"), size_t(1));
+  }
   CHECK(contains(error_of(authzen(identity, " url = \"http://pdp\"")), "access.pdp needs the token"));
   const std::string clear = error_of(authzen(identity, " url = \"http://pdp\"\n token = \"in-clear\""));
   CHECK(contains(clear, "access.pdp.token: a secret is never written in the file"));
