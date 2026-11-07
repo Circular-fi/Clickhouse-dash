@@ -95,7 +95,7 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
 }
 
 Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, const std::string& tool) {
-  Ctx ctx{key, config, db, nullptr, nullptr, 0, "", 0, {}, {}, {}, {}, 0};
+  Ctx ctx{key, config, db, nullptr, nullptr, 0, "", 0, {}, {}, {}, {}, 0, std::nullopt, McpCeilings{}};
   ctx.max_rows = config.max_rows;
   if (key.max_rows) ctx.max_rows = std::min(ctx.max_rows, *key.max_rows);
   int64_t timeout = config.query_timeout_seconds;
