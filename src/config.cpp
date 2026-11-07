@@ -997,7 +997,7 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   };
 
   // identity { }
-  validate_object(*identity, "access.identity", {"header", "issuer", "audience", "public_keys", "public_keys_env", "public_keys_file", "max_age"}, {});
+  validate_object(*identity, "access.identity", {"header", "issuer", "audience", "public_keys", "public_keys_env", "public_keys_file", "max_age", "clock_skew"}, {});
   if (const auto header = string_attr(*identity, "header", "access.identity")) {
     const bool token_chars = !header->empty() && header->size() <= 128 && std::all_of(header->begin(), header->end(), [](unsigned char c) {
       return std::isalnum(c) || std::string_view("!#$%&'*+-.^_`|~").find(static_cast<char>(c)) != std::string_view::npos;
@@ -1036,6 +1036,12 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
     cfg.value_sources["access.identity.public_keys"] = keys_text->source;
   }
   duration(*identity, "access.identity", "max_age", 1000, 24 * 3600 * 1000, &out.max_age_ms);
+  // The tolerance is in whole seconds: the claims of the token are seconds. 0s means no tolerance.
+  duration(*identity, "access.identity", "clock_skew", 0, 5 * 60 * 1000, &out.clock_skew_ms);
+  if (out.clock_skew_ms % 1000 != 0) {
+    throw std::runtime_error("access.identity.clock_skew must be a whole number of seconds (the claims of the token are seconds), not \"" +
+                             *string_attr(*identity, "clock_skew", "access.identity") + "\"");
+  }
 
   // pdp { }
   validate_object(*pdp, "access.pdp", {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl"}, {});
@@ -1063,6 +1069,15 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   cfg.value_sources["access.pdp.token"] = token.source;
   duration(*pdp, "access.pdp", "timeout", 10, 60 * 1000, &out.pdp_timeout_ms);
   duration(*pdp, "access.pdp", "cache_ttl", 0, 3600 * 1000, &out.pdp_cache_ttl_ms);
+
+  // The service must be reachable only through the edge (docs/access.md, "Network"): all the interfaces is a warning, not an error.
+  {
+    const std::string listen_host = cfg.listen.substr(0, cfg.listen.rfind(':'));
+    if (listen_host == "0.0.0.0" || listen_host == "::" || listen_host == "[::]") {
+      cfg.warnings.push_back("access.mode = \"authzen\" and server.listen_host = \"" + listen_host +
+                             "\": the server listens on all the interfaces. Make sure that only the edge reaches it (docs/access.md, \"Network\")");
+    }
+  }
 
   // The name of each host is the id of a host resource for the PDP (docs/access.md, "Hosts"): 1 to 256 bytes of UTF-8 without a control
   // character (contract 11.4). A longer name, or a name that is not UTF-8, contradicts the authzen mode.

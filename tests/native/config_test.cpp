@@ -689,6 +689,75 @@ void test_access_block() {
            std::string(""));
 }
 
+// ---- the identity block: clock_skew, JWK Set, and the network warning (docs/access.md) ----
+
+void test_access_identity_extras() {
+  const auto source = [&](const AppConfig& cfg, const std::string& name) {
+    for (const auto& value : config::effective_config(cfg)) {
+      if (value.name == name) return value.source + "|" + value.value;
+    }
+    return std::string("missing");
+  };
+  write_file(dir + "/skew-identity.pem",
+             "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n-----END PUBLIC KEY-----\n");
+  write_file(dir + "/skew-pdp-token", "pdp-secret\n");
+  const auto authzen = [&](const std::string& identity, const std::string& server = "") {
+    return server + "access {\n mode = \"authzen\"\n identity {\n" + identity + "\n }\n pdp {\n url = \"http://pdp:4182\"\n token_file = \"" + dir +
+           "/skew-pdp-token\"\n }\n}\n";
+  };
+  const std::string identity = " issuer = \"https://issuer\"\n audience = \"db\"\n public_keys_file = \"" + dir + "/skew-identity.pem\"";
+
+  // clock_skew: the default, the range and the errors.
+  const AppConfig defaults = load(authzen(identity));
+  CHECK_EQ(defaults.access.clock_skew_ms, int64_t(60000));
+  CHECK_EQ(source(defaults, "access.identity.clock_skew"), std::string("default|1m"));
+  CHECK_EQ(load(authzen(identity + "\n clock_skew = \"0s\"")).access.clock_skew_ms, int64_t(0));
+  CHECK_EQ(load(authzen(identity + "\n clock_skew = \"5m\"")).access.clock_skew_ms, int64_t(300000));
+  CHECK_EQ(load(authzen(identity + "\n clock_skew = \"30s\"")).access.clock_skew_ms, int64_t(30000));
+  CHECK_EQ(source(load(authzen(identity + "\n clock_skew = \"30s\"")), "access.identity.clock_skew"), std::string("file|30s"));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = \"301s\"")), "access.identity.clock_skew must be between 0ms and 5m, not \"301s\""));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = \"6m\"")), "access.identity.clock_skew must be between 0ms and 5m, not \"6m\""));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = \"soon\"")), "access.identity.clock_skew must be a duration"));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = \"soon\"")), "not \"soon\""));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = \"1500ms\"")), "access.identity.clock_skew must be a whole number of seconds"));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = 60")), "clock_skew"));
+  CHECK(contains(error_of(authzen(identity + "\n clock_skew = \"1s\"\n clock_skew = \"2s\"")), "duplicate attribute 'clock_skew'"));
+
+  // A JWK Set in a file (the portal form), in the text of the file, and its errors with the name of the key.
+  const std::string jwk = R"({"keys":[{"alg":"Ed25519","crv":"Ed25519","kid":"portal-1","kty":"OKP","use":"sig","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})";
+  write_file(dir + "/skew-identity.jwks", jwk + "\n");
+  const std::string jwks_identity = " issuer = \"https://issuer\"\n audience = \"db\"\n public_keys_file = \"" + dir + "/skew-identity.jwks\"";
+  const AppConfig with_jwk = load(authzen(jwks_identity));
+  CHECK_EQ(with_jwk.access.keys.size(), size_t(1));
+  if (with_jwk.access.keys.size() == 1) CHECK_EQ(with_jwk.access.keys[0].kid, std::string("portal-1"));
+  CHECK_EQ(source(with_jwk, "access.identity.public_keys"), "file:" + dir + "/skew-identity.jwks|[\"Ed25519 kid=portal-1\"]");
+  ::setenv("CHDASH_TEST_JWKS", jwk.c_str(), 1);
+  const AppConfig from_env = load(authzen(" issuer = \"i\"\n audience = \"db\"\n public_keys_env = \"CHDASH_TEST_JWKS\""));
+  CHECK_EQ(from_env.access.keys.size(), size_t(1));
+  write_file(dir + "/skew-private.jwks",
+             R"({"keys":[{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","d":"nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"}]})");
+  const std::string private_error =
+      error_of(authzen(" issuer = \"i\"\n audience = \"db\"\n public_keys_file = \"" + dir + "/skew-private.jwks\""));
+  CHECK(contains(private_error, "access.identity.public_keys (file:" + dir + "/skew-private.jwks)"));
+  CHECK(contains(private_error, "private member \"d\""));
+  CHECK(!contains(private_error, "nWGxne"));
+
+  // The warning of the network: authzen with all the interfaces. Another address gives no warning.
+  const auto warned = [&](const AppConfig& cfg) {
+    for (const auto& warning : cfg.warnings) {
+      if (contains(warning, "access.mode = \"authzen\"") && contains(warning, "server.listen_host")) return true;
+    }
+    return false;
+  };
+  CHECK(warned(load(authzen(identity))));
+  CHECK(warned(load(authzen(identity, "server {\n listen_host = \"0.0.0.0\"\n listen_port = 8080\n}\n"))));
+  CHECK(contains(load(authzen(identity)).warnings.back(), "docs/access.md"));
+  CHECK(!warned(load(authzen(identity, "server {\n listen_host = \"127.0.0.1\"\n listen_port = 8080\n}\n"))));
+  CHECK(!warned(load(authzen(identity, "server {\n listen_host = \"10.1.2.3\"\n}\n"))));
+  // The open mode has its own warning and no network warning.
+  CHECK(!warned(load("access { mode = \"open\" }")));
+}
+
 void test_mcp_key_secrets() {
   write_file(dir + "/key-secret", "a11da7a0-0000-4000-8000-0000000000a1\n");
   ::setenv("CHDASH_TEST_KEY", "a11da7a0-0000-4000-8000-0000000000a2", 1);
@@ -975,6 +1044,7 @@ int main() {
   test_mcp_key_secrets();
   test_telemetry_block();
   test_access_block();
+  test_access_identity_extras();
   try {
     test_mcp_key_block();
   } catch (const std::exception& e) {

@@ -378,10 +378,11 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 | `header` | text | `X-Identity-Token` | an HTTP header name, not Cookie or Authorization | The request header that carries the identity token. The token is never read from a cookie or from a query parameter. |
 | `issuer` | text |  | 1 to 1024 bytes, no control character | Required with authzen: the value that the iss claim of a token must have. |
 | `audience` | text |  | 1 to 256 bytes of UTF-8, no control character | Required with authzen: the name of this server. The aud claim of a token must contain it. It is also the id of the service resource that ChDash sends to the PDP, and the server of GET /.well-known/access-actions. |
-| `public_keys` | text |  | PEM, 1 to 16 SubjectPublicKeyInfo blocks | The public keys of the issuer: Ed25519 (alg Ed25519) or P-256 with an uncompressed point (ES256). A token signed by one of them is accepted. Give exactly one of public_keys, public_keys_env and public_keys_file. |
+| `public_keys` | text |  | PEM (1 to 16 SubjectPublicKeyInfo blocks) or a JWK Set (1 to 16 keys) | The public keys of the issuer: Ed25519 (alg Ed25519) or P-256 with an uncompressed point (ES256). A text that starts with { is a JWK Set (RFC 7517): kty OKP with crv Ed25519 and x, or kty EC with crv P-256, x and y, each with an optional kid. A key with a private member (d) stops the start. The kid of a key is the declared kid, or else its RFC 7638 thumbprint. A token with a header kid is verified with the key of this kid only. A token without kid is verified with each key of its algorithm. A token signed by one of the keys is accepted. Give exactly one of public_keys, public_keys_env and public_keys_file. |
 | `public_keys_env` | environment variable name |  | letters, digits and _ | The variable that holds the value of public_keys. Give exactly one of public_keys, public_keys_env and public_keys_file. |
 | `public_keys_file` | file path |  |  | The file that holds the value of public_keys, without its last line end. Give exactly one of public_keys, public_keys_env and public_keys_file. |
 | `max_age` | duration | `5m` | 1s to 24h | The longest life of a token: exp - iat is at most this value. A token with a longer life gets 401. |
+| `clock_skew` | duration | `60s` | 0s to 5m | The tolerance for the clock of the issuer. A token is refused only when the current time is after exp plus this value. An iat or an nbf can be this far in the future. 0s means no tolerance. |
 
 ## `access.pdp`
 

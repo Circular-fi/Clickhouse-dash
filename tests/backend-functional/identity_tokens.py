@@ -188,5 +188,7 @@ def make_token(key, claims: dict, header: dict | None = None) -> str:
     head = {"alg": key.alg, "typ": "JWT"}
     if header:
         head.update(header)
+        # A value None removes the member (for example a header without typ).
+        head = {k: v for k, v in head.items() if v is not None}
     signing_input = b64url(json.dumps(head, separators=(",", ":")).encode()) + "." + b64url(json.dumps(claims, separators=(",", ":")).encode())
     return signing_input + "." + b64url(key.sign(signing_input.encode()))

@@ -151,7 +151,13 @@ def test_u03_a_token_that_is_not_valid_gets_401():
         "issuer": token(iss="https://other"),
         "audience": token(aud="other"),
         "audience list": token(aud=["other", "x"]),
-        "expired": token(iat=now - 100, exp=now - 1),
+        # exp has a tolerance of 60 s (access.identity.clock_skew, default): exp - 1 is still valid.
+        "expired": token(iat=now - 200, exp=now - 120),
+        "typ absent": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"typ": None}),
+        "typ jwt": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"typ": "jwt"}),
+        "typ at+jwt": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"typ": "at+jwt"}),
+        "kid unknown": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"kid": "unknown"}),
+        "kid not a text": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"kid": 5}),
         "max_age": token(iat=now - 5, exp=now + 3600),
         "no subject": token(sub=None),
         "no iat": token(iat=None),
@@ -162,7 +168,9 @@ def test_u03_a_token_that_is_not_valid_gets_401():
         response = call("GET", SYSTEM, tok=value)
         assert response.status_code == 401, (name, response.status_code, response.text)
     # The valid forms: Ed25519, ES256, an audience in a list.
-    for name, value in {"ed25519": token(), "es256": token(key=P256), "list": token(aud=["x", AUDIENCE])}.items():
+    # The tolerance: a token that expired 30 s ago is valid, because clock_skew is 60 s.
+    for name, value in {"ed25519": token(), "es256": token(key=P256), "list": token(aud=["x", AUDIENCE]),
+                        "exp in the skew": token(iat=now - 100, exp=now - 30)}.items():
         response = call("GET", "/api/version", tok=value)
         assert response.status_code == 200, (name, response.status_code, response.text)
 

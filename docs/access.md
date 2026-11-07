@@ -27,6 +27,7 @@ access {
     audience         = "db"              # the name of this server
     public_keys_file = "/run/secrets/db_identity_keys.pem"   # or public_keys, or public_keys_env
     max_age          = "5m"
+    clock_skew       = "60s"
   }
   pdp {
     url        = "http://pdp.example.internal:4182"           # or url_env, or url_file
@@ -43,8 +44,9 @@ access {
 | `identity.header` | `X-Identity-Token` | The request header that carries the token. `Cookie`, `Authorization`, `Host`, `Content-Type` and `Content-Length` are refused. |
 | `identity.issuer` | (required) | The value that the `iss` claim must have. |
 | `identity.audience` | (required) | The name of this server: 1 to 256 bytes of UTF-8, no control character. The `aud` claim must contain it. It is also the `id` of the `service` resource and the `server` of the list of actions. |
-| `identity.public_keys` | (required) | The public keys of the issuer in PEM: 1 to 16 `-----BEGIN PUBLIC KEY-----` blocks. Each key is Ed25519 (`Ed25519`) or P-256 with an uncompressed point (`ES256`). It has the forms `public_keys`, `public_keys_env` and `public_keys_file`. Give exactly one. |
+| `identity.public_keys` | (required) | The public keys of the issuer: PEM or a JWK Set (refer to [Public keys](#public-keys)). 1 to 16 keys. It has the forms `public_keys`, `public_keys_env` and `public_keys_file`. Give exactly one. |
 | `identity.max_age` | `5m` | The longest life of a token (`exp - iat`). From `1s` to `24h`. |
+| `identity.clock_skew` | `60s` | The tolerance for the clock of the issuer (refer to [Identity token](#identity-token)). From `0s` to `5m`, in whole seconds. `0s` means no tolerance. |
 | `pdp.url` | (required) | The base URL of the PDP: `http://host[:port][/path]`. It has the forms `url`, `url_env` and `url_file`. Give exactly one. |
 | `pdp.token_env`, `pdp.token_file` | (required) | The token of this server at the PDP. It is a secret: give exactly one of the two forms. A token in clear text (`token = "..."`) stops the start. |
 | `pdp.timeout` | `500ms` | The time of one request to the PDP. From `10ms` to `1m`. |
@@ -55,12 +57,27 @@ These items stop the start:
 - No `access` block, no `mode`, or a `mode` that is not `authzen` or `open`.
 - `mode = "open"` with an `identity` block or a `pdp` block. The two contradict each other.
 - `mode = "authzen"` without the `identity` block or the `pdp` block, or without one of their required keys.
-- A PEM text that does not hold only Ed25519 or P-256 public keys, or a P-256 point that is not on the curve.
+- A key text that does not hold only Ed25519 or P-256 public keys, or a P-256 point that is not on the curve.
+- A JWK Set with a private member (`d`), with a `kty` or `crv` that ChDash does not accept, or with two keys of the same `kid`.
 - An `https` URL. ChDash has no TLS client (refer to [Deviation from AuthZEN: no TLS](#deviation-from-authzen-no-tls)).
 - A token of the PDP that holds a space, a control character or more than 4096 bytes. The error does not show the token.
 - With `mode = "authzen"`, a `clickhouse.host` name that has more than 256 bytes or is not UTF-8. The name is the id of a host for the PDP (refer to [Resources and hosts](#resources-and-hosts)).
 
 With `mode = "open"`, ChDash writes the warning `config.warning` at each start. Use the open mode only for a server alone on a closed network.
+
+With `mode = "authzen"` and `server.listen_host = "0.0.0.0"`, ChDash also writes a `config.warning` at each start. This is a warning, not an error. Refer to [Network](#network).
+
+### Public keys
+
+`identity.public_keys` holds PEM text or a JWK Set (RFC 7517). ChDash reads the text as a JWK Set when it starts with `{`. Else it reads PEM.
+
+- PEM: 1 to 16 `-----BEGIN PUBLIC KEY-----` blocks. Each key is Ed25519 (`Ed25519`) or P-256 with an uncompressed point (`ES256`).
+- JWK Set: a JSON object with a `keys` array of 1 to 16 keys. This is the form that the portal publishes (`portal identity-public-key`).
+- A JWK of type `OKP` has `crv` `Ed25519` and `x` (RFC 8037). A JWK of type `EC` has `crv` `P-256`, `x` and `y` (RFC 7518).
+- A JWK has an optional `kid`. The `use` member has no effect. The `alg` member is optional. If it is present, it must be `Ed25519` (or `EdDSA`) for `OKP` and `ES256` for `EC`.
+- A JWK with a private member (`d`), or with another `kty` or `crv`, stops the start. The error does not show the member value.
+
+The `kid` of a key is the `kid` that the JWK declares. A PEM key, or a JWK without `kid`, has the RFC 7638 thumbprint of the key as `kid`. Two keys cannot have the same `kid` in a JWK Set.
 
 `--print-config` shows each value with its source. It shows the keys as their type and their JWK thumbprint (RFC 7638), for example `["Ed25519 kid=kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"]`. It shows the token of the PDP as `<hidden>`. [configuration-reference.md](configuration-reference.md) is the generated list of the keys.
 
@@ -70,23 +87,36 @@ The identity token is a JWT (RFC 7519) in the compact JWS form. ChDash verifies 
 
 | Item | Rule |
 |---|---|
-| Header | `alg` is `Ed25519` or `ES256` (P-256, SHA-256). The name `EdDSA` is deprecated (RFC 9864, 4.1.2): a token with it is refused. A header with `crit`, or a `typ` that is not `JWT`, is refused. ChDash never fetches a key: `jku`, `x5u` and `jwk` have no effect. ChDash tries each configured key of the algorithm, so a rotation can use two keys. |
-| Signature | It must be valid for one of the configured keys. |
+| Header | `alg` is `Ed25519` or `ES256` (P-256, SHA-256). The name `EdDSA` is deprecated (RFC 9864, 4.1.2): a token with it is refused. A header with `crit` is refused. `typ` is required and must be exactly `JWT` (the comparison is case-sensitive): an absent `typ`, `jwt`, `JOSE` and `at+jwt` are refused. ChDash never fetches a key: `jku`, `x5u` and `jwk` have no effect. |
+| `kid` | When it is present, it must be a text, and ChDash verifies the token with the configured key of this `kid` only (refer to [Public keys](#public-keys)). A `kid` that is not a text gives `malformed`. A `kid` that no configured key has gives `kid`. When it is absent, ChDash tries each configured key of the algorithm, so a rotation can use two keys. |
+| Signature | It must be valid for the selected key, or for one of the configured keys when `kid` is absent. |
 | `iss` | It must be equal to `identity.issuer`. |
 | `aud` | A text equal to `identity.audience`, or a list that contains it. |
-| `iat`, `exp` | Both are required. `exp` must be after the current time, with no tolerance. `iat` can be 60 seconds in the future at most (the clock of the gateway can be in advance). `exp - iat` must not be more than `identity.max_age`. |
-| `nbf` | When it is present, it can be 60 seconds in the future at most. |
-| `sub` | The name of the human: 1 to 256 bytes, no control character. It is the AuthZEN subject `id`. |
+| `iat`, `exp` | Both are required. ChDash refuses a token only when the current time is after `exp + identity.clock_skew`. `iat` can be `identity.clock_skew` in the future at most. `exp - iat` must not be more than `identity.max_age`: the tolerance does not change this limit. |
+| `nbf` | When it is present, it can be `identity.clock_skew` in the future at most. |
+| `sub` | The name of the human: 1 to 256 bytes, no control character. It is the AuthZEN subject `id`. The limit of 256 bytes and the refusal of control characters are deliberate: the `sub` goes into the PDP questions, the logs and the traces. |
+| Size | The token has 16384 bytes at most (16 KiB). A longer token gives `malformed`. |
+
+`identity.clock_skew` is `60s` by default. With `0s`, the verifier has no tolerance: it refuses a token when the current time is after `exp`, and an `iat` or `nbf` in the future.
 
 ChDash accepts the token only in the configured header. It does not accept a token in a cookie or in a query parameter. Two copies of the header are refused: the reverse proxy must replace a header of the same name that the client sends.
 
-If the token is absent or not valid, ChDash sends status `401` with `{"error_code": "unauthenticated"}`. It does not show a login page and does not redirect: the access gateway does that. The log line `access.unauthenticated` gives the reason (`missing`, `malformed`, `algorithm`, `signature`, `issuer`, `audience`, `expired`, `not_yet_valid`, `max_age`, `subject`). The answer does not give it.
+If the token is absent or not valid, ChDash sends status `401` with `{"error_code": "unauthenticated"}`. It does not show a login page and does not redirect: the access gateway does that. The log line `access.unauthenticated` gives the reason (`missing`, `malformed`, `algorithm`, `kid`, `signature`, `issuer`, `audience`, `expired`, `not_yet_valid`, `max_age`, `subject`). The answer does not give it.
 
-ChDash keeps a verified token (its SHA-256, its subject and its `exp`) in memory until its `exp`. A token in the cache is not accepted after its `exp`.
+ChDash keeps a verified token (its SHA-256, its subject and its `exp`) in memory. A token in the cache follows the same rule as a new token: it is not accepted when the current time is after `exp + identity.clock_skew`.
 
 ChDash checks the token when a request starts. A stream that started with a valid token (the result of a run, the status of the hosts, an export) continues after the `exp` of the token. The next request needs a new token.
 
 These routes need no token: `/livez`, `/readyz`, `/healthz`, `/metrics`, `GET /.well-known/access-actions` and `/mcp`. Keep `/metrics` on the internal network.
+
+## Network
+
+ChDash must be reachable only through the edge (the access gateway and its reverse proxy). The identity token is a bearer credential in a header. A client that reaches ChDash directly can send any token that it holds, or can use a service without an edge in front of it. Obey these rules:
+
+- Kubernetes: write a NetworkPolicy for the pods of ChDash. Allow ingress only from the pods of the edge, and from the monitoring that reads `/metrics`. Allow egress only to the ClickHouse hosts, to the PDP and to the telemetry receiver.
+- Docker Compose: put ChDash on a network that only the edge and ChDash use. Do not publish the port of ChDash on the host.
+- Bind address: set `server.listen_host` to the address of the internal network, not `0.0.0.0`. The default is `0.0.0.0`, so ChDash writes a `config.warning` at start when `access.mode = "authzen"` and `server.listen_host` is `0.0.0.0`. The warning does not stop the start.
+- The edge must replace the identity header that a client sends. Keep `/metrics` and `/mcp` off the public network.
 
 ## Actions
 

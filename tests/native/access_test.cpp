@@ -107,8 +107,9 @@ std::vector<IdentityKey> keys_of(const std::string& pem) {
   return *keys;
 }
 
-IdentityVerifier verifier(const std::vector<IdentityKey>& keys, size_t cache = 4096) {
+IdentityVerifier verifier(const std::vector<IdentityKey>& keys, size_t cache = 4096, int64_t skew_s = 60) {
   IdentityVerifierOptions options;
+  options.clock_skew_s = skew_s;
   options.issuer = "https://issuer";
   options.audience = "db";
   options.max_age_ms = 300 * 1000;
@@ -218,7 +219,9 @@ void test_identity_token() {
   CHECK_EQ(reason(key.token(claims("https://issuer", R"("dbx")"))), std::string("audience"));
   CHECK_EQ(reason(key.token(claims("https://issuer", R"(["x"])"))), std::string("audience"));
   CHECK_EQ(reason(key.token(claims("https://issuer", "5"))), std::string("audience"));
-  CHECK_EQ(reason(key.token(claims("https://issuer", R"("db")", kNow - 100, kNow))), std::string("expired"));
+  // exp has the tolerance of 60 s (clock_skew): refused only when now > exp + 60.
+  CHECK_EQ(reason(key.token(claims("https://issuer", R"("db")", kNow - 100, kNow - 61))), std::string("expired"));
+  CHECK_EQ(reason(key.token(claims("https://issuer", R"("db")", kNow - 100, kNow - 60))), std::string("ok:alice"));
   CHECK_EQ(reason(key.token(claims("https://issuer", R"("db")", kNow - 10, kNow + 300))), std::string("max_age"));
   CHECK_EQ(reason(key.token(claims("https://issuer", R"("db")", kNow + 120, kNow + 200))), std::string("not_yet_valid"));
   // The clock of the gateway may be 60 s in advance.
@@ -235,17 +238,18 @@ void test_identity_token() {
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"HS256"})")), std::string("algorithm"));
   // EdDSA is the deprecated name (RFC 9864, 4.1.2; ProcurAuth 9.2): a token with it is refused, also with a valid Ed25519 signature.
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"EdDSA","typ":"JWT"})")), std::string("algorithm"));
-  CHECK_EQ(reason(key.token(claims(), R"({"alg":"ES256"})")), std::string("signature"));
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"ES256","typ":"JWT"})")), std::string("signature"));
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"ES256"})")), std::string("malformed"));
   CHECK_EQ(reason(key.token(claims(), R"({"typ":"JWT"})")), std::string("algorithm"));
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","crit":["exp"]})")), std::string("malformed"));
-  CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","typ":"jwt","kid":"anything"})")), std::string("ok:alice"));
+  CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","typ":"jwt"})")), std::string("malformed"));
   CHECK_EQ(reason(key.token(claims(), R"({"alg":"Ed25519","typ":"at+jwt"})")), std::string("malformed"));
   // The form of the token.
   const std::string good = key.token(claims());
   CHECK_EQ(reason(good.substr(0, good.rfind('.'))), std::string("malformed"));
   CHECK_EQ(reason(good + ".x"), std::string("malformed"));
   CHECK_EQ(reason(good + "="), std::string("malformed"));
-  CHECK_EQ(reason(std::string(9000, 'a')), std::string("malformed"));
+  CHECK_EQ(reason(std::string(17000, 'a')), std::string("malformed"));
   // A changed payload with the old signature.
   const size_t dot = good.find('.');
   const std::string forged = good.substr(0, dot + 1) + b64url(claims("https://issuer", R"("db")", kNow - 10, kNow + 290, R"(,"sub":"root")")) +
@@ -254,11 +258,13 @@ void test_identity_token() {
 
   // The cache keeps a verified token until its exp, and never past it.
   CHECK_EQ(reason(good), std::string("ok:alice"));
-  CHECK_EQ(reason(good, kNow + 289), std::string("ok:alice"));
-  CHECK_EQ(reason(good, kNow + 290), std::string("expired"));
+  CHECK_EQ(reason(good, kNow + 290), std::string("ok:alice"));
+  CHECK_EQ(reason(good, kNow + 350), std::string("ok:alice"));
+  CHECK_EQ(reason(good, kNow + 351), std::string("expired"));
   const IdentityVerifier uncached = verifier(keys, 0);
   CHECK(uncached.verify(good, kNow).ok);
-  CHECK_EQ(uncached.verify(good, kNow + 290).reason, std::string("expired"));
+  CHECK(uncached.verify(good, kNow + 350).ok);
+  CHECK_EQ(uncached.verify(good, kNow + 351).reason, std::string("expired"));
 
   // Two keys: a token of each is accepted (a rotation).
   const IdentityVerifier both = verifier(keys_of(key.pem() + other.pem()));
@@ -267,7 +273,8 @@ void test_identity_token() {
 }
 
 void test_es256_token() {
-  // RFC 7515, A.3: a JWS with ES256. Its claims have no aud: the signature passes, then the audience stops it.
+  // RFC 7515, A.3: a JWS with ES256. Its header has no typ (ProcurAuth 9.4 requires typ JWT), so the token is malformed for the
+  // verifier. The signature is checked in test_es256_vectors. The backend tests send ES256 tokens.
   const std::string jws =
       "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ."
       "DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1Q";
@@ -276,13 +283,242 @@ void test_es256_token() {
   options.audience = "db";
   options.keys = keys_of(kRfcP256Pem);
   const IdentityVerifier check(options);
-  CHECK_EQ(check.verify(jws, 1300819000).reason, std::string("audience"));
+  CHECK_EQ(check.verify(jws, 1300819000).reason, std::string("malformed"));
   std::string changed = jws;
   changed[changed.size() - 3] = changed[changed.size() - 3] == 'A' ? 'B' : 'A';
-  CHECK_EQ(check.verify(changed, 1300819000).reason, std::string("signature"));
+  CHECK_EQ(check.verify(changed, 1300819000).reason, std::string("malformed"));
   // The Ed25519 key does not verify an ES256 token.
   options.keys = keys_of(kRfcEd25519Pem);
-  CHECK_EQ(IdentityVerifier(options).verify(jws, 1300819000).reason, std::string("signature"));
+  CHECK_EQ(IdentityVerifier(options).verify(jws, 1300819000).reason, std::string("malformed"));
+}
+
+// ---- the identity token: typ, kid, clock skew, size, and the JWK Set (ProcurAuth 9.4) --------------------------------------
+
+// The JWK of a key of the tests, in the form of the portal.
+std::string jwk_of(const TestKey& key, const std::string& extra = "") {
+  return R"({"alg":"Ed25519","crv":"Ed25519",)" + extra + R"("kty":"OKP","use":"sig","x":")" +
+         encode64(std::vector<uint8_t>(key.public_key.begin(), key.public_key.end()), true) + "\"}";
+}
+
+void test_identity_typ() {
+  const TestKey key(7);
+  const IdentityVerifier check = verifier(keys_of(key.pem()));
+  const auto reason = [&](const std::string& header) {
+    const IdentityResult result = check.verify(key.token(claims(), header), kNow);
+    return result.ok ? std::string("ok") : result.reason;
+  };
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":"JWT"})"), std::string("ok"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519"})"), std::string("malformed"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":"JOSE"})"), std::string("malformed"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":"at+jwt"})"), std::string("malformed"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":"jwt"})"), std::string("malformed"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":"JWT "})"), std::string("malformed"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":5})"), std::string("malformed"));
+  CHECK_EQ(reason(R"({"alg":"Ed25519","typ":null})"), std::string("malformed"));
+}
+
+void test_identity_kid() {
+  const TestKey key(7);
+  const TestKey other(9);
+  const auto keys = keys_of(key.pem() + other.pem());
+  CHECK_EQ(keys.size(), size_t(2));
+  if (keys.size() != 2) return;
+  const IdentityVerifier check = verifier(keys);
+  const auto header = [](const std::string& kid_json) { return R"({"alg":"Ed25519","typ":"JWT","kid":)" + kid_json + "}"; };
+  const auto reason = [&](const TestKey& signer, const std::string& kid_json) {
+    const IdentityResult result = check.verify(signer.token(claims(), header(kid_json)), kNow);
+    return result.ok ? std::string("ok") : result.reason;
+  };
+  // The kid of each key is its thumbprint: the key with this kid verifies.
+  CHECK_EQ(reason(key, "\"" + keys[0].kid + "\""), std::string("ok"));
+  CHECK_EQ(reason(other, "\"" + keys[1].kid + "\""), std::string("ok"));
+  // A kid that no key has: refused with the reason kid.
+  CHECK_EQ(reason(key, R"("anything")"), std::string("kid"));
+  CHECK_EQ(reason(key, R"("")"), std::string("kid"));
+  // A kid that is not a text: malformed.
+  CHECK_EQ(reason(key, "5"), std::string("malformed"));
+  CHECK_EQ(reason(key, "null"), std::string("malformed"));
+  CHECK_EQ(reason(key, R"(["x"])"), std::string("malformed"));
+  CHECK_EQ(reason(key, "true"), std::string("malformed"));
+  // The kid selects the key: a token signed by the first key with the kid of the second key does not verify.
+  CHECK_EQ(reason(key, "\"" + keys[1].kid + "\""), std::string("signature"));
+  CHECK_EQ(reason(other, "\"" + keys[0].kid + "\""), std::string("signature"));
+  // Without kid, each key of the algorithm is tried.
+  CHECK(check.verify(key.token(claims()), kNow).ok);
+  CHECK(check.verify(other.token(claims()), kNow).ok);
+  // A kid of an Ed25519 key with the algorithm ES256: no key of that algorithm has the kid.
+  const std::string es256_header = R"({"alg":"ES256","typ":"JWT","kid":")" + keys[0].kid + "\"}";
+  CHECK_EQ(check.verify(key.token(claims(), es256_header), kNow).reason, std::string("signature"));
+}
+
+void test_identity_clock_skew() {
+  const TestKey key(7);
+  const auto keys = keys_of(key.pem());
+  const auto token_of = [&](int64_t iat, int64_t exp, const std::string& extra = R"(,"sub":"alice")") {
+    return key.token(claims("https://issuer", R"("db")", iat, exp, extra));
+  };
+  const auto reason = [&](const IdentityVerifier& check, const std::string& token, int64_t now) {
+    const IdentityResult result = check.verify(token, now);
+    return result.ok ? std::string("ok") : result.reason;
+  };
+  // 60 s (the default): exp + 60 is the last second of a token.
+  const IdentityVerifier sixty = verifier(keys, 0, 60);
+  CHECK_EQ(reason(sixty, token_of(kNow - 100, kNow), kNow + 60), std::string("ok"));
+  CHECK_EQ(reason(sixty, token_of(kNow - 100, kNow), kNow + 61), std::string("expired"));
+  CHECK_EQ(reason(sixty, token_of(kNow + 60, kNow + 100), kNow), std::string("ok"));
+  CHECK_EQ(reason(sixty, token_of(kNow + 61, kNow + 100), kNow), std::string("not_yet_valid"));
+  CHECK_EQ(reason(sixty, token_of(kNow, kNow + 10, R"(,"sub":"alice","nbf":)" + std::to_string(kNow + 60)), kNow), std::string("ok"));
+  CHECK_EQ(reason(sixty, token_of(kNow, kNow + 10, R"(,"sub":"alice","nbf":)" + std::to_string(kNow + 61)), kNow), std::string("not_yet_valid"));
+  // exp - iat stays at most max_age: the skew does not widen it.
+  CHECK_EQ(reason(sixty, token_of(kNow - 10, kNow + 300), kNow), std::string("max_age"));
+  // 0 s: no tolerance.
+  const IdentityVerifier none = verifier(keys, 0, 0);
+  CHECK_EQ(reason(none, token_of(kNow - 100, kNow), kNow), std::string("ok"));
+  CHECK_EQ(reason(none, token_of(kNow - 100, kNow), kNow + 1), std::string("expired"));
+  CHECK_EQ(reason(none, token_of(kNow, kNow + 10), kNow), std::string("ok"));
+  CHECK_EQ(reason(none, token_of(kNow + 1, kNow + 10), kNow), std::string("not_yet_valid"));
+  CHECK_EQ(reason(none, token_of(kNow, kNow + 10, R"(,"sub":"alice","nbf":)" + std::to_string(kNow + 1)), kNow), std::string("not_yet_valid"));
+  // 5 min: the longest skew.
+  const IdentityVerifier long_skew = verifier(keys, 0, 300);
+  CHECK_EQ(reason(long_skew, token_of(kNow - 400, kNow - 300), kNow), std::string("ok"));
+  CHECK_EQ(reason(long_skew, token_of(kNow - 400, kNow - 301), kNow), std::string("expired"));
+  // The cache follows the same rule, on both sides of the boundary.
+  const IdentityVerifier cached = verifier(keys, 16, 60);
+  const std::string good = token_of(kNow - 10, kNow + 100);
+  CHECK_EQ(reason(cached, good, kNow), std::string("ok"));
+  CHECK_EQ(reason(cached, good, kNow + 160), std::string("ok"));
+  CHECK_EQ(reason(cached, good, kNow + 161), std::string("expired"));
+  const IdentityVerifier cached_none = verifier(keys, 16, 0);
+  CHECK_EQ(reason(cached_none, good, kNow), std::string("ok"));
+  CHECK_EQ(reason(cached_none, good, kNow + 100), std::string("ok"));
+  CHECK_EQ(reason(cached_none, good, kNow + 101), std::string("expired"));
+  // A huge exp does not overflow.
+  CHECK_EQ(reason(sixty, token_of(kNow - 10, INT64_MAX - 5), kNow), std::string("max_age"));
+}
+
+void test_identity_token_size() {
+  const TestKey key(7);
+  const IdentityVerifier check = verifier(keys_of(key.pem()), 0);
+  const auto padded = [&](size_t pad) {
+    return key.token(claims("https://issuer", R"("db")", kNow - 10, kNow + 290, R"(,"sub":"alice","pad":")" + std::string(pad, 'a') + "\""));
+  };
+  const std::string twelve = padded(9300);
+  CHECK(twelve.size() >= 12 * 1024 && twelve.size() < 16384);
+  CHECK(check.verify(twelve, kNow).ok);
+  const std::string seventeen = padded(12700);
+  CHECK(seventeen.size() >= 17000);
+  const IdentityResult refused = check.verify(seventeen, kNow);
+  CHECK(!refused.ok);
+  CHECK_EQ(refused.reason, std::string("malformed"));
+  CHECK(check.verify(padded(11900), kNow).ok);  // about 15.9 KiB: still under the bound
+}
+
+// RFC 8037, A.2: the key of the RFC 8032 test 1. RFC 7515, A.3: a P-256 key (the key of kRfcP256Pem as a JWK).
+const std::string kRfcEd25519Jwk = R"({"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"})";
+const std::string kRfcP256Jwk =
+    R"({"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"})";
+
+void test_jwk_set() {
+  const auto parse = [](const std::string& text, std::string* error = nullptr) {
+    std::string local;
+    auto keys = parse_identity_public_keys(text, error ? error : &local);
+    return keys ? *keys : std::vector<IdentityKey>();
+  };
+  const auto refused = [](const std::string& text, const std::string& part) {
+    std::string error;
+    const bool none = !parse_identity_public_keys(text, &error);
+    CHECK(none);
+    CHECK(error.find(part) != std::string::npos);
+    if (error.find(part) == std::string::npos) std::cerr << "  error: " << error << std::endl;
+  };
+  // The vectors: the same keys as the PEM texts, with the same bytes and the same thumbprint.
+  const auto pem_keys = keys_of(kRfcEd25519Pem + kRfcP256Pem);
+  const auto keys = parse("{\"keys\":[" + kRfcEd25519Jwk + "," + kRfcP256Jwk + "]}");
+  CHECK_EQ(keys.size(), size_t(2));
+  if (keys.size() == 2 && pem_keys.size() == 2) {
+    CHECK(keys[0].type == IdentityKey::Type::Ed25519);
+    CHECK(keys[0].ed25519 == pem_keys[0].ed25519);
+    // RFC 8037, A.3: the thumbprint of the key of A.2.
+    CHECK_EQ(keys[0].kid, std::string("kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"));
+    CHECK(keys[1].type == IdentityKey::Type::P256);
+    CHECK(keys[1].p256 == pem_keys[1].p256);
+    CHECK_EQ(keys[1].kid, pem_keys[1].kid);
+  }
+  // The text can start with white space. A declared kid replaces the thumbprint.
+  const auto declared = parse("  \n{\"keys\":[{\"kid\":\"k-1\"," + kRfcEd25519Jwk.substr(1) + "]}");
+  CHECK_EQ(declared.size(), size_t(1));
+  if (!declared.empty()) CHECK_EQ(declared[0].kid, std::string("k-1"));
+  // The form of the portal: alg Ed25519, use sig, kid. The alg EdDSA, ES256 and the other members of a key have no other effect.
+  const auto portal = parse(R"({"keys":[{"alg":"Ed25519","crv":"Ed25519","kid":"p","kty":"OKP","use":"sig","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})");
+  CHECK_EQ(portal.size(), size_t(1));
+  CHECK_EQ(parse(R"({"keys":[{"alg":"EdDSA","kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})").size(), size_t(1));
+  CHECK_EQ(parse(R"({"keys":[{"alg":"ES256","use":"enc","key_ops":["verify"],"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}]})").size(),
+           size_t(1));
+  // PEM keeps working.
+  CHECK_EQ(parse(kRfcEd25519Pem).size(), size_t(1));
+
+  // The errors.
+  refused("{", "not a JSON object");
+  refused("{}", "no \"keys\" array");
+  refused(R"({"keys":{}})", "no \"keys\" array");
+  refused(R"({"keys":[]})", "no key");
+  refused(R"({"keys":[5]})", "key 1 is not a JSON object");
+  // A private member.
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","d":"nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"}]})", "private member \"d\"");
+  refused(R"({"keys":[{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","d":"jpsQnnGQmL-YBIffH1136cspYG6-0iY7X1fCE9-E9LI"}]})", "private member \"d\"");
+  // An unknown kty or crv.
+  refused(R"({"keys":[{"kty":"RSA","crv":"P-256","n":"x","e":"AQAB"}]})", "kty that is not OKP or EC");
+  refused(R"({"keys":[{"kty":"oct","crv":"Ed25519","k":"x"}]})", "has the private member \"k\"");
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed448","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "curve that is not Ed25519");
+  refused(R"({"keys":[{"kty":"OKP","crv":"X25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "curve that is not Ed25519");
+  refused(R"({"keys":[{"kty":"EC","crv":"P-384","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}]})", "curve that is not P-256");
+  refused(R"({"keys":[{"kty":"EC","crv":"secp256k1","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}]})", "curve that is not P-256");
+  refused(R"({"keys":[{"crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "no \"kty\"");
+  refused(R"({"keys":[{"kty":"OKP","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "no \"crv\"");
+  // An alg that disagrees with the kty.
+  refused(R"({"keys":[{"alg":"ES256","kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "alg that is not Ed25519");
+  refused(R"({"keys":[{"alg":"Ed25519","kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}]})", "alg that is not ES256");
+  // The coordinates: missing, bad base64url, bad length, a point that is not on the curve.
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed25519"}]})", "needs \"x\"");
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed25519","x":"!!!"}]})", "needs \"x\"");
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed25519","x":"AAAA"}]})", "needs \"x\"");
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed25519","x":5}]})", "needs \"x\"");
+  refused(R"({"keys":[{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo="}]})", "needs \"x\"");
+  refused(R"({"keys":[{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU"}]})", "needs \"x\" and \"y\"");
+  refused(R"({"keys":[{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"y_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}]})", "curve P-256");
+  // The kid: not a text, empty, too long, a control character, a duplicate.
+  refused(R"({"keys":[{"kid":5,"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "\"kid\" that is not a text");
+  refused(R"({"keys":[{"kid":"","kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "\"kid\" that is not 1 to 256 bytes");
+  refused(R"({"keys":[{"kid":")" + std::string(257, 'k') + R"(","kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "\"kid\" that is not 1 to 256 bytes");
+  refused(R"({"keys":[{"kid":"a\nb","kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]})", "\"kid\" that is not 1 to 256 bytes");
+  refused("{\"keys\":[" + kRfcEd25519Jwk + "," + kRfcEd25519Jwk + "]}", "same kid");
+  // 16 keys are accepted and 17 are refused.
+  const auto many = [](int count) {
+    std::string text = "{\"keys\":[";
+    for (int i = 0; i < count; ++i) {
+      if (i) text += ",";
+      text += R"({"kty":"OKP","crv":"Ed25519","kid":"k)" + std::to_string(i) + R"(","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"})";
+    }
+    return text + "]}";
+  };
+  CHECK_EQ(parse(many(16)).size(), size_t(16));
+  refused(many(17), "more than 16");
+
+  // A token verified with a JWK Set: by the declared kid, and by the thumbprint when the JWK has no kid.
+  const TestKey key(7);
+  const TestKey other(9);
+  const IdentityVerifier check = verifier(parse("{\"keys\":[" + jwk_of(key, R"("kid":"portal-1",)") + "," + jwk_of(other) + "]}"));
+  const auto header = [](const std::string& kid) { return R"({"alg":"Ed25519","typ":"JWT","kid":")" + kid + "\"}"; };
+  CHECK(check.verify(key.token(claims(), header("portal-1")), kNow).ok);
+  CHECK_EQ(check.verify(key.token(claims(), header("other")), kNow).reason, std::string("kid"));
+  CHECK_EQ(check.verify(key.token(claims(), R"({"alg":"Ed25519","typ":"JWT","kid":"portal-2"})"), kNow).reason, std::string("kid"));
+  const auto set = parse("{\"keys\":[" + jwk_of(key, R"("kid":"portal-1",)") + "," + jwk_of(other) + "]}");
+  CHECK_EQ(set.size(), size_t(2));
+  if (set.size() == 2) {
+    CHECK(check.verify(other.token(claims(), header(set[1].kid)), kNow).ok);
+    CHECK_EQ(check.verify(other.token(claims(), header("portal-1")), kNow).reason, std::string("signature"));
+  }
+  CHECK(check.verify(key.token(claims()), kNow).ok);
 }
 
 // ---- the actions and the routes ------------------------------------------------------------------------------------------
@@ -942,6 +1178,11 @@ int main() {
   RUN(test_public_keys);
   RUN(test_identity_token);
   RUN(test_es256_token);
+  RUN(test_identity_typ);
+  RUN(test_identity_kid);
+  RUN(test_identity_clock_skew);
+  RUN(test_identity_token_size);
+  RUN(test_jwk_set);
   RUN(test_actions_document);
   RUN(test_actions_of_the_features_that_are_on);
   RUN(test_route_rules);
