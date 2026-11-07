@@ -192,7 +192,7 @@ def test_u04_a_token_in_a_cookie_or_a_query_parameter_gets_401():
 
 @needs_access
 def test_u05_the_actions_are_published_without_a_token():
-    response = call("GET", "/.well-known/access-actions", tok=None)
+    response = call("GET", "/.well-known/procurauth/actions", tok=None)
     assert response.status_code == 200
     doc = response.json()
     assert doc["server"] == AUDIENCE
@@ -201,10 +201,10 @@ def test_u05_the_actions_are_published_without_a_token():
     # The document lists the published actions only (ProcurAuth 5.2a). The configuration of this test turns on the Explorer, the System
     # page and MCP with its keys in the hybrid mode. It has no library and no OpenTelemetry signal: their actions are absent.
     assert set(actions) == {
-        "query.run.read", "query.run.write", "query.export", "explorer.read", "system.read", "system.kill_query",
+        "query.run.read", "query.run.write", "query.export", "explorer.read", "system.read",
         "mcp.keys.read", "mcp.keys.write", "mcp.usage.read",
     }
-    for name in ("library.read", "library.write", "observability.read"):
+    for name in ("library.read", "library.write", "observability.read", "system.kill_query"):
         assert name not in actions, name
     # The tree under the service: host, then database (contract 11.4).
     assert doc["resource_types"] == [
@@ -213,13 +213,54 @@ def test_u05_the_actions_are_published_without_a_token():
     ]
     for name in ("query.run.read", "query.run.write", "explorer.read"):
         assert actions[name]["resource_types"] == ["service", "host", "database"], name
-    for name in ("query.export", "system.read", "system.kill_query"):
+    for name in ("query.export", "system.read"):
         assert actions[name]["resource_types"] == ["service", "host"], name
     for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
         assert actions[name]["resource_types"] == ["service"], name
     assert all(a["description"] for a in actions.values())
+    # The member resources names the hosts: one node for each, with no actions (ProcurAuth 5.2).
+    assert [r["path"] for r in doc["resources"]] == ["host:local", "host:other"], doc["resources"]
+    assert all(set(r) <= {"path", "label"} and 0 < len(r["label"]) <= 60 for r in doc["resources"])
     # The probes need no token either.
     assert call("GET", "/livez", tok=None).status_code == 200
+
+
+@needs_access
+def test_u05_the_former_path_of_the_document_has_no_route():
+    # There is no alias: the former path answers 404, with a token and without one.
+    assert call("GET", "/.well-known/access-actions", tok=None).status_code == 404
+    assert call("GET", "/.well-known/access-actions").status_code == 404
+
+
+@needs_access
+def test_the_route_of_the_options_lists_the_hosts_and_the_databases_that_the_pdp_allows():
+    # The route needs the token (U75).
+    assert call("GET", "/.well-known/procurauth/resources?type=host", tok=None).status_code == 401
+    # A person with explorer.read on one database of local sees the host local, and in it that database only.
+    answer(default=False, allow=["explorer.read@host:local/database:chdash_ui"])
+    tok = token("options-tenant")
+    hosts = call("GET", "/.well-known/procurauth/resources?type=host", tok=tok)
+    assert hosts.status_code == 200, hosts.text
+    assert [i["id"] for i in hosts.json()["items"]] == ["local"] and hosts.json()["items"][0]["has_children"] is True
+    assert hosts.json()["next"] is None
+    databases = call("GET", "/.well-known/procurauth/resources?parent=host%3Alocal&type=database", tok=tok)
+    assert databases.status_code == 200, databases.text
+    assert [i["id"] for i in databases.json()["items"]] == ["chdash_ui"], databases.text
+    assert call("GET", "/.well-known/procurauth/resources?parent=host%3Aother&type=database", tok=tok).json()["items"] == []
+    # The questions have the match subtree, the type of the child and the chain of its ancestors (U70, U83).
+    questions = [e for e in asked("explorer.read") if e["subject"]["id"] == "options-tenant" and e["resource"]["type"] == "database"]
+    assert questions and all(e["context"].get("match") == "subtree" for e in questions), questions
+    # A search keeps the databases whose id holds the text; a limit of one gives one item at most.
+    answer(default=True)
+    found = call("GET", "/.well-known/procurauth/resources?parent=host%3Alocal&type=database&q=CHDASH&limit=1", tok=tok).json()
+    assert len(found["items"]) <= 1 and all("chdash" in i["id"].lower() for i in found["items"]), found
+    # The system databases are not listed.
+    listed = {i["id"] for i in call("GET", "/.well-known/procurauth/resources?parent=host%3Alocal&type=database&limit=50", tok=tok).json()["items"]}
+    assert "system" not in listed and "information_schema" not in listed and "INFORMATION_SCHEMA" not in listed
+    # The bad requests of 5.7 give 400 (U76 to U80); an unknown parameter is ignored (U81).
+    for query in ("", "type=host&type=host", "type=host&limit=0", "type=host&limit=abc", "parent=host%3Alocal&type=host", "parent=%zz&type=host"):
+        assert call("GET", f"/.well-known/procurauth/resources?{query}", tok=tok).status_code == 400, query
+    assert call("GET", "/.well-known/procurauth/resources?type=host&x_unknown=1", tok=tok).status_code == 200
 
 
 # ---- U06, U07, U08, U09: the decisions ----------------------------------------------------------------------------------
@@ -450,7 +491,10 @@ def test_a_grant_on_one_database_of_one_host_allows_that_database_only():
                    json={"host_id": "local", "database": "chdash_ui", "table": "weather_buffer", "limit": 1})
     assert preview.status_code == 403
     assert call("GET", "/api/explorer/table?host_id=other&database=system&table=one", tok=tok).status_code == 403
-    assert call("GET", "/api/explorer/catalog?host_id=other", tok=tok).status_code == 403
+    # The catalog of the host of the grant lists that database only; the other host and the other databases of this host are not listed.
+    catalog = call("GET", "/api/explorer/catalog?host_id=other", tok=tok)
+    assert catalog.status_code == 200 and catalog.json()["databases"] == ["chdash_ui"], catalog.text[:300]
+    assert call("GET", "/api/explorer/catalog?host_id=local", tok=tok).status_code == 403
     # A grant below a host shows that host (the match "subtree", addendum 1), and only that host.
     assert [h["id"] for h in call("GET", "/api/hosts", tok=tok).json()["hosts"]] == ["other"]
     # The question named the database under its host.
@@ -477,7 +521,11 @@ def test_a_grant_on_one_database_shows_its_host_and_allows_only_that_database():
     # Another database of local, the whole host and a run on local are refused.
     denied = call("GET", "/api/explorer/table?host_id=local&database=system&table=one", tok=tok)
     assert denied.status_code == 403 and denied.json()["action"] == "explorer.read"
-    assert call("GET", "/api/explorer/catalog?host_id=local", tok=tok).status_code == 403
+    # The catalog lists the database of the grant and no other (the list is filtered: no 403).
+    catalog = call("GET", "/api/explorer/catalog?host_id=local", tok=tok)
+    assert catalog.status_code == 200 and catalog.json()["databases"] == ["chdash_ui"], catalog.text[:300]
+    assert {t["database"] for t in catalog.json()["tables"]} <= {"chdash_ui"}
+    assert call("GET", "/api/explorer/catalog?host_id=local&database=system", tok=tok).status_code == 403
     run = call("POST", "/api/query/run", tok=tok, json={"host_id": "local", "sql": "SELECT 1"})
     assert run.status_code == 403 and run.json()["action"] == "query.run.read", run.text
     # The questions of the operations had no match "subtree": the explorer.read questions on the exact resource are "node".
@@ -527,13 +575,15 @@ def test_readonly_follows_the_host_of_the_run():
 
 @needs_access
 def test_explorer_read_on_one_database():
-    # A grant on the database chdash_ui only: its table opens, the database system does not, and the whole catalog neither.
+    # A grant on the database chdash_ui only: its table opens, the database system does not, and the catalog lists chdash_ui only.
     answer(default=False, allow=["explorer.read@host:local/database:chdash_ui"])
     ok = call("GET", "/api/explorer/table?host_id=local&database=chdash_ui&table=weather_buffer")
     assert ok.status_code != 403, ok.text
     denied = call("GET", "/api/explorer/table?host_id=local&database=system&table=one")
     assert denied.status_code == 403 and denied.json()["action"] == "explorer.read"
-    assert call("GET", "/api/explorer/catalog?host_id=local").status_code == 403
+    catalog = call("GET", "/api/explorer/catalog?host_id=local")
+    assert catalog.status_code == 200 and catalog.json()["databases"] == ["chdash_ui"], catalog.text[:300]
+    assert call("GET", "/api/explorer/catalog?host_id=local&database=system").status_code == 403
     # The data preview names its database in the body.
     preview = call("POST", "/api/explorer/table/data", json={"host_id": "local", "database": "system", "table": "one", "limit": 1})
     assert preview.status_code == 403
