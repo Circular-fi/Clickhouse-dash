@@ -134,6 +134,9 @@ ChDash publishes its actions at `GET /.well-known/procurauth/actions`, without a
   ],
   "resources": [
     { "path": "host:prod", "label": "Production" }
+  ],
+  "limits": [
+    { "name": "max_rows", "label": "Most rows in the result of one run", "description": "...", "unit": "rows", "kind": "ceiling", "min": 1, "max": 1000000000000000 }
   ]
 }
 ```
@@ -161,7 +164,7 @@ The navigation follows the document: a page whose actions are not published has 
 |---|---|---|
 | `query.run.read` | `service`, `host`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta` |
 | `query.run.write` | `service`, `host`, `database` | The same routes. Without it, the statements of a run run with `readonly = 1`. |
-| `query.export` | `service`, `host` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. |
+| `query.export` | `service`, `host` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. The stream asks the actions on the host of the export (refer to [The stream of an export](#the-stream-of-an-export)). |
 | `library.read` | `service` | `GET /api/query-library...` |
 | `library.write` | `service` | `POST`, `PATCH` and `DELETE /api/query-library...` |
 | `explorer.read` | `service`, `host`, `database` | `/api/explorer/...`, except `/api/explorer/ops/...` |
@@ -174,6 +177,8 @@ The navigation follows the document: a page whose actions are not published has 
 The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
 
 A route that is not in this table is refused with `403` and the action `unknown` (fail closed), and the log has the line `access.no_rule`. A path that has no route gets `404`.
+
+The member `limits` of the document declares the six ceilings, and each action lists the names of its ceilings (refer to [Limits of a grant](#limits-of-a-grant)).
 
 When you remove or rename an action, or change its resource types, write the change in the release notes.
 
@@ -334,7 +339,7 @@ Rules:
 - If the PDP gives no valid answer (refer to [Decisions](#decisions)), ChDash sends status `503` with `{"error_code": "pdp_unavailable", "action": "<action>", "retryable": true, ...}`. It never sends `403` for a failure. When an operation needs several decisions, a failure comes before a denial: a failed question can hide a `true` answer.
 - A route that filters a list with the decisions does not filter on a failure: it answers `503`. These routes are the catalog, the storage map, the graph, the table card and the definition of the Explorer (action `explorer.read`), the names of `GET /api/meta` (action `query.run.read`), `GET /api/hosts`, `GET /api/hosts/stream` and the hosts of `GET /api/mcp/meta` (action `hosts`), `GET /api/version` (action `access`) and the route of the options (action `resources`).
 - No answer gives the reason of the PDP (ProcurAuth 10.3).
-- **Ceilings.** A ceiling of `context.limits` is mandatory to understand (ProcurAuth 7.5). ChDash declares no ceiling yet. Thus a `true` answer with a ceiling is a `false` answer with no reason: the route answers `403`. The log has the line `access.ceiling_unenforceable` with the action, the resource and the name of the ceiling.
+- **Ceilings.** A ceiling of `context.limits` is mandatory to understand (ProcurAuth 7.5). ChDash applies the six ceilings that the document declares (refer to [Limits of a grant](#limits-of-a-grant)). A `true` answer with another ceiling is a `false` answer with no reason: the route answers `403`. The log has the line `access.ceiling_unenforceable` with the action, the resource and the name of the ceiling.
 - A run without `query.run.write` on its host runs each statement with `readonly = 1`. For `GET /api/meta` with `database`, the decisions apply to that database of the host. ClickHouse then refuses a statement that changes data or settings, also a `SETTINGS` clause and `SET`. ChDash sends `readonly = 1` also when it cannot read the settings profile of the runner (fail closed). A run needs `query.run.read` or `query.run.write`: without the two, the answer is `403` with the action `query.run.read`. The same rule applies to Deep Analyze and to the statements of an export. An export also needs `query.export`: without it, the answer is `403` with the action `query.export`.
 - The pages hide what the subject cannot do. `GET /api/version` gives the decisions in `features.access`, and the pages read them. The host picker of a page shows only the hosts on which the subject holds an action of that page. The query library needs `library.read` (and `library.write` to change it). `GET /api/mcp/meta` says `can_manage = false` without `mcp.keys.write`, so the MCP page shows no New key and no Delete. The pages and their links follow the rules of [Navigation](#navigation).
 
@@ -355,6 +360,92 @@ Rules:
 - ChDash does not read a SQL text inside a text, for example the `QUERY` of a dictionary source.
 - The focus of the graph (`focus_database`) names its own database. Without a `true` decision on the host or on that database, the answer is `403` with the action `explorer.read`.
 - The Query page names no database. Thus a grant of `query.run.read` on one database does not let the user run a query: ChDash asks for the host. The SQL of a query can name any table, so a decision for one database cannot limit what the SQL reads. The grants of the ClickHouse runner user of each host stay the limit of the data.
+
+## Limits of a grant
+
+A grant can carry limits (ProcurAuth section 6). ChDash declares six limits of the kind ceiling. A ceiling is the most that one use of an action can take. The portal reads the declaration in the action document and shows the form of the values. The PDP gives the value of each ceiling in `context.limits` of a `true` answer. ChDash holds no value itself.
+
+### The six ceilings
+
+Each ceiling has the lowest value 1, because ClickHouse reads 0 as no limit. A grant never gives 0.
+
+| Ceiling | Unit | ClickHouse setting | What it limits |
+|---|---|---|---|
+| `max_rows_read` | rows | `max_rows_to_read` | The rows that one run reads from the tables. |
+| `max_read_size` | bytes | `max_bytes_to_read` | The bytes that one run reads from the tables. |
+| `max_rows` | rows | `max_result_rows` | The rows in the result of one run. |
+| `max_result_size` | bytes | `max_result_bytes` | The bytes in the result of one run. |
+| `max_duration` | seconds | `max_execution_time` | The time that one run takes. |
+| `max_memory` | bytes | `max_memory_usage` | The memory that one run uses. |
+
+The declared `max` of a ceiling is the highest bound of the configuration that carries it. A key with the value 0 stands for the highest value that its schema allows. A ceiling that no key bounds has the highest value of its schema:
+
+| Ceiling | Keys that bound it | Highest value of the schema |
+|---|---|---|
+| `max_rows_read` | `query.max_rows_to_read`, `generated_queries.max_rows_to_read` | 10^15 rows |
+| `max_read_size` | `query.max_bytes_to_read`, `generated_queries.max_bytes_to_read` | 10^15 bytes |
+| `max_rows` | none | 10^15 rows |
+| `max_result_size` | none | 1 099 511 627 776 bytes (1 TiB) |
+| `max_duration` | `query.max_execution_time_s`, `export.max_execution_time_s`, `generated_queries.timeout_ms` | 604 800 seconds (7 days) |
+| `max_memory` | `query.max_memory_usage`, `export.max_memory_usage`, `generated_queries.max_memory_usage` | 1 099 511 627 776 bytes (1 TiB) |
+
+Every value is below 2^53. A reader that uses floating point numbers reads each value exactly. A value above `max` is not a fault. The value that applies is always the lowest of the ceiling, the bound of the configuration and the settings profile.
+
+### Actions that list ceilings
+
+| Action | Ceilings |
+|---|---|
+| `query.run.read`, `query.run.write`, `query.export` | All six. |
+| `explorer.read` | `max_rows`, `max_rows_read`, `max_duration`, `max_memory`. |
+| `system.read`, `observability.read` | `max_rows_read`, `max_rows`, `max_duration`. |
+| `library.read`, `library.write`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read` | None. |
+
+An action lists its ceilings only when the action is published. The MCP endpoint applies no ceiling yet. An MCP key never has more than its creator, and a `true` answer for the creator with a ceiling is `false` for the key.
+
+### How ChDash applies a ceiling
+
+1. The rule of the route asks the PDP. ChDash keeps the ceilings of the `true` answer of the action that guards the route. An export keeps the ceilings of `query.export` and of the class of its SQL.
+2. One function, `apply_ceilings`, lowers the bounds of a statement. Four places call it: the run of the Query page (`QuerySession`), the statements of the pages (`request_limits`), Deep Analyze (`user_sql_limits`) and the export stream.
+3. The ceiling lowers the matching bound. The value that ClickHouse gets is the lowest of the ceiling, the bound of the configuration and the settings profile of the runner user. A ceiling never makes a bound looser.
+4. A ceiling that lowers a bound also sets the overflow mode `throw` when the route sets none. The run then fails with a clear error and gives no cut result.
+5. `max_memory` has no backstop in ChDash. The settings profile of the ClickHouse user enforces it, with the setting `max_memory_usage`. To limit the memory of a statement that sets its own `max_memory_usage`, use a constraint in the profile.
+
+ClickHouse lets a `SETTINGS` clause of a statement replace the setting of the client. A profile with `readonly = 1` takes no setting at all. Thus ChDash also counts what it sees, in the run of the Query page and in the export:
+
+| Ceiling | What ChDash counts | The error |
+|---|---|---|
+| `max_rows_read`, `max_read_size` | The rows and bytes of the progress packets of ClickHouse. | `query_scan_limit` |
+| `max_rows` | The rows of the result blocks. A block that goes past the ceiling is not sent. | `query_result_limit` |
+| `max_result_size` | The bytes of the result events that ChDash sends. In an export: the bytes of the CSV or JSON text. The count follows the sending: a run goes past the ceiling by one event (in an export, one block) at most. | `query_result_limit` |
+| `max_duration` | A deadline from the start of the run. At the deadline ChDash stops the statement with the cancel path (`KILL QUERY`). | `query_timeout` |
+
+A run that goes past a ceiling ends with an `error` event that has the code in the table and the name and the value of the ceiling. An export writes the error in `error.txt` of the archive and stops. In an export, each statement has its own counters and its own deadline.
+
+The statements that ChDash writes for the pages (Explorer, System, Traces, Logs, Metrics, the metadata of the editor) have the same backstop, because many of them carry their own `SETTINGS` clause. Each statement counts the rows and bytes read, the rows of its result and its time. Past a ceiling it ends, and the route answers as for the ClickHouse code of the same meaning (`<page>_scan_limit` or `<page>_timeout`, [operations.md](operations.md#errors)). The pages have no backstop for `max_result_size`: its setting is the only bound there. The progress packets of ClickHouse give the rows and bytes read, so a statement that reads very little can end before a packet arrives.
+
+The pages keep shared caches of their answers (the Explorer, the System page). An answer that comes from a cache runs no statement, so no ceiling applies to it. A ceiling bounds the work that the request does itself.
+
+### Read and write
+
+A person can hold `query.run.read` and `query.run.write`. ChDash then gets two sets of ceilings, and it classifies the SQL of the run:
+
+- The SQL is a write when a statement changes data, the schema, the access or the settings (`INSERT`, `CREATE`, `ALTER`, `DROP`, `SET`, `SYSTEM`, `KILL` and the other commands). The ceilings of `query.run.write` apply.
+- The SQL is a read when each statement only reads (`SELECT`, `WITH ... SELECT`, `SHOW`, `DESCRIBE`, `EXISTS`, `EXPLAIN`, `CHECK`). The ceilings of `query.run.read` apply.
+- When ChDash cannot tell (a statement that it does not know, or a text without a statement), the lower value of each ceiling of the two actions applies.
+
+A `SETTINGS` clause does not change the class. A person with only one of the two actions uses the ceilings of that action. The routes that ChDash guards with `query.run.read` or `query.run.write` and that run no SQL of the person (`GET /api/meta`, `POST /api/query/analysis`) use the lower value of the two sets.
+
+### The stream of an export
+
+The body of `POST /api/export/stream` holds only the token of the export. It names no host. ChDash stores in the job, at `POST /api/export/run`, the ceilings, the class of the SQL and `readonly = 1`. At the stream, ChDash asks `query.export`, `query.run.read` and `query.run.write` again on the host of the job. The stream applies the lower value of each ceiling of the new answer and of the stored ones. A failure of the PDP gives `503` and keeps the token, so the person can try again.
+
+### Questions of the navigation
+
+A question of the navigation has the match `subtree`. It shows or hides a page, a host or a database, and it runs no operation. A ceiling in its answer never makes it `false`. The same is true for the questions that filter the databases of a list. Only the questions that guard an operation follow the rule of ProcurAuth 7.5.
+
+### A ceiling that ChDash cannot apply
+
+A `true` answer for an operation is `false` when it has a ceiling that the action does not list, a name that ChDash does not know, or a value below 1. The route answers `403` with no reason. The log has the line `access.ceiling_unenforceable`.
 
 ## Navigation
 

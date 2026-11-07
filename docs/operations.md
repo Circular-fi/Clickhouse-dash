@@ -69,6 +69,8 @@ The status of a failed ClickHouse statement depends on the **code that ClickHous
 
 The System page routes, `/api/system/...`, have a short, fixed list of parameters. They answer 400 `unknown_parameter` to any other name. A number in a parameter is the whole text of the value, so `123abc`, ` 12` and `1e3` are not integers. The trace and metrics routes read a bad `start_ms` or `end_ms` as 400. For the other numbers of the Traces routes (`limit`, `lookback_minutes`, the duration bounds), a text that is not a number gives the default. A number outside the bounds gives the nearest bound.
 
+A run of the Query page and an export also end with three codes of their own when the run goes past a ceiling of the grant of the person (`query_scan_limit`, `query_result_limit` and `query_timeout`). The client counts what it sees, so the codes also apply when the SQL sets its own `SETTINGS`. The `error` event of a run has the code. An export writes it in `error.txt`. [access.md](access.md#limits-of-a-grant) gives the ceilings.
+
 A batch of statements (`POST /api/format` with `sqls`) answers 200 with a status for each statement. The error of a statement is in its entry. This entry has the same members and the member `index`. A statement whose meaning the formatter changes gets the status `formatted`. Its entry keeps the text as it was written, and it also has a `warning` (`format_meaning_changed`).
 
 The `clickhouse` member of a refused statement shows where ClickHouse stopped. The position counts in the text that the client sent. A text that is longer than the limit answers 422. The message gives the limit ([formatter.md](formatter.md)).

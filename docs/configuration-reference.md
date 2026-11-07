@@ -74,6 +74,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 | `max_execution_time_s` | integer | `0` | 0 to 604800 seconds | max_execution_time of a run. 0 = the settings profile of the runner user decides. A bound is never looser than the profile. |
 | `max_memory_usage` | integer | `0` | 0 to 1099511627776 bytes | max_memory_usage of a run. 0 = the settings profile of the runner user decides. |
 | `max_rows_to_read` | integer | `0` | 0 to 1000000000000000 rows | max_rows_to_read of a run. 0 = the settings profile of the runner user decides. |
+| `max_bytes_to_read` | integer | `0` | 0 to 1000000000000000 bytes | max_bytes_to_read of a run: the bytes that a run may read. 0 = the settings profile of the runner user decides. |
 
 ## `client_pool`
 
@@ -93,6 +94,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 | `timeout_ms` | integer | `60000` | 1000 to 3600000 ms | The time of one request of a page. Each statement of the request gets max_execution_time = the seconds that remain. |
 | `max_memory_usage` | integer | `4294967296` | 0 to 1099511627776 bytes | max_memory_usage of each statement that a page writes. 0 = the settings profile decides. |
 | `max_rows_to_read` | integer | `20000000000` | 0 to 1000000000000000 rows | Rows that one statement of a page may read. A statement that would read more fails with <page>_scan_limit. 0 = the settings profile decides. |
+| `max_bytes_to_read` | integer | `0` | 0 to 1000000000000000 bytes | Bytes that one statement of a page may read. A statement that would read more fails with <page>_scan_limit. 0 = the settings profile decides. |
 
 ## `admission`
 

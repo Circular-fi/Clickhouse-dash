@@ -20,6 +20,11 @@ the headers that matter and the body). The tests set its answers and read what i
                              apply to every evaluation request until the next /control/answer or /control/reset. fixed gives the
                              whole answer of each evaluation of an action, for a known subject and a valid chain, for example
                              {"fixed": {"system.read": {"decision": false, "context": {"reason": "budget_exceeded", "retry_after": 7}}}}.
+                             limits gives the ceilings of the true answers (ProcurAuth 7.3): a map from an entry ("action" or
+                             "action@<path>", the same forms as allow) to {"max_rows": 100, ...}. A true answer holds in
+                             "context": {"limits": {...}} the lowest value of each ceiling over the entries that cover the question
+                             (ProcurAuth 8.1). A false answer has no limits (7.6). Example:
+                             {"limits": {"query.run.read": {"max_rows": 100}, "query.run.read@host:local": {"max_rows": 10}}}.
     GET  /healthz            200
 
 Each evaluation follows the rules of contract 11.4: the chain of the resource (properties.ancestors and the resource) must start with
@@ -48,7 +53,7 @@ SERVICE = os.environ.get("FAKE_PDP_SERVICE", "db")
 LOCK = threading.Lock()
 RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
 DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
-                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}}
+                  "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}, "limits": {}}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
@@ -110,7 +115,23 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     fixed = (answer["fixed"] or {}).get(str((action or {}).get("name", "")))
     if isinstance(fixed, dict):
         return json.loads(json.dumps(fixed))
-    return {"decision": allowed(answer, subject, action, chain, match == "subtree")}
+    granted = allowed(answer, subject, action, chain, match == "subtree")
+    out: dict = {"decision": granted}
+    limits = ceilings_of(answer, str((action or {}).get("name", "")), chain, match == "subtree") if granted else {}
+    if limits:
+        out["context"] = {"limits": limits}
+    return out
+
+
+def ceilings_of(answer: dict, name: str, chain: list[str], subtree: bool) -> dict:
+    """The ceilings of a true answer: for each name, the lowest value of the entries of "limits" that cover the question."""
+    out: dict = {}
+    for entry, values in (answer["limits"] or {}).items():
+        if not matches(entry, name, chain, subtree) or not isinstance(values, dict):
+            continue
+        for ceiling, value in values.items():
+            out[ceiling] = min(out.get(ceiling, value), value)
+    return out
 
 
 def allowed(answer: dict, subject: dict, action: dict, chain: list[str], subtree: bool = False) -> bool:

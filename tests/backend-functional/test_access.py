@@ -226,6 +226,20 @@ def test_u05_the_actions_are_published_without_a_token():
     for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
         assert actions[name]["resource_types"] == ["service"], name
     assert all(a["description"] for a in actions.values())
+    # The six ceilings (ProcurAuth 6.1): declared once, listed by the actions that apply them (docs/access.md, "Limits of a grant").
+    ceilings = {item["name"]: item for item in doc["limits"]}
+    assert list(ceilings) == ["max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"]
+    for item in ceilings.values():
+        assert set(item) == {"name", "label", "description", "unit", "kind", "min", "max"}, item
+        assert item["kind"] == "ceiling" and item["min"] == 1 and item["min"] <= item["max"] <= 2**53, item
+        assert 0 < len(item["label"]) <= 60 and 0 < len(item["description"]) <= 300 and 0 < len(item["unit"]) <= 20, item
+    every = list(ceilings)
+    for name in ("query.run.read", "query.run.write", "query.export"):
+        assert actions[name]["limits"] == every, name
+    assert actions["explorer.read"]["limits"] == ["max_rows", "max_rows_read", "max_duration", "max_memory"]
+    assert actions["system.read"]["limits"] == ["max_rows_read", "max_rows", "max_duration"]
+    for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
+        assert "limits" not in actions[name], name
     # The member resources names the hosts: one node for each, with no actions (ProcurAuth 5.2).
     assert [r["path"] for r in doc["resources"]] == ["host:local", "host:other"], doc["resources"]
     assert all(set(r) <= {"path", "label"} and 0 < len(r["label"]) <= 60 for r in doc["resources"])
@@ -364,13 +378,95 @@ def test_budget_exceeded_gives_429_with_retry_after_and_no_reason():
 
 @needs_access
 def test_a_true_answer_with_a_ceiling_that_chdash_cannot_apply_is_a_denial():
-    # ProcurAuth 7.5: ChDash declares no ceiling for system.read, so it cannot apply max_rows.
-    answer(fixed={"system.read": {"decision": True, "context": {"limits": {"max_rows": 10}}}})
-    response = call("GET", SYSTEM)
-    assert response.status_code == 403 and response.json()["action"] == "system.read", response.text
+    # ProcurAuth 7.5: system.read lists max_rows_read, max_rows and max_duration. A ceiling that it does not list, an unknown ceiling and a
+    # value below the declared min (1) cannot be applied: the answer is false.
+    for limits in ({"max_memory": 1000}, {"max_unknown": 5}, {"max_rows": 0}, {"max_duration": 5, "max_read_size": 10}):
+        answer(fixed={"system.read": {"decision": True, "context": {"limits": limits}}})
+        response = call("GET", SYSTEM)
+        assert response.status_code == 403 and response.json()["action"] == "system.read", (limits, response.text)
+        assert "max_" not in response.text, response.text
+    # A declared ceiling is applied, not refused. A value above the declared max is not a fault either.
+    for limits in ({"max_rows": 10}, {"max_rows_read": 1000000, "max_duration": 30}, {"max_rows": 2**52}):
+        answer(fixed={"system.read": {"decision": True, "context": {"limits": limits}}})
+        assert call("GET", SYSTEM).status_code == 200, limits
     # ProcurAuth 7.6: the limits of a false answer mean nothing.
     answer(fixed={"system.read": {"decision": False, "context": {"limits": "not an object"}}})
     assert call("GET", SYSTEM).status_code == 403
+
+
+@needs_access
+def test_a_ceiling_never_turns_a_navigation_question_false():
+    # The questions of the navigation have the match "subtree": they run no operation. A true answer with a ceiling that the action
+    # does not list keeps the page and the host visible, while the operation of the route is refused.
+    answer(fixed={"system.read": {"decision": True, "context": {"limits": {"max_memory": 1000}}}})
+    assert call("GET", SYSTEM).status_code == 403
+    version = call("GET", "/api/version")
+    assert version.status_code == 200, version.text
+    assert version.json()["features"]["access"]["actions"]["system.read"] is True, version.text
+
+
+@needs_access
+def test_the_ceilings_of_the_grant_end_a_run_that_goes_past_them():
+    # The declared ceiling max_rows (query.run.read) is max_result_rows of the run.
+    answer(deny=["query.run.write"], limits={"query.run.read": {"max_rows": 3}})
+    tok = token("limited")
+    events = run_sql("SELECT number FROM numbers(10)", tok)
+    assert any(e["event"] == "error" for e in events), events
+    events = run_sql("SELECT number FROM numbers(2)", tok)
+    assert not any(e["event"] == "error" for e in events) and len(cells(events)) == 2, events
+    # With readonly = 1, ClickHouse refuses a SETTINGS clause, so the ceiling stays.
+    events = run_sql("SELECT number FROM numbers(10) SETTINGS max_result_rows = 0", tok)
+    assert any(e["event"] == "error" for e in events) and not cells(events), events
+    # A person who can also write runs without readonly = 1: the SETTINGS clause wins in ClickHouse. The backstop of ChDash counts the
+    # rows that it receives, so the run still ends with the code of the ceiling. The SQL is a read: the read ceiling applies.
+    answer(limits={"query.run.read": {"max_rows": 3}, "query.run.write": {"max_rows": 1000}})
+    events = run_sql("SELECT number FROM numbers(10) SETTINGS max_result_rows = 0", token("limited_writer"))
+    errors = [e["data"] for e in events if e["event"] == "error"]
+    assert errors and errors[0]["error_code"] == "query_result_limit", events
+    # The same holds for the rows read: the progress of ClickHouse is the count.
+    answer(limits={"query.run.read": {"max_rows_read": 100}, "query.run.write": {"max_rows_read": 100000}})
+    events = run_sql("SELECT count() FROM numbers(2000000) SETTINGS max_rows_to_read = 0, max_block_size = 1000", token("limited_writer"))
+    errors = [e["data"] for e in events if e["event"] == "error"]
+    assert errors and errors[0]["error_code"] in ("query_scan_limit", "158", "query_failed"), events
+
+
+@needs_access
+def test_a_person_with_read_and_write_gets_the_ceilings_of_the_class_of_the_sql():
+    # The read ceiling is low, the write ceiling is high. A SELECT is a read, a SET is a write.
+    answer(limits={"query.run.read": {"max_rows": 2}, "query.run.write": {"max_rows": 1000}})
+    tok = token("both")
+    events = run_sql("SELECT number FROM numbers(10)", tok)
+    assert any(e["event"] == "error" for e in events), events
+    events = run_sql("SET max_threads = 1", tok)
+    assert not any(e["event"] == "error" for e in events), events
+    # A person with query.run.write only uses the write ceilings for every statement.
+    answer(deny=["query.run.read"], limits={"query.run.read": {"max_rows": 2}, "query.run.write": {"max_rows": 1000}})
+    events = run_sql("SELECT number FROM numbers(10)", token("writer_only"))
+    assert not any(e["event"] == "error" for e in events) and len(cells(events)) == 10, events
+
+
+@needs_access
+def test_the_stream_of_an_export_asks_the_host_of_the_job():
+    # The body of the stream holds the token only. A person with grants on the host "local" only (none on the service or on "other") has
+    # an export that works: the stream asks the host of the job, not the service.
+    answer(default=False, subjects={"exporter": ["query.export@host:local", "query.run.read@host:local"]})
+    tok = token("exporter")
+    response = call("POST", "/api/export/run", tok=tok, json={"host_id": "local", "queries": ["SELECT 1 AS one"], "format": "csv"})
+    assert response.status_code == 200, response.text
+    time.sleep(CACHE_TTL + 0.2)  # the answers of the run leave the cache: the stream asks the PDP again
+    since = len(received())
+    stream = call("POST", "/api/export/stream", tok=tok, json={"token": response.json()["token"]})
+    assert stream.status_code == 200, stream.text[:300]
+    questions = [e for r in received()[since:] for e in evaluations(r)]
+    assert questions and all(e["resource"]["type"] == "host" and e["resource"]["id"] == "local" for e in questions), questions
+    # A PDP that fails answers 503 and keeps the token: the person tries again.
+    response = call("POST", "/api/export/run", tok=tok, json={"host_id": "local", "queries": ["SELECT 1 AS one"], "format": "csv"})
+    assert response.status_code == 200, response.text
+    answer(status=500)
+    failed = call("POST", "/api/export/stream", tok=tok, json={"token": response.json()["token"]})
+    assert failed.status_code == 503, failed.text
+    answer(default=False, subjects={"exporter": ["query.export@host:local", "query.run.read@host:local"]})
+    assert call("POST", "/api/export/stream", tok=tok, json={"token": response.json()["token"]}).status_code == 200
 
 
 @needs_access
@@ -457,9 +553,15 @@ def test_a_run_needs_query_run_read_or_query_run_write():
     response = call("POST", "/api/query/run", json={"host_id": "local", "sql": "SELECT 1"})
     assert response.status_code == 403 and response.json()["action"] == "query.run.read"
     # An export runs SQL: query.export alone is not enough.
-    for path in ("/api/export/run", "/api/export/stream"):
-        response = call("POST", path, json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
-        assert response.status_code == 403 and response.json()["action"] == "query.run.read", (path, response.text)
+    response = call("POST", "/api/export/run", json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
+    assert response.status_code == 403 and response.json()["action"] == "query.run.read", response.text
+    # The stream asks again on the host of the job. A token that a run made while the grants were there gets 403 once they are gone.
+    answer(default=True)
+    made = call("POST", "/api/export/run", json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
+    assert made.status_code == 200, made.text
+    answer(deny=["query.run.read", "query.run.write"])
+    response = call("POST", "/api/export/stream", json={"token": made.json()["token"]})
+    assert response.status_code == 403 and response.json()["action"] == "query.run.read", response.text
     answer(deny=["query.export"])
     response = call("POST", "/api/export/run", json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"})
     assert response.status_code == 403 and response.json()["action"] == "query.export"
