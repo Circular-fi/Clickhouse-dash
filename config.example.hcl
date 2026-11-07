@@ -328,10 +328,11 @@ access {
     # header         = "X-Identity-Token"   # never a cookie, never a query parameter
     issuer           = "https://access.example.internal"   # the iss of the tokens
     audience         = "db"                 # the name of this server: in aud, and the service id for the PDP
-    # The PEM public keys of the issuer (Ed25519 or P-256). One of public_keys, public_keys_env
-    # and public_keys_file.
+    # The public keys of the issuer (Ed25519 or P-256): PEM, or a JWK Set (a text that starts with {).
+    # One of public_keys, public_keys_env and public_keys_file.
     public_keys_file = "/run/secrets/db_identity_keys.pem"
     # max_age        = "5m"                 # exp - iat is at most this value (1s to 24h)
+    # clock_skew     = "60s"                # tolerance on exp, iat and nbf (0s to 5m). 0s: none
   }
   pdp {
     # http only: ChDash has no TLS client. Keep the network private to ChDash and the PDP.

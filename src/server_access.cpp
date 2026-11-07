@@ -159,6 +159,7 @@ void Server::init_access() {
   identity.issuer = settings.issuer;
   identity.audience = settings.audience;
   identity.max_age_ms = settings.max_age_ms;
+  identity.clock_skew_s = settings.clock_skew_ms / 1000;
   identity.keys = settings.keys;
   identity_ = std::make_unique<IdentityVerifier>(std::move(identity));
 

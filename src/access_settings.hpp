@@ -5,7 +5,7 @@
 //
 //   access {
 //     mode = "authzen"                 # or "open"
-//     identity { header, issuer, audience, public_keys | public_keys_env | public_keys_file, max_age }
+//     identity { header, issuer, audience, public_keys | public_keys_env | public_keys_file, max_age, clock_skew }
 //     pdp      { url | url_env | url_file, token_env | token_file, timeout, cache_ttl }
 //   }
 
@@ -34,6 +34,7 @@ struct AccessSettings {
   std::string audience;
   std::vector<IdentityKey> keys;
   int64_t max_age_ms = 5 * 60 * 1000;
+  int64_t clock_skew_ms = 60 * 1000;
   // pdp { }
   std::string pdp_url;
   OtlpEndpoint pdp_endpoint;

@@ -14,9 +14,10 @@
 namespace chdash {
 namespace {
 
-constexpr size_t kMaxTokenBytes = 8192;
+constexpr size_t kMaxTokenBytes = 16384;
 constexpr size_t kMaxSubjectBytes = 256;
 constexpr size_t kMaxKeys = 16;
+constexpr size_t kMaxKidBytes = 256;
 
 // The DER prefixes of a SubjectPublicKeyInfo: Ed25519 (RFC 8410), then P-256 with an uncompressed point (RFC 5480).
 constexpr uint8_t kEd25519Prefix[] = {0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00};
@@ -116,11 +117,116 @@ IdentityResult refused(const char* reason) {
   return out;
 }
 
+
+// The thumbprint input of a key (RFC 7638): the members in the order of their names, without a space.
+std::string ed25519_thumbprint(const Ed25519PublicKey& key) {
+  return thumbprint(R"({"crv":"Ed25519","kty":"OKP","x":")" + base64url_encode(key.data(), 32) + "\"}");
+}
+
+std::string p256_thumbprint(const P256PublicKey& key) {
+  return thumbprint(R"({"crv":"P-256","kty":"EC","x":")" + base64url_encode(key.data(), 32) + R"(","y":")" +
+                    base64url_encode(key.data() + 32, 32) + "\"}");
+}
+
+// The text of a JWK member that must be a string. nullptr when the member is absent. `bad` is true when it is not a string.
+const rapidjson::Value* jwk_string(const rapidjson::Value& jwk, const char* name, bool* bad) {
+  const auto it = jwk.FindMember(name);
+  if (it == jwk.MemberEnd()) return nullptr;
+  if (!it->value.IsString()) {
+    *bad = true;
+    return nullptr;
+  }
+  return &it->value;
+}
+
+// A coordinate of a JWK: base64url without padding that gives exactly 32 bytes (RFC 7518, 6.2.1.2 and RFC 8037, 2).
+bool jwk_coordinate(const rapidjson::Value& jwk, const char* name, uint8_t* out) {
+  bool bad = false;
+  const rapidjson::Value* text = jwk_string(jwk, name, &bad);
+  if (!text || bad) return false;
+  std::vector<uint8_t> bytes;
+  if (!base64_decode(std::string_view(text->GetString(), text->GetStringLength()), true, bytes) || bytes.size() != 32) return false;
+  std::memcpy(out, bytes.data(), 32);
+  return true;
+}
+
+std::optional<std::vector<IdentityKey>> parse_jwk_set(std::string_view text, std::string* error) {
+  const auto fail = [&](std::string message) -> std::optional<std::vector<IdentityKey>> {
+    if (error) *error = std::move(message);
+    return std::nullopt;
+  };
+  rapidjson::Document document;
+  if (!parse_json_bounded(document, text) || !document.IsObject()) return fail("the JWK Set is not a JSON object");
+  const auto set = document.FindMember("keys");
+  if (set == document.MemberEnd() || !set->value.IsArray()) return fail("the JWK Set has no \"keys\" array");
+  const auto& list = set->value.GetArray();
+  if (list.Empty()) return fail("no key: the \"keys\" array is empty");
+  if (list.Size() > kMaxKeys) return fail("more than " + std::to_string(kMaxKeys) + " keys");
+  std::vector<IdentityKey> keys;
+  for (const auto& jwk : list) {
+    const std::string label = "key " + std::to_string(keys.size() + 1);
+    if (!jwk.IsObject()) return fail(label + " is not a JSON object");
+    // A private member: the configuration holds public keys only.
+    for (const char* member : {"d", "p", "q", "dp", "dq", "qi", "oth", "k"}) {
+      if (jwk.HasMember(member)) return fail(label + " has the private member \"" + member + "\": give public keys only");
+    }
+    bool bad = false;
+    const rapidjson::Value* kty = jwk_string(jwk, "kty", &bad);
+    if (!kty || bad) return fail(label + " has no \"kty\" text");
+    const rapidjson::Value* crv = jwk_string(jwk, "crv", &bad);
+    if (!crv || bad) return fail(label + " has no \"crv\" text");
+    const std::string_view kty_text(kty->GetString(), kty->GetStringLength());
+    const std::string_view crv_text(crv->GetString(), crv->GetStringLength());
+    const rapidjson::Value* alg = jwk_string(jwk, "alg", &bad);
+    if (bad) return fail(label + " has an \"alg\" that is not a text");
+    const std::string_view alg_text = alg ? std::string_view(alg->GetString(), alg->GetStringLength()) : std::string_view();
+    const rapidjson::Value* kid_value = jwk_string(jwk, "kid", &bad);
+    if (bad) return fail(label + " has a \"kid\" that is not a text");
+    IdentityKey key;
+    if (kty_text == "OKP") {
+      if (crv_text != "Ed25519") return fail(label + " has kty OKP with a curve that is not Ed25519");
+      if (alg && alg_text != "Ed25519" && alg_text != "EdDSA") return fail(label + " has kty OKP with an alg that is not Ed25519");
+      key.type = IdentityKey::Type::Ed25519;
+      if (!jwk_coordinate(jwk, "x", key.ed25519.data())) return fail(label + " needs \"x\": base64url of 32 bytes");
+      key.kid = ed25519_thumbprint(key.ed25519);
+    } else if (kty_text == "EC") {
+      if (crv_text != "P-256") return fail(label + " has kty EC with a curve that is not P-256");
+      if (alg && alg_text != "ES256") return fail(label + " has kty EC with an alg that is not ES256");
+      key.type = IdentityKey::Type::P256;
+      if (!jwk_coordinate(jwk, "x", key.p256.data()) || !jwk_coordinate(jwk, "y", key.p256.data() + 32)) {
+        return fail(label + " needs \"x\" and \"y\": base64url of 32 bytes each");
+      }
+      if (!p256_public_key_valid(key.p256)) return fail(label + " is not a point of the curve P-256");
+      key.kid = p256_thumbprint(key.p256);
+    } else {
+      return fail(label + " has a kty that is not OKP or EC");
+    }
+    if (kid_value) {
+      const std::string_view declared(kid_value->GetString(), kid_value->GetStringLength());
+      if (declared.empty() || declared.size() > kMaxKidBytes || has_control(declared)) {
+        return fail(label + " has a \"kid\" that is not 1 to " + std::to_string(kMaxKidBytes) + " bytes without a control character");
+      }
+      key.kid.assign(declared.data(), declared.size());
+    }
+    for (const IdentityKey& other : keys) {
+      if (other.kid == key.kid) return fail(label + " has the same kid as an earlier key");
+    }
+    keys.push_back(std::move(key));
+  }
+  return keys;
+}
+
 } // namespace
 
 const char* identity_key_type_name(IdentityKey::Type type) { return type == IdentityKey::Type::Ed25519 ? "Ed25519" : "P-256"; }
 
 std::optional<std::vector<IdentityKey>> parse_identity_public_keys(std::string_view pem, std::string* error) {
+  // A JWK Set is a JSON object: its text starts with "{" (after the white space).
+  {
+    size_t first = 0;
+    while (first < pem.size() && (pem[first] == ' ' || pem[first] == '\t' || pem[first] == '\r' || pem[first] == '\n')) ++first;
+    if (first < pem.size() && pem[first] == '{') return parse_jwk_set(pem.substr(first), error);
+  }
   const auto fail = [&](std::string message) -> std::optional<std::vector<IdentityKey>> {
     if (error) *error = std::move(message);
     return std::nullopt;
@@ -158,13 +264,12 @@ std::optional<std::vector<IdentityKey>> parse_identity_public_keys(std::string_v
     if (der.size() == sizeof(kEd25519Prefix) + 32 && std::memcmp(der.data(), kEd25519Prefix, sizeof(kEd25519Prefix)) == 0) {
       key.type = IdentityKey::Type::Ed25519;
       std::memcpy(key.ed25519.data(), der.data() + sizeof(kEd25519Prefix), 32);
-      key.kid = thumbprint(R"({"crv":"Ed25519","kty":"OKP","x":")" + base64url_encode(key.ed25519.data(), 32) + "\"}");
+      key.kid = ed25519_thumbprint(key.ed25519);
     } else if (der.size() == sizeof(kP256Prefix) + 64 && std::memcmp(der.data(), kP256Prefix, sizeof(kP256Prefix)) == 0) {
       key.type = IdentityKey::Type::P256;
       std::memcpy(key.p256.data(), der.data() + sizeof(kP256Prefix), 64);
       if (!p256_public_key_valid(key.p256)) return fail("key " + std::to_string(index) + " is not a point of the curve P-256");
-      key.kid = thumbprint(R"({"crv":"P-256","kty":"EC","x":")" + base64url_encode(key.p256.data(), 32) + R"(","y":")" +
-                           base64url_encode(key.p256.data() + 32, 32) + "\"}");
+      key.kid = p256_thumbprint(key.p256);
     } else {
       return fail("key " + std::to_string(index) +
                   " is not an Ed25519 public key or a P-256 public key with an uncompressed point (SubjectPublicKeyInfo)");
@@ -189,7 +294,7 @@ IdentityResult IdentityVerifier::verify(std::string_view token, int64_t now_unix
     std::lock_guard<std::mutex> lock(mu_);
     const auto it = cache_.find(cache_key);
     if (it != cache_.end()) {
-      if (now_unix < it->second.expires_at) {
+      if (now_unix - options_.clock_skew_s <= it->second.expires_at) {
         IdentityResult out;
         out.ok = true;
         out.subject = it->second.subject;
@@ -204,7 +309,7 @@ IdentityResult IdentityVerifier::verify(std::string_view token, int64_t now_unix
   if (result.ok && options_.cache_entries > 0) {
     std::lock_guard<std::mutex> lock(mu_);
     if (cache_.size() >= options_.cache_entries) {
-      for (auto it = cache_.begin(); it != cache_.end();) it = it->second.expires_at <= now_unix ? cache_.erase(it) : std::next(it);
+      for (auto it = cache_.begin(); it != cache_.end();) it = it->second.expires_at < now_unix - options_.clock_skew_s ? cache_.erase(it) : std::next(it);
       if (cache_.size() >= options_.cache_entries) cache_.clear();
     }
     cache_[cache_key] = Cached{result.subject, result.expires_at};
@@ -241,16 +346,28 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
   const IdentityKey::Type type = algorithm == "Ed25519" ? IdentityKey::Type::Ed25519 : IdentityKey::Type::P256;
   // An extension that this verifier does not know must stop the token (RFC 7515, 4.1.11).
   if (header.HasMember("crit")) return refused("malformed");
-  if (const auto typ = header.FindMember("typ"); typ != header.MemberEnd()) {
-    if (!typ->value.IsString()) return refused("malformed");
-    std::string value(typ->value.GetString(), typ->value.GetStringLength());
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    if (value != "JWT") return refused("malformed");
+  // ProcurAuth 9.4: `typ` is required and is exactly "JWT" (the comparison is case-sensitive).
+  const auto typ = header.FindMember("typ");
+  if (typ == header.MemberEnd() || !typ->value.IsString() ||
+      std::string_view(typ->value.GetString(), typ->value.GetStringLength()) != "JWT") {
+    return refused("malformed");
+  }
+  // ProcurAuth 9.4: `kid` selects the key. A `kid` that is not a text stops the token. A `kid` that no key has is refused.
+  // Without `kid`, each key of the algorithm is tried.
+  std::string kid;
+  bool has_kid = false;
+  if (const auto kid_member = header.FindMember("kid"); kid_member != header.MemberEnd()) {
+    if (!kid_member->value.IsString()) return refused("malformed");
+    kid.assign(kid_member->value.GetString(), kid_member->value.GetStringLength());
+    has_kid = true;
+    const bool known = std::any_of(options_.keys.begin(), options_.keys.end(), [&](const IdentityKey& key) { return key.kid == kid; });
+    if (!known) return refused("kid");
   }
 
   bool signed_ok = false;
   for (const IdentityKey& key : options_.keys) {
     if (key.type != type) continue;
+    if (has_kid && key.kid != kid) continue;
     signed_ok = type == IdentityKey::Type::Ed25519 ? ed25519_verify(key.ed25519, signing_input, signature.data(), signature.size())
                                                    : es256_verify(key.p256, signing_input, signature.data(), signature.size());
     if (signed_ok) break;
@@ -286,7 +403,8 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
   const auto exp = numeric_date(exp_member->value);
   const auto iat = numeric_date(iat_member->value);
   if (!exp || !iat) return refused("malformed");
-  if (now_unix >= *exp) return refused("expired");
+  // ProcurAuth 9.4: a token is refused only when now > exp + skew.
+  if (now_unix - options_.clock_skew_s > *exp) return refused("expired");
   if (*iat > now_unix + options_.clock_skew_s) return refused("not_yet_valid");
   // The claims are whole seconds: a life of d seconds is at most max_age_ms when d <= max_age_ms / 1000 (the division rounds down).
   if (*exp < *iat || (*exp - *iat) > options_.max_age_ms / 1000) return refused("max_age");

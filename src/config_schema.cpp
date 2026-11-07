@@ -326,6 +326,7 @@ std::vector<EffectiveValue> effective_config(const AppConfig& cfg) {
           out.add(name, list_text(keys));
         }
         else if (name == "access.identity.max_age") out.add(name, duration_text(cfg.access.max_age_ms));
+        else if (name == "access.identity.clock_skew") out.add(name, duration_text(cfg.access.clock_skew_ms));
         else if (name == "access.pdp.url") out.add(name, cfg.access.pdp_url);
         else if (name == "access.pdp.token_env") out.add_secret("access.pdp.token");
         else if (name == "access.pdp.timeout") out.add(name, duration_text(cfg.access.pdp_timeout_ms));
