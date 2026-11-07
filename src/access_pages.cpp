@@ -180,6 +180,33 @@ std::string access_denied_page(const AccessPage& page, const std::set<std::strin
   return out;
 }
 
+std::string access_unavailable_page(const AccessPage& page) {
+  return
+      "<!doctype html>\n"
+      "<html lang=\"en\">\n"
+      "<head>\n"
+      "  <meta charset=\"utf-8\" />\n"
+      "  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />\n"
+      "  <title>ClickHouse Dash · Access check not available</title>\n"
+      "  <style>\n"
+      "    :root { color-scheme: light dark; --bg: #ffffff; --text: #1f2328; --muted: #59636e; }\n"
+      "    @media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --text: #e6edf3; --muted: #9198a1; } }\n"
+      "    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }\n"
+      "    main { max-width: 36rem; margin: 12vh auto 0; padding: 0 16px; }\n"
+      "    h1 { margin: 0 0 8px; font-size: 22px; font-weight: 600; }\n"
+      "    p { margin: 0 0 12px; color: var(--muted); }\n"
+      "  </style>\n"
+      "</head>\n"
+      "<body>\n"
+      "  <main id=\"accessUnavailable\" data-unavailable-page=\"" + std::string(page.name) + "\">\n"
+      "    <h1>ClickHouse Dash cannot check your access now</h1>\n"
+      "    <p>The access service did not give a decision for " + page.label + ". This is not a refusal of your access.</p>\n"
+      "    <p>Reload this page in a few seconds. If the problem continues, tell the administrator of ClickHouse Dash.</p>\n"
+      "  </main>\n"
+      "</body>\n"
+      "</html>\n";
+}
+
 const AccessPage* access_first_page(const std::set<std::string>& pages) {
   for (const auto& page : access_pages()) {
     if (contains(pages, page.name)) return &page;

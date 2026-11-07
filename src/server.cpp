@@ -258,6 +258,17 @@ void write_denied_page(httplib::Response& res, const httplib::Request& req, cons
   res.set_content(html, "text/html; charset=utf-8");
 }
 
+// The 503 page when the PDP gave no valid decision for the navigation (ProcurAuth 10.3): not the 403 page.
+void write_unavailable_page(httplib::Response& res, const httplib::Request& req, const AccessPage& page) {
+  log_event(LogLevel::Warn, "access.page_unavailable",
+            {{"request_id", current_request_context().request_id}, {"page", page.name}, {"path", req.path.substr(0, 512)}});
+  const std::string html = access_unavailable_page(page);
+  res.status = 503;
+  res.set_header("Cache-Control", "no-store");
+  set_page_security_policy(res, html);
+  res.set_content(html, "text/html; charset=utf-8");
+}
+
 } // namespace
 
 void Server::serve_shell(const httplib::Request& req, httplib::Response& res, const std::string& file) {
@@ -274,7 +285,9 @@ void Server::serve_shell(const httplib::Request& req, httplib::Response& res, co
   // One batch for the render. An address of the Explorer in one database also opens with explorer.read on that database.
   const std::string database = std::string(page->name) == "explorer" ? explorer_address_database(req) : std::string();
   bool database_allowed = false;
-  const std::set<std::string> pages = navigation_pages(database, &database_allowed);
+  bool failed = false;
+  const std::set<std::string> pages = navigation_pages(database, &database_allowed, &failed);
+  if (failed) return write_unavailable_page(res, req, *page);
   if (pages.count(page->name) == 0 && !database_allowed) {
     log_event(LogLevel::Info, "access.page_denied",
               {{"request_id", current_request_context().request_id}, {"page", page->name}, {"path", req.path.substr(0, 512)}});
@@ -298,7 +311,9 @@ void Server::serve_shell(const httplib::Request& req, httplib::Response& res, co
 
 void Server::serve_root(const httplib::Request& req, httplib::Response& res) {
   if (cfg_.access.enforced()) {
-    const std::set<std::string> pages = navigation_pages(std::string());
+    bool failed = false;
+    const std::set<std::string> pages = navigation_pages(std::string(), nullptr, &failed);
+    if (failed) return write_unavailable_page(res, req, *access_page("query"));
     if (pages.count("query") == 0) {
       // The root is the Query page. A human without it goes to the first page that the human can use, or gets the 403 page.
       const AccessPage* first = access_first_page(pages);
