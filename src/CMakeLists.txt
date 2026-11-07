@@ -46,10 +46,11 @@ FetchContent_Declare(
   GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
 # TLS to ClickHouse: the parameter secure=1 of a ClickHouse URI (docs/configuration.md). The client library needs OpenSSL for it.
+# TLS to the PDP (an https access.pdp.url) uses the same OpenSSL in src/pdp_transport.cpp.
 # A build with CHDASH_TLS=ON links the STATIC libraries of OpenSSL (the release binary has no shared library). tools/build_openssl.sh
 # builds the pinned version into a prefix; give the prefix with -DOPENSSL_ROOT_DIR=<prefix>. A build without CHDASH_TLS has no OpenSSL
-# and refuses secure=1 at start, with a message that names this option.
-option(CHDASH_TLS "Build the TLS client of ClickHouse (secure=1); needs the static OpenSSL, see tools/build_openssl.sh" OFF)
+# and refuses secure=1 and an https access.pdp.url at start, with a message that names this option.
+option(CHDASH_TLS "Build the TLS client of ClickHouse (secure=1) and of the PDP (https); needs the static OpenSSL, see tools/build_openssl.sh" OFF)
 if (CHDASH_TLS)
   set(OPENSSL_USE_STATIC_LIBS ON)
   set(WITH_OPENSSL ON CACHE BOOL "" FORCE)
@@ -104,7 +105,13 @@ target_compile_definitions(chdash_signatures PUBLIC
 set_target_properties(chdash_signatures PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # The access of humans (docs/access.md): the identity token, the actions and their routes, the PDP.
-set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_options.cpp access_pages.cpp access_pdp.cpp access_resource.cpp signature_verify.cpp)
+# The transport of the PDP (pdp_transport.cpp) uses OpenSSL in a build with CHDASH_TLS: every target that has these sources links it. The
+# link_libraries call is after the dependencies above, so only the targets of ChDash get it.
+if (CHDASH_TLS)
+  find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+  link_libraries(OpenSSL::SSL OpenSSL::Crypto)
+endif()
+set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_options.cpp access_pages.cpp access_pdp.cpp pdp_transport.cpp access_resource.cpp signature_verify.cpp)
 
 if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
@@ -286,7 +293,7 @@ if (CHDASH_BUILD_ACCESS_TESTS)
   # The access of humans (docs/access.md): the signature checks against the vectors of the RFCs, the PEM keys, the identity token, the
   # actions and the rule of each route, and the client of the PDP on a fake transport.
   add_executable(chdash_access_test ../tests/native/access_test.cpp
-    ${CHDASH_ACCESS_SOURCES} jwt.cpp log.cpp mcp_trace.cpp secure_random.cpp otlp_export.cpp metrics.cpp)
+    ${CHDASH_ACCESS_SOURCES} jwt.cpp log.cpp mcp_trace.cpp secure_random.cpp otlp_export.cpp metrics.cpp telemetry_settings.cpp)
   target_include_directories(chdash_access_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_access_test SYSTEM PRIVATE ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
