@@ -39,7 +39,7 @@ struct AccessFeatures {
   bool query_library = true;           // at least one library is enabled: library.read
   bool query_library_writable = true;  // at least one enabled library is writable: library.write
   bool explorer = true;                // the Explorer is on (explorer.browse or the graph): explorer.read
-  bool system = true;                  // the System page is on: system.read and system.kill_query
+  bool system = true;                  // the System page is on: system.read
   bool observability = true;           // the traces, the logs or the metrics are on for one host: observability.read
   bool mcp = true;                     // the MCP endpoint is on: mcp.keys.read and mcp.usage.read
   bool mcp_keys_write = true;          // MCP is on and the page may make keys (mcp.keys.mode is not "static"): mcp.keys.write
@@ -50,10 +50,19 @@ bool access_action_published(const AccessAction& action, const AccessFeatures& f
 // The published actions, in the order of the table.
 std::vector<AccessAction> access_published_actions(const AccessFeatures& features = AccessFeatures{});
 
-// The document of GET /.well-known/access-actions: {"server": <server>, "resource_types": [{name, parent, description}],
-// "actions": [{name, resource_types, description}]}. The types of an action are "service", then "host" and "database" when it takes them.
-// The document lists the published actions only.
-std::string access_actions_json(std::string_view server, const AccessFeatures& features = AccessFeatures{});
+// One host of the configuration, for the member "resources" of the document.
+struct AccessHostEntry {
+  std::string id;
+  std::string label;
+};
+
+// The document of GET /.well-known/procurauth/actions: {"server": <server>, "resource_types": [{name, parent, description}],
+// "actions": [{name, resource_types, description}], "resources": [{path, label}]}. The types of an action are "service", then "host" and
+// "database" when it takes them. The document lists the published actions only. "resources" has one node for each host, with the path
+// "host:<encoded id>" and the label cut to 60 characters, and no "actions" member. It is absent when `hosts` is empty. The databases are
+// not in it: the route /.well-known/procurauth/resources lists them.
+std::string access_actions_json(std::string_view server, const AccessFeatures& features = AccessFeatures{},
+                                const std::vector<AccessHostEntry>& hosts = {});
 
 // What a route needs.
 enum class AccessRuleKind {
@@ -83,6 +92,11 @@ struct AccessRule {
   bool database_param = false;
   // The host and the database are in the JSON body (a POST): the check waits until the server has read the body.
   bool body = false;
+  // A route of the Explorer that lists the databases of a host (the catalog, the storage map, the graph). When the request names no
+  // database, the question has the match "subtree" on the host: a grant on one database shows the host and lets the route run. The route
+  // then keeps only the databases with a decision "node" true (docs/access.md, "Hidden hosts"). A request that names a database asks "node"
+  // on that database, as the other routes do.
+  bool list_filter = false;
 };
 
 // The rule of a request. HEAD has the rule of GET.

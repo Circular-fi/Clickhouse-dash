@@ -41,6 +41,12 @@ std::string access_encode_id(std::string_view id);
 // example "service:db/host:prod/database:analytics". The log line access.decision and the key of the cache use it.
 std::string access_resource_path(const AccessResource& resource);
 
+// The longest label of a node, in characters (ProcurAuth 5.3c, 5.8).
+constexpr size_t kAccessMaxLabelChars = 60;
+// The label of a node: `text` cut to 60 characters (UTF-8 code points). The text is valid UTF-8 and holds no control character.
+// A text that is not valid UTF-8 gives the empty string. A control character becomes a space.
+std::string access_cut_label(std::string_view text);
+
 // The host of a resource: the id of the host node, in the resource or in its ancestors. Empty for the service.
 std::string access_resource_host(const AccessResource& resource);
 

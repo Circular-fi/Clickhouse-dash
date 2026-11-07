@@ -585,11 +585,19 @@ Server::Server(AppConfig cfg, bool start_background)
   if (cfg_.server.metrics) http_.Get("/metrics", [&](const auto& req, auto& res) { handle_metrics(req, res); });
   http_.Get("/api/version", [&](const auto& req, auto& res) { handle_api_version(req, res); });
   // These are the actions of the access of humans (docs/access.md, contract 11.4). They need no identity token. The access gateway reads them.
-  http_.Get("/.well-known/access-actions", [this](const httplib::Request&, httplib::Response& res) {
+  // The path is /.well-known/procurauth/actions only (ProcurAuth 5.1). The former path /.well-known/access-actions has no route: it gives 404.
+  http_.Get("/.well-known/procurauth/actions", [this](const httplib::Request&, httplib::Response& res) {
     res.status = 200;
     res.set_header("Cache-Control", "no-store");
-    res.set_content(access_actions_json(access_server_name(), access_features()), "application/json");
+    // A host whose name cannot be an id of a node (open mode only: the authzen mode refuses it at start) has no entry.
+    std::vector<AccessHostEntry> hosts;
+    for (const auto& host : cfg_.hosts) {
+      if (access_valid_id(host.id)) hosts.push_back(AccessHostEntry{host.id, host.label});
+    }
+    res.set_content(access_actions_json(access_server_name(), access_features(), hosts), "application/json");
   });
+  // The children of a node, for the form of the grants (ProcurAuth 5.6). It needs the identity token of the edge (access_rule: Identity).
+  http_.Get("/.well-known/procurauth/resources", scoped([&](const auto& req, auto& res) { handle_procurauth_resources(req, res); }));
   http_.Get("/api/meta", scoped([&](const auto& req, auto& res) { handle_api_meta(req, res); }));
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });
   http_.Get("/api/hosts/stream", [&](const auto& req, auto& res) { handle_api_hosts_stream(req, res); });

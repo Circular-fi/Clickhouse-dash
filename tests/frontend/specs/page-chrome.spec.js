@@ -495,7 +495,7 @@ function identityToken(sub) {
   return `${input}.${b64url(crypto.sign(null, Buffer.from(input), ACCESS_KEY))}`;
 }
 const ALL_ACTIONS = ['query.run.read', 'query.run.write', 'query.export', 'library.read', 'library.write', 'explorer.read', 'system.read',
-  'system.kill_query', 'observability.read', 'mcp.keys.read', 'mcp.keys.write', 'mcp.usage.read'];
+  'observability.read', 'mcp.keys.read', 'mcp.keys.write', 'mcp.usage.read'];
 const GRANTS = {
   'nav-querier': ['query.run.read', 'query.run.write', 'query.export'],
   'nav-explorer': ['explorer.read'],
