@@ -2,6 +2,7 @@
 // It lists the hosts (without parent) or the databases of a host (parent = host:<id>) that the human of the identity token can see.
 // A child is visible when the PDP gives true, with the match "subtree", for one published action whose resource types hold the type of the
 // child. The parser, the cursor and the page are in access_options.hpp: this file gives them the candidates and the decisions.
+// For databases, the Resource Search of the PDP can replace the questions (access_search.hpp), when access.pdp.search is true.
 #include "server.hpp"
 
 #include "access_options.hpp"
@@ -62,6 +63,8 @@ void Server::handle_procurauth_resources(const httplib::Request& req, httplib::R
   // The question for a child: each action of its type, on the child, with the match "subtree".
   std::function<AccessResource(const std::string&)> resource_of;
   std::vector<OptionsCandidate> candidates;
+  // true: the Resource Search (or a grant on the host) already decided: every candidate that is left is visible, and the PDP gets no more question.
+  bool decided_locally = false;
   if (query.type == "host") {
     for (const HostSpec& host : cfg_.hosts) candidates.push_back(OptionsCandidate{host.id, host.label});
     resource_of = [service](const std::string& id) { return access_host_resource(service, id); };
@@ -103,10 +106,22 @@ void Server::handle_procurauth_resources(const httplib::Request& req, httplib::R
     const auto cached = options_databases_cache_.get(host_id, fetch);
     if (!cached.has_value) return json_error(res, 503, "resources_unavailable", "The databases of the host cannot be read.");
     for (const std::string& name : *cached.value) candidates.push_back(OptionsCandidate{name, name});
+    // With access.pdp.search and a PDP that announces the search (docs/access.md, "Resource Search"): one search for each action gives the
+    // ids, and the candidates are the databases that exist on the host (SHOW DATABASES) and that the search returned. A grant on the host
+    // makes every database visible. Unused and Fallback keep the questions of the batch below.
+    const AccessSearchOutcome found = access_search_visible_databases(actions, host_id);
+    if (found.kind == AccessSearchKind::Covered) {
+      decided_locally = true;
+    } else if (found.kind == AccessSearchKind::Ids) {
+      decided_locally = true;
+      candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [&](const OptionsCandidate& c) { return found.ids.count(c.id) == 0; }),
+                       candidates.end());
+    }
     resource_of = [service, host_id](const std::string& id) { return access_database_resource(service, host_id, id); };
   }
 
   const OptionsDecide decide = [&](const std::vector<std::string>& ids) -> std::optional<std::vector<bool>> {
+    if (decided_locally) return std::vector<bool>(ids.size(), true);
     std::vector<AccessQuestion> questions;
     questions.reserve(ids.size() * actions.size());
     for (const std::string& id : ids) {
@@ -120,7 +135,7 @@ void Server::handle_procurauth_resources(const httplib::Request& req, httplib::R
     }
     return visible;
   };
-  const OptionsPage page = access_options_page(std::move(candidates), query, actions.size(), decide);
+  const OptionsPage page = access_options_page(std::move(candidates), query, decided_locally ? 1 : actions.size(), decide);
   if (page.failed) return access_unavailable(res, kOptionsAction);
   send_options(res, access_options_json(page, query.type == "host"));
 }

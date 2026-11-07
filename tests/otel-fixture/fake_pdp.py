@@ -35,6 +35,13 @@ the headers that matter and the body). The tests set its answers and read what i
                              the Resource Search of AuthZEN 1.0 (l.1151-1210): /control/answer "search": {"pages": [["a", "b"], ["c"]]}
                              gives each page of ids as results of the type that the request names; page.next_token is "p<N>" and the
                              request page.token "p<N>" asks page N. The metadata names this endpoint only when "search" is set.
+                             "search": {"by_action": {"explorer.read": [["a"], ["b"]]}} gives other pages to an action (an action that is
+                             not in the map gets "pages", or an empty result). "search": {"status": 500} makes only this endpoint answer
+                             that HTTP status. The search ignores the chain and the subject, like a PDP that does not read
+                             properties.ancestors (the check of the extension in docs/access.md, "Resource Search").
+
+FAKE_PDP_SEARCH (JSON, for example {"pages": []}) is the default value of "search" after each /control/reset, so that the metadata that a
+client reads at its start announces the search endpoint.
 
 The PDP echoes the X-Request-ID of a request in its response (AuthZEN 1.0, l.1449-1451) unless /control/answer has
 "echo_request_id": false.
@@ -71,7 +78,8 @@ RECEIVED: deque = deque(maxlen=MAX_REQUESTS)
 PUBLIC_URL = os.environ.get("FAKE_PDP_PUBLIC_URL", "").rstrip("/")
 DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
                   "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}, "metadata": True, "metadata_extra": {},
-                  "search": None, "echo_request_id": True, "limits": {}}
+                  "search": json.loads(os.environ["FAKE_PDP_SEARCH"]) if os.environ.get("FAKE_PDP_SEARCH") else None, "echo_request_id": True,
+                  "limits": {}}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
@@ -254,6 +262,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(int(answer["status"]), {"error": "test status"})
         echo = bool(answer["echo_request_id"])
         if self.path == "/access/v1/search/resource":
+            if (answer["search"] or {}).get("status"):
+                return self.reply(int(answer["search"]["status"]), {"error": "test search status"})
             return self.reply(200, search(answer, body), echo)
         if self.path == "/access/v1/evaluation":
             return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource"), body.get("context")), echo)
@@ -270,7 +280,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def search(answer: dict, body: dict) -> dict:
     """The page of a Resource Search: the ids of the page named by page.token ("p<N>"), as results of the type of the request."""
-    pages = (answer["search"] or {}).get("pages") or [[]]
+    config = answer["search"] or {}
+    action = str((body.get("action") or {}).get("name", ""))
+    pages = (config.get("by_action") or {}).get(action) or config.get("pages") or [[]]
     token = str(((body.get("page") or {}).get("token")) or "")
     index = int(token[1:]) if token.startswith("p") and token[1:].isdigit() else 0
     if index >= len(pages):

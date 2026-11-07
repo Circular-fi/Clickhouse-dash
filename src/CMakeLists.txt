@@ -111,7 +111,7 @@ if (CHDASH_TLS)
   find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
   link_libraries(OpenSSL::SSL OpenSSL::Crypto)
 endif()
-set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_ceilings.cpp access_options.cpp access_pages.cpp access_pdp.cpp pdp_transport.cpp access_resource.cpp signature_verify.cpp)
+set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_ceilings.cpp access_options.cpp access_pages.cpp access_pdp.cpp access_search.cpp pdp_transport.cpp access_resource.cpp signature_verify.cpp)
 
 if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)

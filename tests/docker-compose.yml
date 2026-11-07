@@ -361,6 +361,62 @@ services:
       retries: 120
       start_period: 2s
 
+  # A second fake PDP whose metadata announces the Resource Search (FAKE_PDP_SEARCH), and a server with access.pdp.search = true
+  # (tests/config/access.search.hcl). backend-functional/test_access_search.py uses them (ACCESS_SEARCH_BASE_URL, ACCESS_SEARCH_PDP_URL).
+  access_pdp_search:
+    profiles: ["test"]
+    image: chdash-tests-otel-fixture:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: ./tests/otel-fixture/Dockerfile
+    container_name: chdash-tests-access-pdp-search
+    restart: unless-stopped
+    stop_grace_period: 2s
+    entrypoint: ["python3", "/fixture/fake_pdp.py"]
+    environment:
+      FAKE_PDP_TOKEN: pdp-test-token
+      FAKE_PDP_PUBLIC_URL: http://access_pdp_search:8181
+      FAKE_PDP_SEARCH: '{"pages": []}'
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8181/healthz | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 1s
+
+  chdash_access_search:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-access-search
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+      access_pdp_search:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/access.search.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/livez | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
   chdash_mcp_identity:
     profiles: ["test"]
     image: chdash-tests-source:local
@@ -635,6 +691,10 @@ services:
         condition: service_healthy
       chdash_access:
         condition: service_healthy
+      chdash_access_search:
+        condition: service_healthy
+      access_pdp_search:
+        condition: service_healthy
       chdash_mcp_identity:
         condition: service_healthy
       access_pdp:
@@ -676,6 +736,8 @@ services:
       ACCESS_BASE_URL: http://chdash_access:8080
       MCP_IDENTITY_BASE_URL: http://chdash_mcp_identity:8080
       ACCESS_PDP_URL: http://access_pdp:8181
+      ACCESS_SEARCH_BASE_URL: http://chdash_access_search:8080
+      ACCESS_SEARCH_PDP_URL: http://access_pdp_search:8181
       ACCESS_OTLP_URL: http://access_otlp_receiver:4318
       SYSTEM_DISABLED_BASE_URL: http://chdash_system_disabled:8080
       SYSTEM_LIMITS_BASE_URL: http://chdash_system_limits:8080

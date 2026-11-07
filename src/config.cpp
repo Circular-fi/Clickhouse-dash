@@ -1069,7 +1069,7 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   }
 
   // pdp { }
-  validate_object(*pdp, "access.pdp", {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl", "ca_file", "verify"}, {});
+  validate_object(*pdp, "access.pdp", {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl", "ca_file", "verify", "search"}, {});
   const auto url = read_value_forms(*pdp, "url", "access.pdp");
   if (!url) throw std::runtime_error("access.pdp needs the address of the PDP: give one of url, url_env and url_file");
   {
@@ -1091,6 +1091,10 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   if (const auto verify = bool_attr(*pdp, "verify", "access.pdp")) {
     out.pdp_verify = *verify;
     cfg.value_sources["access.pdp.verify"] = "file";
+  }
+  if (const auto search = bool_attr(*pdp, "search", "access.pdp")) {
+    out.pdp_search = *search;
+    cfg.value_sources["access.pdp.search"] = "file";
   }
   if (const auto ca_file = string_attr(*pdp, "ca_file", "access.pdp")) {
     if (ca_file->empty()) throw std::runtime_error("access.pdp.ca_file must be the path of a file of PEM certificates, not \"\"");
