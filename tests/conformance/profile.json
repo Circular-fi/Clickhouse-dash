@@ -63,6 +63,10 @@
         "action": "library.read"
       },
       "mcp_call_plain": {
+        "headers": {
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "list_databases"
+        },
         "tool": "list_databases",
         "action": "explorer.read",
         "resource_type": "host",

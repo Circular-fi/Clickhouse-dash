@@ -1043,16 +1043,17 @@ def test_one_batch_for_the_page_hides_what_is_denied():
     access = response.json()["features"]["access"]
     assert access["mode"] == "authzen" and access["subject"] == "erin"
     assert access["actions"]["system.read"] is False and access["actions"]["mcp.keys.write"] is False
-    assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 9
-    # The decisions of each visible host: the published actions that take a host (six), on local and on other.
+    # The eight published actions of this configuration (system.kill_query is not an action since 1.3.0).
+    assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 8
+    # The decisions of each visible host: the published actions that take a host (five), on local and on other.
     assert set(access["hosts"]) == {"local", "other"}, access
     assert access["hosts"]["local"]["system.read"] is False and access["hosts"]["other"]["explorer.read"] is True
-    assert len(access["hosts"]["local"]) == 6
+    assert len(access["hosts"]["local"]) == 5
     batches = received()[before:]
     assert len(batches) == 1 and batches[0]["path"] == "/access/v1/evaluations", batches
-    # One batch: the three published actions without a host on the service (the MCP keys and usage), the six others on each of the two hosts.
+    # One batch: the three published actions without a host on the service (the MCP keys and usage), the five others on each of the two hosts.
     asked_ = evaluations(batches[0])
-    assert len(asked_) == 3 + 6 * 2
+    assert len(asked_) == 3 + 5 * 2
     assert {e["resource"]["type"] for e in asked_} == {"service", "host"}
     # The batch of the page only shows or hides the navigation: each item has the match "subtree".
     assert {e["context"].get("match") for e in asked_} == {"subtree"}
@@ -1070,8 +1071,8 @@ def test_the_mcp_endpoint_keeps_its_keys_and_needs_no_identity_token():
     # A wrong key is refused by MCP, not by the access of humans.
     response = SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
                             headers={"Content-Type": "application/json", "Authorization": "Bearer mcp_wrong"})
-    assert response.status_code == 401
-    assert response.json().get("error_code") != "unauthenticated"
+    # The 401 of the MCP endpoint has an empty body (MCP binding 5.2): the refusal of the access of humans has a JSON body.
+    assert response.status_code == 401 and response.text == "", response.text
 
 
 @needs_access

@@ -58,7 +58,7 @@ The file `tests/conformance/expected.txt` has one case id on each line. The reas
 
 | File | Use |
 |---|---|
-| `tests/config/access.conformance.hcl` | The configuration of ChDash: mode `authzen`, `pdp.cache_ttl = 0s`, one host, one query library, MCP off. |
+| `tests/config/access.conformance.hcl` | The configuration of ChDash: mode `authzen`, `pdp.cache_ttl = 0s`, one host, one query library, MCP in the mode `identity`. |
 | `tests/conformance/profile.json` | The profile of the runner: the identity token, the keys, the PDP listener and the operations. |
 | `tests/conformance/identity-keys.json` | The public keys of the two test keys of the runner, as a JWK Set with the `kid` of the profile. |
 | `tests/conformance/expected.txt` | The expected failures. |
@@ -88,37 +88,35 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 | `use_ceiling` | The same request | `explorer.read` with the ceiling `max_rows`. |
 | `use_service` | `GET /api/query-library?host_id=conf` | `library.read` on the service. |
 | `list_options` | `GET /.well-known/procurauth/resources?type=host` | The route of the options (the profile has `options_type` = `host`). |
+| `mcp_call_plain` | `POST /mcp`, `tools/call` of `list_databases` with the argument `host` = `conf` | `explorer.read` on the host `conf`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 
-The profile has no `use_budget`, `use_multi` and MCP operation. The reasons are:
+The profile has the member `mcp` (`path` = `/mcp`). It has no `use_budget`, `use_multi` and no MCP operation other than `mcp_call_plain`. The reasons are:
 
 - ChDash lists no budget in its action document. The budget cases are skipped. A PDP can still answer `budget_exceeded`. ChDash then gives `429`.
-- ChDash has no action that needs two permissions for one use, so the profile has no `use_multi`.
-- MCP is off in the configuration. The MCP cases are skipped. Add the MCP operations to the profile when ChDash accepts the identity token on `/mcp`.
+- ChDash has no action that needs two permissions for one use, so the profile has no `use_multi` and no `mcp_call_multi`.
+- ChDash has no tool that asks for input or that waits for an approval.
+
+### The headers of an MCP request
+
+The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. The MCP cases that write their own request do not send them, so they fail. These cases are in `expected.txt`. A test build that accepts a request without the two headers passes each of them (run of 2026-11-07: 79 passed, 0 failed, 20 skipped).
 
 ## Result of 2026-11-07
 
-The run used the binary of the branch `wip/conformance` (version 1.2.2 plus the merge of the ProcurAuth work: document path, resources route, token checks, PDP failure 503). The runner is the one of the ProcurAuth repository of the same day.
+The run used the binary of the branch `feat/procurauth-1.3` (the five phases of ProcurAuth: document path, resources route, token checks, PDP failures, ceilings, PDP transport and the identity mode of MCP). The runner is the one of the ProcurAuth repository of the same day.
 
 ```text
-99 cases: 59 passed, 1 failed, 38 skipped, 1 warned
+99 cases: 70 passed, 9 failed, 20 skipped
 ```
 
 | Result | Cases |
 |---|---|
-| Failed | U37 |
-| Warned | U69 |
-| Skipped, no budget action | U04, U19, U21, U22, U24, U32 to U35, U58, U62, U63, U67, U68 |
-| Skipped, no MCP endpoint | U18, U23, U25 to U31, U85 to U99 |
+| Failed (expected) | U18, U26, U29, U31, U88, U89, U91, U94, U98: the request of the case has no header `Mcp-Method` |
+| Skipped, no budget action | U04, U19, U21 to U24, U30, U32 to U35, U58, U62, U63, U67, U68, U93, U96, U97 |
+| Skipped, `mcp.session` lists no budget | U95 |
 
-### Failed case
-
-- U37 (paragraphs 7.3, 7.5 and 10.2). The PDP gives a ceiling that the action lists. ChDash declares no ceiling in this branch. It treats a `true` answer with a ceiling as `false`, and the route gives `403`. The case expects a success. The ceilings of ChDash fix this case. The line is in `expected.txt` until they are merged.
-
-### Warned case
-
-- U69 (paragraph 10.7, SHOULD). The PEP keeps its connection to the PDP open between questions. ChDash opens a new connection for each question: the runner counted four connections for four uses. This is not a failure of a MUST rule. The exit code does not change.
+U37 (a ceiling that the action lists) and U69 (the PEP keeps its connection to the PDP open) pass since the ceilings and the PDP transport.
 
 ### Notes
 
 - The cases U02, U40, U59 and U84 use `use_service`. They failed during the first run, because `GET /api/query-library` needs the parameter `host_id` (`400`). The profile has the parameter since.
-- A case that the run skips does not pass. It tests nothing. The number of skipped cases falls when ChDash declares budgets or when the profile has MCP operations.
+- A case that the run skips does not pass. It tests nothing. The number of skipped cases falls when ChDash declares budgets.

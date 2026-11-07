@@ -1460,7 +1460,7 @@ def test_log_comment_names_the_agent():
 
 
 KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_mask", "hosts", "tools", "databases", "max_rows",
-              "timeout_seconds", "subject", "creator", "expires_at", "created_at", "last_used_at"}
+              "timeout_seconds", "subject", "creator", "orphan", "expires_at", "created_at", "last_used_at"}
 
 
 @needs_mcp

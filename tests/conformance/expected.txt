@@ -1,4 +1,14 @@
 # The cases of the runner that fail today, and are known. One case id, then # and the reason.
 # tests/conformance/run.sh gives the exit code 1 for a failed case that this list does not name.
 # When a case of this list passes, the script says so: remove its line.
-U37 # ChDash declares no ceiling yet: it treats a true answer with max_rows as false (403). The ceilings of ChDash fix it (branch wip/ceilings).
+# The MCP cases below write their own request without the headers Mcp-Method and Mcp-Name. The MCP server contract (2.5, case T03)
+# makes ChDash refuse such a 2026-07-28 request with 400 and -32020 before any access check. With the two headers, each case passes.
+U18 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U26 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U29 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U31 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U88 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U89 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U91 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U94 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+U98 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).

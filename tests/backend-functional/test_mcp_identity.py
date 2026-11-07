@@ -248,6 +248,27 @@ def test_u92_a_true_answer_with_an_unknown_ceiling_is_a_refusal():
     assert response.status_code == 200 and response.json()["error"]["code"] == -32602
 
 
+@needs_identity
+def test_the_declared_ceilings_of_the_action_of_a_tool_bound_the_call():
+    # query.run.read declares the six ceilings (docs/access.md, "Actions that list ceilings"). max_rows lowers the rows of the call.
+    answer(default=True, limits={"query.run.read": {"max_rows": 2, "max_read_size": 1_000_000_000}})
+    response = call_tool("run_query", {"host": "local", "sql": "SELECT number FROM numbers(10)"})
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["isError"] is False, result
+    assert result["structuredContent"]["row_count"] == 2 and result["structuredContent"]["truncated"] is True, result
+    # max_read_size is max_bytes_to_read of the statement: a read of more bytes fails.
+    answer(default=True, limits={"query.run.read": {"max_read_size": 1}})
+    response = call_tool("run_query", {"host": "local", "sql": "SELECT sum(number) FROM numbers(1000000)"})
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["isError"] is True and result["structuredContent"]["error"]["code"] == "read_limit", result
+    # explorer.read does not declare max_read_size: the true answer is a refusal, the same as for an unknown tool (ProcurAuth 7.5).
+    answer(default=True, limits={"explorer.read": {"max_read_size": 1000}})
+    response = call_tool("list_databases", {"host": "local"})
+    assert response.status_code == 200 and response.json()["error"]["code"] == -32602, response.text
+
+
 # ---- the page API ----------------------------------------------------------------------------------------------------------
 
 
