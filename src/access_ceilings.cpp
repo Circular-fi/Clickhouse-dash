@@ -99,6 +99,36 @@ std::vector<std::string> access_action_ceilings(std::string_view action) {
   return {};
 }
 
+const std::vector<AccessBudgetInfo>& access_budget_table() {
+  static const std::vector<AccessBudgetInfo> table = {
+      {"queries", "Queries run",
+       "The number of queries that a person runs. Each run of the Query page and each run_query call of MCP takes one unit when the run "
+       "starts. The formatter, the names of the editor, the Explorer and the other pages take none.",
+       "query"},
+      {"exports", "Exports downloaded",
+       "The number of exports that a person downloads. One unit is taken when the download starts. The preparation of an export takes no "
+       "unit, so an export that nobody downloads costs nothing.",
+       "export"},
+      {"requests", "MCP requests with no tool",
+       "The number of MCP requests that read no data of a host: initialize, ping, server/discover, the notifications and the tools of the "
+       "action mcp.session. Each one takes one unit. The other tools take units from the budget of their own action.",
+       "request"},
+  };
+  return table;
+}
+
+std::vector<std::string> access_action_budgets(std::string_view action) {
+  if (action == "query.run.read" || action == "query.run.write") return {"queries"};
+  if (action == "query.export") return {"exports"};
+  if (action == "mcp.session") return {"requests"};
+  return {};
+}
+
+bool access_action_has_budget(std::string_view action, const AccessFeatures& features) {
+  const AccessAction* known = access_action(action);
+  return known && access_action_published(*known, features) && !access_action_budgets(action).empty();
+}
+
 std::set<std::string> access_declared_ceilings(std::string_view action, const AccessFeatures& features) {
   const AccessAction* known = access_action(action);
   if (!known || !access_action_published(*known, features)) return {};
@@ -163,6 +193,58 @@ void CeilingDeadline::run(uint64_t seconds) {
   expired_ = true;
   lock.unlock();
   if (on_expired_) on_expired_();
+}
+
+AccessRunUse access_run_use(SqlStatementClass sql_class, const std::function<AccessDecision(const std::string& action)>& ask,
+                            const std::function<AccessDecision(const std::string& action, bool* pdp_true)>& ask_use) {
+  AccessRunUse out;
+  const bool read_class = sql_class == SqlStatementClass::Read;
+  const std::string first = read_class ? "query.run.read" : "query.run.write";
+  const std::string second = read_class ? "query.run.write" : "query.run.read";
+  out.action = first;
+
+  // 1. The action of the use, with context.usage. A run needs one of the two run actions: the other action is no required permission
+  // (ProcurAuth 5.5a), so no question without context.usage comes before this one (10.1).
+  bool first_true = false;
+  const AccessDecision first_decision = ask_use(first, &first_true);
+  AccessDecision second_decision;
+  if (first_decision.allowed) {
+    // 2. The other action, without context.usage (6.6). It tells readonly and the ceilings of the other class. The unit is taken already:
+    // a failure here gives 503, and the unit stays counted.
+    second_decision = ask(second);
+    if (second_decision.failed) {
+      out.refusal = second_decision;
+      out.action = second;
+      return out;
+    }
+  } else {
+    // A plain false: no budget_exceeded, no failure, no true answer that was turned false or that had no units. Nothing was counted, so
+    // the PEP chooses the other action for the use, in its order of preference (10.1). It never does so after an answer that took a unit.
+    const bool plain_false = !first_decision.failed && !first_decision.usage_invalid && !first_true && first_decision.reason != PdpReason::BudgetExceeded;
+    if (!plain_false) {
+      out.refusal = first_decision;
+      return out;
+    }
+    bool second_true = false;
+    second_decision = ask_use(second, &second_true);
+    if (!second_decision.allowed) {
+      out.refusal = access_refusal_of({second_decision, first_decision});
+      if (second_decision.failed || second_decision.reason == PdpReason::BudgetExceeded) out.action = second;
+      return out;
+    }
+    out.action = second;
+  }
+  // The decision of each action is final: the action of the use has its answer with context.usage (its ceilings), the other one has the
+  // answer without it, or a plain false (after the second try, the first action).
+  const AccessDecision& read = read_class ? first_decision : second_decision;
+  const AccessDecision& write = read_class ? second_decision : first_decision;
+  out.allowed = true;
+  out.ceilings.has_read = read.allowed;
+  out.ceilings.has_write = write.allowed;
+  if (read.allowed) out.ceilings.read = access_ceilings_of(read.limits);
+  if (write.allowed) out.ceilings.write = access_ceilings_of(write.limits);
+  out.read_only = !write.allowed;
+  return out;
 }
 
 void access_enforce_ceilings(const std::string& request_id, const std::vector<AccessQuestion>& questions,

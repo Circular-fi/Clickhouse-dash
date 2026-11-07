@@ -932,6 +932,8 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
                                        : static_cast<McpToolBackend&>(*mcp_tools_);
   McpRpcResult result = mcp_handle_message(body, key, backend, info, now, headers);
   res.status = result.http_status;
+  // A spent budget on a request with no tool (binding 5.4): HTTP 429 with Retry-After.
+  if (result.http_status == 429 && result.retry_after) res.set_header("Retry-After", std::to_string(*result.retry_after));
   // A notification (202) and a refusal that has no id (binding 5.6a) have no body.
   if (result.http_status == 202 || result.body.empty()) {
     res.set_content("", 0, "application/json");

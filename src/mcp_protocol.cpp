@@ -327,7 +327,7 @@ const std::vector<std::string>& mcp_legacy_protocol_versions() {
 }
 
 bool mcp_error_retryable(const std::string& code) {
-  return code == "timeout" || code == "unavailable" || code == "api_unavailable";
+  return code == "timeout" || code == "unavailable" || code == "api_unavailable" || code == "budget_exceeded";
 }
 
 std::string mcp_error_message(const std::string& code) {
@@ -363,6 +363,25 @@ McpToolOutcome mcp_tool_error(const std::string& code, const std::string& messag
     w.Key("detail"); put(w, untrusted_detail);
     w.EndObject();
   }
+  w.EndObject();
+  w.EndObject();
+  out.json.assign(sb.GetString(), sb.GetSize());
+  return out;
+}
+
+McpToolOutcome mcp_budget_exceeded_error(uint64_t retry_after) {
+  McpToolOutcome out;
+  out.is_error = true;
+  out.error_code = "budget_exceeded";
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("error");
+  w.StartObject();
+  w.Key("code"); w.String("budget_exceeded");
+  w.Key("message"); w.String(kMcpBudgetMessage);
+  w.Key("retryable"); w.Bool(true);
+  w.Key("retry_after"); w.Uint64(retry_after);
   w.EndObject();
   w.EndObject();
   out.json.assign(sb.GetString(), sb.GetSize());
@@ -639,23 +658,29 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
   // The identity mode asks the PDP for each request with no tool (binding 3.6a): the action mcp.session on the service. A refusal
   // before the service knows the id has no body (binding 5.6a). A fixed message never holds a value of the request (binding 5.6).
   const bool identity = mcp_key_is_identity(key);
-  const auto refuse_session = [&](McpAccess access, const rapidjson::Value* error_id) {
+  const auto refuse_session = [&](McpAccess access, const rapidjson::Value* error_id, uint64_t retry_after) {
     const bool failed = access == McpAccess::Failed;
-    McpRpcResult refused = error_id ? fail(error_id, failed ? kRpcInternalError : kRpcForbidden, failed ? kMcpUnavailableMessage : kMcpForbiddenMessage,
-                                           failed ? 503 : 403)
+    // budget_exceeded: HTTP 429 with the code -31429 and data.retry_after (binding 5.4), also the header Retry-After.
+    const bool budget = access == McpAccess::BudgetExceeded;
+    const int code = failed ? kRpcInternalError : budget ? kRpcRateLimited : kRpcForbidden;
+    const int status = failed ? 503 : budget ? 429 : 403;
+    const std::string message = failed ? kMcpUnavailableMessage : budget ? kMcpRateLimitedMessage : kMcpForbiddenMessage;
+    McpRpcResult refused = error_id ? fail(error_id, code, message, status, budget ? "{\"retry_after\":" + std::to_string(retry_after) + "}" : std::string())
                                     : McpRpcResult();
     if (!error_id) {
-      refused.http_status = failed ? 503 : 403;
-      refused.rpc_error = failed ? kRpcInternalError : kRpcForbidden;
+      refused.http_status = status;
+      refused.rpc_error = code;
       refused.method = shown;
       refused.trace = trace;
     }
+    if (budget) refused.retry_after = retry_after;
     return refused;
   };
 
   if (!id) {
     // A notification.
-    if (const McpAccess access = backend.session_permitted(key); access != McpAccess::Allowed) return refuse_session(access, nullptr);
+    uint64_t retry_after = 0;
+    if (const McpAccess access = backend.session_permitted(key, &retry_after); access != McpAccess::Allowed) return refuse_session(access, nullptr, retry_after);
     McpRpcResult accepted;
     accepted.http_status = 202;
     accepted.method = shown;
@@ -737,8 +762,9 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
   }
 
   if (name != "tools/list" && name != "tools/call") {
-    if (const McpAccess access = backend.session_permitted(key); access != McpAccess::Allowed) {
-      McpRpcResult refused = refuse_session(access, id);
+    uint64_t retry_after = 0;
+    if (const McpAccess access = backend.session_permitted(key, &retry_after); access != McpAccess::Allowed) {
+      McpRpcResult refused = refuse_session(access, id, retry_after);
       refused.modern = modern;
       refused.protocol_version = request_version;
       refused.client_name = result.client_name;
@@ -818,6 +844,15 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
       refused.client_name = result.client_name;
       refused.client_version = result.client_version;
       return refused;
+    }
+    if (access == McpAccess::BudgetExceeded) {
+      // A spent budget is a tool error, not a JSON-RPC error (binding 5.3). The tool never runs.
+      result.tool_called = true;
+      result.outcome = mcp_budget_exceeded_error(call.retry_after.value_or(1));
+      mcp_frame_untrusted(result.outcome.json);
+      const bool structured_budget = modern || protocol_has_structured_content(request_version);
+      result.body = tool_call_body(*id, result.outcome, structured_budget, modern);
+      return result;
     }
     if (access != McpAccess::Allowed) {
       // The identity mode copies nothing of the request into a message (binding 5.6).

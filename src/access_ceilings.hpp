@@ -86,6 +86,27 @@ const std::vector<AccessCeilingInfo>& access_ceiling_table();
 // The names of the ceilings that an action lists, in the order of the table. Empty for an action without ceilings.
 std::vector<std::string> access_action_ceilings(std::string_view action);
 
+// The declaration of one budget (ProcurAuth 6.1): the name is the plural noun of the thing that it counts, with no unit and no window.
+struct AccessBudgetInfo {
+  const char* name;
+  const char* label;        // 60 characters at most
+  const char* description;  // 300 characters at most
+  const char* unit;         // 20 characters at most
+};
+
+// The three budgets, in the order of the document: queries (query.run.read, query.run.write), exports (query.export) and requests
+// (mcp.session).
+const std::vector<AccessBudgetInfo>& access_budget_table();
+
+// The names of the budgets that an action lists. Empty for an action without a budget. A budget is counted at the use of the action
+// (ProcurAuth 6.2), and the use is the run of SQL, the download of an export or a request of MCP that calls no tool: pages, probes, the
+// formatter and the other questions of display take no unit (docs/access.md, "Budgets").
+std::vector<std::string> access_action_budgets(std::string_view action);
+
+// True when the document lists a budget on `action` with these features: the action is published and has a budget. Only then the use of the
+// action sends a question with context.usage (ProcurAuth 6.4). A route that the document lists with no budget sends none.
+bool access_action_has_budget(std::string_view action, const AccessFeatures& features);
+
 // The ceilings that the document declares for `action` with these features: the list of access_action_ceilings when the
 // action is published, else nothing. ChDash applies these ceilings and no other one (ProcurAuth 7.5).
 std::set<std::string> access_declared_ceilings(std::string_view action, const AccessFeatures& features);

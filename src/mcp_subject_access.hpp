@@ -2,9 +2,13 @@
 
 // The identity mode of the MCP endpoint (docs/mcp.md, "The identity mode"; ProcurAuth MCP binding 3 to 5): the subject of each request
 // comes from the identity token, and the PDP decides each request for this subject. The service has no key of its own then.
-//   - A request with no tool asks mcp.session on the service (binding 3.6a).
+//   - A request with no tool asks mcp.session on the service (binding 3.6a). When the document lists a budget on mcp.session (`requests`),
+//     the request is one use: the question has context.usage (binding 3.6a, protocol 6.4).
 //   - tools/list asks one question for each action of the tools, on the service, with the match "subtree" (binding 4.1).
 //   - tools/call asks the action of the tool on the resource that the arguments name: the host, or the database of the host (binding 3.2).
+//     The tool run_query runs SQL: it is a use of query.run.read, which lists the budget `queries`, so its question has context.usage
+//     (binding 3.4). The tools of the action mcp.session (list_hosts, the analysis of the key itself) are uses of the budget `requests`.
+//     The other tools run no SQL of the person and ask without it.
 // The subject is opaque: it can be a person or a key of the portal ("key:..."). The code reads no meaning from it.
 // Pure code: the decisions come from a function that the server gives (PdpClient::decide), so the tests use fakes.
 
@@ -32,13 +36,16 @@ const char* mcp_tool_identity_action(const McpToolInfo& tool);
 class McpSubjectAccess {
 public:
   using Decide = std::function<std::vector<AccessDecision>(const std::string& subject, const std::vector<AccessQuestion>& questions)>;
+  // The question of a use, with context.usage (PdpClient::decide_use). Without this function (the tests), no question has context.usage.
+  using DecideUse = std::function<AccessDecision(const std::string& subject, const AccessQuestion& question)>;
 
   // `service_id` is the id of the service resource (access.identity.audience). `hosts` are the hosts that MCP reaches (the hosts with
   // mcp_uri): a host that is not in this list is never sent to the PDP as a host. `features` give the published actions.
-  McpSubjectAccess(std::string service_id, std::vector<std::string> hosts, AccessFeatures features, Decide decide);
+  McpSubjectAccess(std::string service_id, std::vector<std::string> hosts, AccessFeatures features, Decide decide, DecideUse decide_use = {});
 
-  // mcp.session on the service. One question.
-  McpAccess session(const std::string& subject);
+  // mcp.session on the service. One question: with context.usage when the document lists a budget on mcp.session. For BudgetExceeded,
+  // *retry_after (when it is not null) receives the seconds.
+  McpAccess session(const std::string& subject, uint64_t* retry_after = nullptr);
   // The tools of `tools` whose action is published and true. One batch: one item for each action, on the service, match "subtree".
   // nullopt when one decision failed.
   std::optional<std::vector<std::string>> list(const std::string& subject, std::vector<std::string> tools);
@@ -48,6 +55,9 @@ public:
   std::optional<AccessQuestion> call_question(const McpToolInfo& tool, const rapidjson::Value& arguments) const;
   // The decision of a call. For Allowed, `call` receives the ceilings (the lowest of the actions of the tool) and, for list_hosts, the
   // hosts that the person can see. A true answer with a ceiling that the action of the tool does not declare is Denied (ProcurAuth 7.5).
+  // A tool that runs SQL (run_query) asks with context.usage when its action lists a budget and the question names a node: the call is
+  // one use. A true answer without context.usage.units is Denied (6.12). For BudgetExceeded, `call->retry_after` has the seconds. A call
+  // without a host asks "subtree" and runs nothing: it is no use, and it asks without usage.
   McpAccess call(const std::string& subject, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call);
 
 private:
@@ -58,6 +68,7 @@ private:
   std::vector<std::string> hosts_;
   AccessFeatures features_;
   Decide decide_;
+  DecideUse decide_use_;
 };
 
 // The backend of one request in the identity mode: the checks of McpSubjectAccess for the subject of the request, and the tools of `inner`.
@@ -79,7 +90,7 @@ public:
   McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
     return access_.call(key.subject, tool, arguments, call);
   }
-  McpAccess session_permitted(const McpKey& key) override { return access_.session(key.subject); }
+  McpAccess session_permitted(const McpKey& key, uint64_t* retry_after) override { return access_.session(key.subject, retry_after); }
 
 private:
   McpToolBackend& inner_;

@@ -28,6 +28,7 @@ extern "C" {
 #include <monocypher-ed25519.h>
 }
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -642,7 +643,7 @@ std::string rule_text(const char* method, const char* path) {
     case AccessRuleKind::Exempt: return "exempt";
     case AccessRuleKind::Identity: return "identity";
     case AccessRuleKind::Action: return std::string(rule.action) + where;
-    case AccessRuleKind::Run: return "run" + where;
+    case AccessRuleKind::Run: return "run" + where + (rule.spend ? " spend" : "");
     case AccessRuleKind::Export: return "export" + where;
     case AccessRuleKind::Unknown: return "unknown";
   }
@@ -659,8 +660,8 @@ void test_route_rules() {
       {"HEAD", "/static/app_common.js", "identity"},
       {"GET", "/api/version", "identity"}, {"GET", "/api/hosts", "identity"}, {"GET", "/api/hosts/stream", "identity"}, {"GET", "/api/health", "identity"},
       {"GET", "/api/meta", "run@host/database"}, {"POST", "/api/format", "run@host body"},
-      {"POST", "/api/query/run", "run@host body"}, {"POST", "/api/query", "run@host body"}, {"GET", "/api/query/stream", "identity"},
-      {"POST", "/api/query/cancel", "identity"}, {"POST", "/api/query/analysis", "run@host body"}, {"POST", "/api/query/deep-analysis", "run@host body"},
+      {"POST", "/api/query/run", "run@host body spend"}, {"POST", "/api/query", "run@host body spend"}, {"GET", "/api/query/stream", "identity"},
+      {"POST", "/api/query/cancel", "identity"}, {"POST", "/api/query/analysis", "run@host body"}, {"POST", "/api/query/deep-analysis", "run@host body spend"},
       {"GET", "/api/query/deep-analysis", "run@host"}, {"POST", "/api/query/deep-analysis/cancel", "identity"}, {"GET", "/api/query/execution", "run@host"},
       {"POST", "/api/export/run", "export@host body"}, {"POST", "/api/export/stream", "identity"}, {"GET", "/api/export/stream", "export@host"},
       {"GET", "/api/traces/search", "observability.read@host"}, {"GET", "/api/traces/logs", "observability.read@host"}, {"GET", "/api/logs/meta", "observability.read@host"},
@@ -1493,13 +1494,20 @@ void check_document_limits(const rapidjson::Document& doc) {
     for (const auto& member : item.GetObject()) CHECK(allowed.count(member.name.GetString()) == 1);
     for (const char* key : {"name", "label", "description", "unit", "kind"}) CHECK(item.HasMember(key) && item[key].IsString());
     const std::string name = item["name"].GetString();
+    const std::string kind = item["kind"].GetString();
     CHECK(is_limit_name(name));
     CHECK(declared.insert(name).second);  // a name is unique in the document (6.1)
-    CHECK(name.rfind("max_", 0) == 0);    // the name of a ceiling is max_ and a noun (7.1)
-    CHECK(std::string(item["kind"].GetString()) == "ceiling");
-    CHECK(item.HasMember("min") && item["min"].IsUint64() && item.HasMember("max") && item["max"].IsUint64());
-    CHECK(item["min"].GetUint64() <= item["max"].GetUint64());
-    CHECK(item["min"].GetUint64() == 1);
+    CHECK(kind == "ceiling" || kind == "budget");
+    if (kind == "ceiling") {
+      CHECK(name.rfind("max_", 0) == 0);  // the name of a ceiling is max_ and a noun (7.1)
+      CHECK(item.HasMember("min") && item["min"].IsUint64() && item.HasMember("max") && item["max"].IsUint64());
+      CHECK(item["min"].GetUint64() <= item["max"].GetUint64());
+      CHECK(item["min"].GetUint64() == 1);
+    } else {
+      // A budget has neither min nor max, and its name is a plural noun that never starts with max_ (6.1, 7.1).
+      CHECK(name.rfind("max_", 0) != 0 && name.back() == 's');
+      CHECK(!item.HasMember("min") && !item.HasMember("max"));
+    }
     // A reader must accept 60 characters of label, 300 of description and 20 of unit (5.3c).
     CHECK(code_points(item["label"].GetString()) >= 1 && code_points(item["label"].GetString()) <= 60);
     CHECK(code_points(item["description"].GetString()) >= 1 && code_points(item["description"].GetString()) <= 300);
@@ -1529,7 +1537,9 @@ void test_ceilings_in_the_document() {
     names.push_back(item["name"].GetString());
     units[item["name"].GetString()] = item["unit"].GetString();
   }
-  CHECK((names == std::vector<std::string>{"max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"}));
+  // The six ceilings come first, then the budgets that a published action lists (all three: the default features publish mcp.session).
+  CHECK((names == std::vector<std::string>{"max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory", "queries",
+                                           "exports", "requests"}));
   CHECK_EQ(units["max_rows_read"], std::string("rows"));
   CHECK_EQ(units["max_read_size"], std::string("bytes"));
   CHECK_EQ(units["max_rows"], std::string("rows"));
@@ -1546,12 +1556,18 @@ void test_ceilings_in_the_document() {
     listed[action["name"].GetString()] = list;
   }
   const std::vector<std::string> all = {"max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"};
-  for (const char* name : {"query.run.read", "query.run.write", "query.export"}) CHECK(listed[name] == all);
+  // The budgets follow the ceilings: queries on the two run actions, exports on the export.
+  std::vector<std::string> with_queries = all;
+  with_queries.push_back("queries");
+  std::vector<std::string> with_exports = all;
+  with_exports.push_back("exports");
+  CHECK(listed["query.run.read"] == with_queries && listed["query.run.write"] == with_queries && listed["query.export"] == with_exports);
+  CHECK((listed["mcp.session"] == std::vector<std::string>{"requests"}));
   CHECK((listed["explorer.read"] == std::vector<std::string>{"max_rows", "max_rows_read", "max_duration", "max_memory"}));
   CHECK((listed["system.read"] == std::vector<std::string>{"max_rows_read", "max_rows", "max_duration"}));
   CHECK((listed["observability.read"] == std::vector<std::string>{"max_rows_read", "max_rows", "max_duration"}));
   for (const char* name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(listed[name].empty());
-  // The table of the code and the document agree, and no budget is declared.
+  // The table of the code and the document agree.
   for (const AccessCeilingInfo& info : access_ceiling_table()) {
     CHECK(code_points(info.label) <= 60 && code_points(info.description) <= 300 && code_points(info.unit) <= 20);
     CHECK(info.schema_max >= 1 && info.schema_max <= (uint64_t(1) << 53));
@@ -1793,7 +1809,406 @@ void test_ceilings_follow_the_published_actions() {
   std::set<std::string> published;
   for (const auto& action : doc["actions"].GetArray()) published.insert(action["name"].GetString());
   CHECK((published == std::set<std::string>{"query.run.read", "query.run.write", "query.export"}));
-  for (const auto& action : doc["actions"].GetArray()) CHECK(action["limits"].Size() == 6);
+  // The six ceilings and the one budget of the action.
+  for (const auto& action : doc["actions"].GetArray()) CHECK(action["limits"].Size() == 7);
+  // The budget `requests` belongs to mcp.session: without that action, it is not declared.
+  for (const auto& item : doc["limits"].GetArray()) CHECK(std::string(item["name"].GetString()) != "requests");
+}
+
+// ---- the budgets (docs/access.md, "Budgets"; ProcurAuth 6.1, 6.4, 10.1) ---------------------------------------------------------
+
+void test_budgets_in_the_document() {
+  // The table: three budgets, plural names with no unit and no window, never max_.
+  const auto& table = access_budget_table();
+  CHECK_EQ(table.size(), size_t(3));
+  for (const AccessBudgetInfo& info : table) {
+    const std::string name = info.name;
+    CHECK(name.back() == 's' && name.rfind("max_", 0) != 0 && name.find("per") == std::string::npos);
+    CHECK(code_points(info.label) >= 1 && code_points(info.label) <= 60);
+    CHECK(code_points(info.description) >= 1 && code_points(info.description) <= 300);
+    CHECK(code_points(info.unit) >= 1 && code_points(info.unit) <= 20);
+  }
+  // The owner's choice: queries on the two run actions, exports on the export, requests on mcp.session; none on the pages, the library and
+  // the MCP keys.
+  CHECK((access_action_budgets("query.run.read") == std::vector<std::string>{"queries"}));
+  CHECK((access_action_budgets("query.run.write") == std::vector<std::string>{"queries"}));
+  CHECK((access_action_budgets("query.export") == std::vector<std::string>{"exports"}));
+  CHECK((access_action_budgets("mcp.session") == std::vector<std::string>{"requests"}));
+  for (const char* name : {"explorer.read", "system.read", "observability.read", "library.read", "library.write", "mcp.keys.read", "mcp.keys.write",
+                           "mcp.usage.read", "unknown", "access"}) {
+    CHECK(access_action_budgets(name).empty());
+  }
+  // The question of a use goes out only for an action that the document lists with a budget: the action must be published.
+  AccessFeatures all;
+  CHECK(access_action_has_budget("query.run.read", all) && access_action_has_budget("query.export", all) && access_action_has_budget("mcp.session", all));
+  CHECK(!access_action_has_budget("explorer.read", all) && !access_action_has_budget("library.read", all));
+  AccessFeatures keys_mode = all;
+  keys_mode.mcp_session = false;
+  CHECK(!access_action_has_budget("mcp.session", keys_mode));
+
+  // The document: the budget declarations have kind "budget" and neither min nor max. `requests` is declared only with mcp.session.
+  rapidjson::Document doc = parse_json(access_actions_json("db"));
+  check_document_limits(doc);
+  std::map<std::string, std::string> kinds;
+  for (const auto& item : doc["limits"].GetArray()) kinds[item["name"].GetString()] = item["kind"].GetString();
+  CHECK(kinds["queries"] == "budget" && kinds["exports"] == "budget" && kinds["requests"] == "budget" && kinds["max_rows"] == "ceiling");
+  doc = parse_json(access_actions_json("db", keys_mode));
+  check_document_limits(doc);
+  kinds.clear();
+  for (const auto& item : doc["limits"].GetArray()) kinds[item["name"].GetString()] = item["kind"].GetString();
+  CHECK(kinds.count("queries") == 1 && kinds.count("exports") == 1 && kinds.count("requests") == 0);
+  for (const auto& action : doc["actions"].GetArray()) CHECK(std::string(action["name"].GetString()) != "mcp.session");
+  // 256 hosts and the nine declarations stay inside the 64 KiB of a reader (5.3c).
+  std::vector<AccessHostEntry> hosts;
+  for (int i = 0; i < 256; ++i) hosts.push_back({"clickhouse-prod-" + std::to_string(1000 + i), "Host " + std::to_string(i)});
+  CHECK(access_actions_json("db", AccessFeatures{}, hosts).size() <= 64 * 1024);
+  // A grant never gives a budget in context.limits (7.3): a budget name in the limits of an answer is not a ceiling.
+  CHECK(!access_ceilings_enforceable({{"queries", 5}}, "query.run.read", all));
+}
+
+// A transport that counts the two kinds of POST apart, and gives scripted answers. A question with context.usage must go by post_once.
+struct UseTransport : PdpTransport {
+  struct Call {
+    bool once = false;
+    std::string path;
+    std::string body;
+    std::chrono::milliseconds timeout{0};
+  };
+  std::vector<Call> calls;
+  std::vector<PdpHttpResult> script;  // one answer for each call, in order; the last one repeats
+  std::chrono::milliseconds delay{0};
+  std::string metadata;  // a metadata document for GET, or empty for a 404
+
+  PdpHttpResult next() {
+    const size_t index = std::min(calls.size() - 1, script.empty() ? size_t(0) : script.size() - 1);
+    if (delay.count() > 0) std::this_thread::sleep_for(delay);
+    return script.empty() ? PdpHttpResult{} : script[index];
+  }
+  PdpHttpResult post(const std::string& path, const std::string& body, const std::vector<std::pair<std::string, std::string>>&,
+                     std::chrono::milliseconds timeout) override {
+    calls.push_back({false, path, body, timeout});
+    return next();
+  }
+  PdpHttpResult post_once(const std::string& path, const std::string& body, const std::vector<std::pair<std::string, std::string>>&,
+                          std::chrono::milliseconds timeout) override {
+    calls.push_back({true, path, body, timeout});
+    return next();
+  }
+  PdpHttpResult get(const std::string&, const std::vector<std::pair<std::string, std::string>>&, std::chrono::milliseconds) override {
+    PdpHttpResult out;
+    out.status = metadata.empty() ? 404 : 200;
+    out.body = metadata;
+    return out;
+  }
+  size_t once_calls() const {
+    size_t n = 0;
+    for (const Call& call : calls) n += call.once ? 1 : 0;
+    return n;
+  }
+};
+
+void test_pdp_use() {
+  const AccessQuestion read{"query.run.read", access_host_resource("db", "prod")};
+  // The body: ONE evaluation (no "evaluations"), with context.usage = {"units": 1}. The chain of the resource is in it.
+  const std::string text = PdpClient::use_request_body("alice", read);
+  rapidjson::Document body = parse_json(text);
+  CHECK(!body.HasMember("evaluations") && body["subject"]["id"].GetString() == std::string("alice"));
+  CHECK(body["action"]["name"].GetString() == std::string("query.run.read"));
+  CHECK(body["resource"]["type"].GetString() == std::string("host") && body["resource"]["properties"]["ancestors"][0]["id"].GetString() == std::string("db"));
+  CHECK(body["context"].IsObject() && body["context"].MemberCount() == 1 && body["context"]["usage"].MemberCount() == 1);
+  CHECK(body["context"]["usage"]["units"].IsUint() && body["context"]["usage"]["units"].GetUint() == 1);
+  CHECK(!body["context"].HasMember("match"));
+  // A question without usage never carries it.
+  CHECK(PdpClient::request_body("alice", {read}).find("usage") == std::string::npos);
+
+  auto transport = std::make_unique<UseTransport>();
+  UseTransport* fake = transport.get();
+  PdpOptions options;
+  options.token = "secret-token";
+  options.timeout = std::chrono::milliseconds(100);
+  options.cache_ttl = std::chrono::seconds(60);
+  PdpClient client(options, std::move(transport));
+  const PdpCallContext context;
+  const auto answer = [&](const std::string& json) { fake->script = {ok(json)}; };
+
+  // A true answer with units 1: allowed, with its ceilings. One request, by post_once, never by post, on the evaluation endpoint. The
+  // answer is never kept: the next use asks again (ProcurAuth 10.1).
+  answer(R"({"decision":true,"context":{"usage":{"units":1},"limits":{"max_rows":50}}})");
+  AccessDecision one = client.decide_use("alice", read, context);
+  CHECK(one.allowed && !one.failed && one.usage_units == uint64_t(1) && one.limits.at("max_rows") == 50 && std::string(one.source) == "pdp");
+  CHECK_EQ(fake->calls.size(), size_t(1));
+  CHECK(fake->calls[0].once && fake->calls[0].path == "/access/v1/evaluation");
+  CHECK(fake->calls[0].body.find(R"("usage":{"units":1})") != std::string::npos);
+  CHECK(client.decide_use("alice", read, context).allowed);
+  CHECK(client.decide_use("alice", read, context).allowed);
+  CHECK_EQ(fake->calls.size(), size_t(3));
+  CHECK_EQ(fake->once_calls(), size_t(3));
+  CHECK_EQ(client.cached_entries(), size_t(0));
+
+  // A true answer with units 0: allowed, and kept for cache_ttl at most. The kept answer lets the next use run with no question.
+  fake->calls.clear();
+  answer(R"({"decision":true,"context":{"usage":{"units":0}}})");
+  CHECK(client.decide_use("bob", read, context).usage_units == uint64_t(0));
+  const AccessDecision kept = client.decide_use("bob", read, context);
+  CHECK(kept.allowed && std::string(kept.source) == "cache" && kept.usage_units == uint64_t(0));
+  CHECK_EQ(fake->calls.size(), size_t(1));
+
+  // The entries of the uses are apart from the other answers (10.1): a question without usage never answers a use, and a use never
+  // answers a question without usage.
+  fake->calls.clear();
+  answer(R"({"decision":true})");
+  CHECK(client.decide("carol", {read}, context)[0].allowed);
+  CHECK_EQ(fake->calls.size(), size_t(1));
+  CHECK(!client.decide("carol", {read}, context)[0].failed && fake->calls.size() == 1);  // the kept answer of the question without usage
+  CHECK(!fake->calls[0].once);
+  answer(R"({"decision":true,"context":{"usage":{"units":1}}})");
+  CHECK(client.decide_use("carol", read, context).allowed);  // asks: the kept true answer never starts a use
+  CHECK_EQ(fake->calls.size(), size_t(2));
+  CHECK(fake->calls[1].once);
+  answer(R"({"decision":true,"context":{"usage":{"units":0}}})");
+  CHECK(client.decide_use("dave", read, context).allowed);
+  answer(R"({"decision":false})");
+  CHECK(!client.decide("dave", {read}, context)[0].allowed);  // asks: the kept use does not answer a question without usage
+  CHECK(client.decide("dave", {read}, context)[0].allowed == false && std::string(client.decide("dave", {read}, context)[0].source) == "cache");
+
+  // A true answer without units is false (6.12): no reason, no ceiling, a flag for the caller, and nothing is kept.
+  fake->calls.clear();
+  answer(R"({"decision":true,"context":{"limits":{"max_rows":9}}})");
+  const AccessDecision no_units = client.decide_use("erin", read, context);
+  CHECK(!no_units.allowed && !no_units.failed && no_units.usage_invalid && no_units.limits.empty() && !no_units.usage_units);
+  CHECK(access_outcome(no_units) == AccessOutcome::Denied);
+  CHECK(!client.decide_use("erin", read, context).allowed);
+  CHECK_EQ(fake->calls.size(), size_t(2));
+
+  // budget_exceeded: the outcome of a 429 with retry_after. It is kept for the lower of retry_after and cache_ttl, and the kept answer gives
+  // the time that remains (never more than the first value).
+  fake->calls.clear();
+  answer(R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":12}})");
+  const AccessDecision spent = client.decide_use("frank", read, context);
+  CHECK(access_outcome(spent) == AccessOutcome::BudgetExceeded && spent.retry_after == uint64_t(12) && !spent.usage_invalid);
+  const AccessDecision again = client.decide_use("frank", read, context);
+  CHECK(std::string(again.source) == "cache" && access_outcome(again) == AccessOutcome::BudgetExceeded);
+  CHECK(again.retry_after && *again.retry_after >= 1 && *again.retry_after <= 12);
+  CHECK_EQ(fake->calls.size(), size_t(1));
+  // A plain false is not kept; its refusal is a 403.
+  fake->calls.clear();
+  answer(R"({"decision":false})");
+  CHECK(access_outcome(client.decide_use("gina", read, context)) == AccessOutcome::Denied);
+  client.decide_use("gina", read, context);
+  CHECK_EQ(fake->calls.size(), size_t(2));
+  // A retry_after that is not a whole number from 1 makes the answer not valid: failed (503).
+  for (const char* bad : {R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":0}})",
+                          R"({"decision":false,"context":{"reason":"budget_exceeded","retry_after":"12"}})",
+                          R"({"decision":false,"context":{"reason":"budget_exceeded"}})"}) {
+    answer(bad);
+    CHECK(client.decide_use("hank", read, context).failed);
+  }
+
+  // 10.6: a timeout, a lost answer, a status that is not 200 and a body that is not an answer give a failed decision, and the client sends
+  // the question ONE time. Nothing sends it again: neither post nor a second post_once.
+  PdpHttpResult lost;
+  lost.error = "timeout";
+  PdpHttpResult status500;
+  status500.status = 500;
+  status500.body = R"({"decision":true,"context":{"usage":{"units":1}}})";
+  PdpHttpResult status400;
+  status400.status = 400;
+  for (const PdpHttpResult& result : {lost, status500, status400, ok("not json"), ok(R"({"evaluations":[{"decision":true}]})"), ok(R"({"decision":true,"context":{"usage":{"units":2}}})")}) {
+    fake->calls.clear();
+    fake->script = {result};
+    const AccessDecision failed = client.decide_use("ivy", read, context);
+    CHECK(failed.failed && !failed.allowed && access_outcome(failed) == AccessOutcome::Failed);
+    CHECK_EQ(fake->calls.size(), size_t(1));
+    CHECK(fake->calls[0].once);
+  }
+  // A late answer is a failure too, also when the body is a true answer that took a unit.
+  fake->calls.clear();
+  fake->delay = std::chrono::milliseconds(160);
+  answer(R"({"decision":true,"context":{"usage":{"units":1}}})");
+  CHECK(client.decide_use("ivy", read, context).failed);
+  CHECK_EQ(fake->calls.size(), size_t(1));
+  fake->delay = std::chrono::milliseconds(0);
+
+  // 6.11: the match "subtree" never goes with context.usage. The client sends nothing and fails closed.
+  fake->calls.clear();
+  const AccessDecision subtree = client.decide_use("jon", AccessQuestion{"query.run.read", access_host_resource("db", "prod"), AccessMatch::Subtree}, context);
+  CHECK(subtree.failed && fake->calls.empty());
+}
+
+// The wait for a question with usage is longer than procurauth_usage_max_seconds (6.9, 10.6), and it is the wait that the transport gets.
+void test_pdp_use_waits_for_the_pdp() {
+  auto transport = std::make_unique<UseTransport>();
+  UseTransport* fake = transport.get();
+  fake->metadata = R"({"policy_decision_point":"http://pdp.test","access_evaluation_endpoint":"http://pdp.test/access/v1/evaluation",)"
+                   R"("access_evaluations_endpoint":"http://pdp.test/access/v1/evaluations","procurauth_usage_max_seconds":3})";
+  fake->script = {ok(R"({"decision":true,"context":{"usage":{"units":1}}})")};
+  PdpOptions options;
+  options.timeout = std::chrono::milliseconds(500);
+  options.cache_ttl = std::chrono::seconds(0);
+  options.discovery = true;
+  options.identifier = "http://pdp.test";
+  PdpClient client(options, std::move(transport));
+  CHECK(client.decide_use("alice", AccessQuestion{"query.export", access_host_resource("db", "prod")}, PdpCallContext{}).allowed);
+  CHECK_EQ(fake->calls.size(), size_t(1));
+  CHECK(fake->calls[0].once);
+  CHECK_EQ(fake->calls[0].timeout.count(), int64_t(4000));
+  CHECK_EQ(client.usage_timeout().count(), int64_t(4000));
+  // The questions without usage keep their own wait.
+  fake->script = {ok(R"({"decision":true})")};
+  client.decide("alice", {AccessQuestion{"query.export", access_host_resource("db", "prod")}}, PdpCallContext{});
+  CHECK(!fake->calls.back().once && fake->calls.back().timeout.count() == 500);
+}
+
+// The use of a run (access_run_use): the questions, their order, and the refusals.
+struct RunScript {
+  std::map<std::string, AccessDecision> plain;
+  std::map<std::string, AccessDecision> use;
+  std::map<std::string, bool> pdp_true;
+  std::vector<std::string> plain_asked;
+  std::vector<std::string> use_asked;
+
+  AccessRunUse run(SqlStatementClass sql_class) {
+    plain_asked.clear();
+    use_asked.clear();
+    return access_run_use(
+        sql_class,
+        [&](const std::string& action) {
+          plain_asked.push_back(action);
+          return plain[action];
+        },
+        [&](const std::string& action, bool* took) {
+          use_asked.push_back(action);
+          if (took) *took = pdp_true.count(action) ? pdp_true[action] : use[action].allowed;
+          return use[action];
+        });
+  }
+};
+
+AccessDecision run_true(PdpLimits limits = {}, std::optional<uint64_t> units = std::nullopt) {
+  AccessDecision out;
+  out.allowed = true;
+  out.source = "pdp";
+  out.limits = std::move(limits);
+  out.usage_units = units;
+  return out;
+}
+AccessDecision run_false() {
+  AccessDecision out;
+  out.source = "pdp";
+  return out;
+}
+AccessDecision run_failed() {
+  AccessDecision out;
+  out.failed = true;
+  return out;
+}
+AccessDecision run_budget(uint64_t retry_after) {
+  AccessDecision out;
+  out.source = "pdp";
+  out.reason = PdpReason::BudgetExceeded;
+  out.retry_after = retry_after;
+  return out;
+}
+
+void test_run_use() {
+  // A read, the person has both actions: the action of the use (read) is asked with usage, one time, and nothing before it. Then the other
+  // action (write) is asked without usage. The ceilings of each action come from its own answer; the answer of the use gives the ceilings
+  // of the use.
+  RunScript s;
+  s.plain["query.run.write"] = run_true({{"max_rows", 7}});
+  s.use["query.run.read"] = run_true({{"max_rows", 50}}, 1);
+  AccessRunUse out = s.run(SqlStatementClass::Read);
+  CHECK(out.allowed && out.action == "query.run.read" && !out.read_only);
+  CHECK((s.plain_asked == std::vector<std::string>{"query.run.write"}) && (s.use_asked == std::vector<std::string>{"query.run.read"}));
+  CHECK(out.ceilings.has_read && out.ceilings.has_write && out.ceilings.read.max_rows == 50 && out.ceilings.write.max_rows == 7);
+  CHECK_EQ(out.ceilings.resolve(SqlStatementClass::Read).max_rows, uint64_t(50));
+  // The action of the use is never asked without usage (ProcurAuth 10.1).
+  CHECK(std::find(s.plain_asked.begin(), s.plain_asked.end(), "query.run.read") == s.plain_asked.end());
+
+  // A read, the person has read only: readonly = 1.
+  s = RunScript{};
+  s.plain["query.run.write"] = run_false();
+  s.use["query.run.read"] = run_true({}, 1);
+  out = s.run(SqlStatementClass::Read);
+  CHECK(out.allowed && out.read_only && out.ceilings.has_read && !out.ceilings.has_write);
+  CHECK_EQ(s.use_asked.size(), size_t(1));
+
+  // A write, the person has both: the use is query.run.write, the other action is query.run.read.
+  for (const SqlStatementClass sql_class : {SqlStatementClass::Write, SqlStatementClass::Unsure}) {
+    s = RunScript{};
+    s.plain["query.run.read"] = run_true();
+    s.use["query.run.write"] = run_true({{"max_duration", 5}}, 1);
+    out = s.run(sql_class);
+    CHECK(out.allowed && out.action == "query.run.write" && !out.read_only);
+    CHECK((s.plain_asked == std::vector<std::string>{"query.run.read"}) && (s.use_asked == std::vector<std::string>{"query.run.write"}));
+    CHECK(out.ceilings.write.max_duration == 5);
+  }
+
+  // The person who holds only the other action: a plain false of the first use, then the other action with usage (10.1, in the order of
+  // preference). Two questions with usage, never more; the first took nothing. No question without usage is needed.
+  s = RunScript{};
+  s.use["query.run.read"] = run_false();
+  s.use["query.run.write"] = run_true({{"max_rows", 4}}, 1);
+  out = s.run(SqlStatementClass::Read);
+  CHECK(out.allowed && out.action == "query.run.write" && !out.read_only && !out.ceilings.has_read && out.ceilings.has_write);
+  CHECK((s.use_asked == std::vector<std::string>{"query.run.read", "query.run.write"}) && s.plain_asked.empty());
+  CHECK_EQ(out.ceilings.write.max_rows, uint64_t(4));
+
+  // Neither action is true: two questions with usage, and the refusal is a 403 that names the first action.
+  s = RunScript{};
+  s.use["query.run.read"] = run_false();
+  s.use["query.run.write"] = run_false();
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Denied && out.action == "query.run.read");
+  CHECK_EQ(s.use_asked.size(), size_t(2));
+  CHECK(s.plain_asked.empty());
+  // The second try gives budget_exceeded or a failure: the refusal is the one of the second answer.
+  s.use["query.run.write"] = run_budget(8);
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::BudgetExceeded && out.refusal.retry_after == uint64_t(8) && out.action == "query.run.write");
+  s.use["query.run.write"] = run_failed();
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed);
+
+  // budget_exceeded: 429 with the retry_after of the PDP; nothing else is asked (the case U04 of the runner has no other answer).
+  s = RunScript{};
+  s.use["query.run.read"] = run_budget(12);
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::BudgetExceeded && out.refusal.retry_after == uint64_t(12));
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.empty());
+
+  // A failure of the use: 503, and nothing else is asked.
+  s = RunScript{};
+  s.use["query.run.read"] = run_failed();
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed);
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.empty());
+
+  // A failure of the other action, after the use took its unit: 503. The unit stays counted.
+  s = RunScript{};
+  s.plain["query.run.write"] = run_failed();
+  s.use["query.run.read"] = run_true({}, 1);
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Failed && out.action == "query.run.write");
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.size() == 1);
+
+  // A true answer without units (the client gives false with usage_invalid): 403, and the other action is not tried.
+  s = RunScript{};
+  s.plain["query.run.write"] = run_true();
+  AccessDecision invalid = run_false();
+  invalid.usage_invalid = true;
+  s.use["query.run.read"] = invalid;
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && access_outcome(out.refusal) == AccessOutcome::Denied);
+  CHECK(s.use_asked.size() == 1 && s.plain_asked.empty());
+
+  // A true answer that the server turned false because of a ceiling that it cannot apply: the PDP took the unit, so no second question.
+  s = RunScript{};
+  s.plain["query.run.write"] = run_true();
+  s.use["query.run.read"] = run_false();
+  s.pdp_true["query.run.read"] = true;
+  out = s.run(SqlStatementClass::Read);
+  CHECK(!out.allowed && s.use_asked.size() == 1 && s.plain_asked.empty());
 }
 
 void test_options_parser() {
@@ -1988,6 +2403,10 @@ int main() {
   RUN(test_ceiling_meter);
   RUN(test_ceiling_deadline);
   RUN(test_ceilings_follow_the_published_actions);
+  RUN(test_budgets_in_the_document);
+  RUN(test_pdp_use);
+  RUN(test_pdp_use_waits_for_the_pdp);
+  RUN(test_run_use);
   RUN(test_options_parser);
   RUN(test_options_page);
   RUN(pdp_cases::test_pdp_chunks);

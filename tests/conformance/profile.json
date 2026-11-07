@@ -26,7 +26,8 @@
     "answer_cache": false,
     "options_type": "host",
     "mcp": {
-      "path": "/mcp"
+      "path": "/mcp",
+      "session_budget": true
     },
     "operations": {
       "use_plain": {
@@ -57,6 +58,23 @@
         "ceiling": "max_rows",
         "ceiling_value": 100
       },
+      "use_budget": {
+        "method": "POST",
+        "path": "/api/query/run",
+        "body": {
+          "host_id": "conf",
+          "sql": "SELECT 1"
+        },
+        "action": "query.run.read",
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ]
+      },
       "use_service": {
         "method": "GET",
         "path": "/api/query-library?host_id=conf",
@@ -79,6 +97,26 @@
         ],
         "arguments": {
           "host": "conf"
+        }
+      },
+      "mcp_call_budget": {
+        "headers": {
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "run_query"
+        },
+        "tool": "run_query",
+        "action": "query.run.read",
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "arguments": {
+          "host": "conf",
+          "sql": "SELECT 1"
         }
       }
     }

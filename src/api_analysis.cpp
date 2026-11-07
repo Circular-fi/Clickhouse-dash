@@ -893,8 +893,14 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
     return json_error(res, 503, "server_stopping", "the server is stopping");
   }
 
-  // The statement of the job is the SQL of the person: the ceilings of the action that fits it apply (docs/access.md, "Limits of a grant").
-  access_classify_sql({record->original_sql});
+  // The replay runs the SQL of the person again: it is one use of query.run.read or query.run.write, and it takes one unit of the budget
+  // `queries` (docs/access.md, "Budgets"). The place of the job is taken, and the job is new: a request that finds a running job
+  // (above) and a request that the admission refuses take no unit. The check also sets the ceilings of the action that fits the SQL.
+  if (!access_use_run(res, host_id, {record->original_sql})) {
+    deep_jobs_.discard(started.job_id);
+    group->leave();
+    return;
+  }
   ChQueryLimits limits = user_sql_limits(req, "chdash-deep-analysis");
   // The request ends, but the job keeps running. The job stops by its own cancel, or when the server stops.
   const std::shared_ptr<DeepJobControl> control = started.control;

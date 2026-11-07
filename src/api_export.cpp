@@ -505,6 +505,15 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
             : preflight_error);
   }
 
+  // The use of the export (docs/access.md, "Budgets"): the stream takes the unit of the budget `exports`, after every check that can refuse
+  // the stream for another reason and before any SQL runs. A refusal (403, 429 with Retry-After, 503) puts the job back, so the client can
+  // ask again with the same token while the token lives.
+  if (!access_use_export(res, claims->host_id)) {
+    active_exports_.fetch_sub(1, std::memory_order_acq_rel);
+    export_jobs_->put(std::move(*job));
+    return;
+  }
+
   const bool multi = job->queries.size() > 1;
   res.status = 200;
   res.set_header("Cache-Control", "no-store, no-transform");

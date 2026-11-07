@@ -25,6 +25,18 @@ the headers that matter and the body). The tests set its answers and read what i
                              "context": {"limits": {...}} the lowest value of each ceiling over the entries that cover the question
                              (ProcurAuth 8.1). A false answer has no limits (7.6). Example:
                              {"limits": {"query.run.read": {"max_rows": 100}, "query.run.read@host:local": {"max_rows": 10}}}.
+                             usage gives the budgets (ProcurAuth section 6): a map from an action name to the rules of its questions with
+                             "context": {"usage": {"units": 1}}. A question with usage gets the decision of the grants first; only a true
+                             answer takes units (6.5) and has "context": {"usage": {"units": N}} (6.12). The rules of an action:
+                             "units": 0 or 1 (default 1) gives the units of the true answer; "amount": N counts the units of each
+                             (subject, action) and gives false with "reason": "budget_exceeded" and "retry_after" ("retry_after", default
+                             12) when N units are taken; "exceeded": R always gives budget_exceeded with retry_after R; "omit_units": true
+                             gives a true answer without usage.units (the PEP must treat it as false); "status": S answers with the HTTP
+                             status S; "drop": true closes the connection with no answer; "delay_ms": D waits D ms before the answer. An
+                             action with no rule gives units 1. The counters start again at /control/reset and at /control/answer.
+                             The PDP follows 6.11: a request with context.usage at any level that is not one evaluation (an
+                             Access Evaluation request, or an Access Evaluations request without items), or with "match": "subtree",
+                             or with units other than 1, gets HTTP 400 and counts nothing.
     GET  /healthz            200
     GET  /.well-known/authzen-configuration
                              404 by default (a PDP without metadata). With FAKE_PDP_PUBLIC_URL (the base URL that the clients
@@ -79,7 +91,8 @@ PUBLIC_URL = os.environ.get("FAKE_PDP_PUBLIC_URL", "").rstrip("/")
 DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [], "unknown_subjects": [], "subjects": {}, "status": 200,
                   "delay_ms": 0, "parents": {"host": "service", "database": "host"}, "fixed": {}, "metadata": True, "metadata_extra": {},
                   "search": json.loads(os.environ["FAKE_PDP_SEARCH"]) if os.environ.get("FAKE_PDP_SEARCH") else None, "echo_request_id": True,
-                  "limits": {}}
+                  "limits": {}, "usage": {}}
+COUNTERS: dict = {}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
@@ -124,8 +137,35 @@ def matches(entry: str, name: str, chain: list[str], subtree: bool = False) -> b
     return subtree and granted[: len(chain)] == chain
 
 
+def usage_of(context) -> dict | None:
+    """The context.usage of an evaluation context, or None."""
+    usage = context.get("usage") if isinstance(context, dict) else None
+    return usage if isinstance(usage, dict) else None
+
+
+def take_units(answer: dict, subject: dict, action: dict, out: dict) -> dict:
+    """Add the units of a use to a true answer, or turn it into budget_exceeded (ProcurAuth 6.5, 6.12, 11.1). `out` is the true answer."""
+    name = str((action or {}).get("name", ""))
+    rules = (answer["usage"] or {}).get(name) or {}
+    if rules.get("exceeded"):
+        return {"decision": False, "context": {"reason": "budget_exceeded", "retry_after": int(rules["exceeded"])}}
+    units = int(rules.get("units", 1))
+    if rules.get("amount") is not None and units > 0:
+        key = (str((subject or {}).get("id", "")), name)
+        with LOCK:
+            used = COUNTERS.get(key, 0)
+            if used + units > int(rules["amount"]):
+                return {"decision": False, "context": {"reason": "budget_exceeded", "retry_after": int(rules.get("retry_after", 12))}}
+            COUNTERS[key] = used + units
+    context = dict(out.get("context") or {})
+    if not rules.get("omit_units"):
+        context["usage"] = {"units": units}
+    return {"decision": True, "context": context}
+
+
 def decide(subject: dict, action: dict, resource: dict, context: dict | None = None) -> dict:
-    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject, resource or match."""
+    """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject, resource or match.
+    A question with context.usage takes units from a true answer (take_units)."""
     with LOCK:
         answer = dict(ANSWER)
     if context is None:
@@ -146,6 +186,8 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     limits = ceilings_of(answer, str((action or {}).get("name", "")), chain, match == "subtree") if granted else {}
     if limits:
         out["context"] = {"limits": limits}
+    if granted and usage_of(context) is not None:
+        return take_units(answer, subject, action, out)
     return out
 
 
@@ -233,10 +275,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/control/reset":
             with LOCK:
                 RECEIVED.clear()
+                COUNTERS.clear()
                 ANSWER = dict(DEFAULT_ANSWER)
             return self.reply(200, {"ok": True})
         if self.path == "/control/answer":
             with LOCK:
+                COUNTERS.clear()
                 ANSWER = dict(DEFAULT_ANSWER)
                 ANSWER.update({k: v for k, v in body.items() if k in DEFAULT_ANSWER})
             return self.reply(200, {"ok": True})
@@ -261,6 +305,18 @@ class Handler(BaseHTTPRequestHandler):
         if answer["status"] != 200:
             return self.reply(int(answer["status"]), {"error": "test status"})
         echo = bool(answer["echo_request_id"])
+        if not usage_request_valid(self.path, body):
+            # ProcurAuth 6.11: the PDP counts nothing.
+            return self.reply(400, {"error": "context.usage is not valid here"}, echo)
+        rules = usage_rules(answer, self.path, body)
+        if rules.get("delay_ms"):
+            time.sleep(int(rules["delay_ms"]) / 1000.0)
+        if rules.get("drop"):
+            # No answer: the connection closes. The units of this request are not taken here, but the PEP cannot know it.
+            self.close_connection = True
+            return
+        if rules.get("status"):
+            return self.reply(int(rules["status"]), {"error": "test status"}, echo)
         if self.path == "/access/v1/search/resource":
             if (answer["search"] or {}).get("status"):
                 return self.reply(int(answer["search"]["status"]), {"error": "test search status"})
@@ -276,6 +332,29 @@ class Handler(BaseHTTPRequestHandler):
             context = item["context"] if "context" in item else body.get("context")
             out.append(decide(subject, action, resource, context))
         return self.reply(200, {"evaluations": out}, echo)
+
+
+def usage_request_valid(path: str, body: dict) -> bool:
+    """ProcurAuth 6.11: context.usage only in a request with one evaluation, never with the match "subtree", units 1."""
+    contexts = [body.get("context")] + [item.get("context") for item in (body.get("evaluations") or []) if isinstance(item, dict)]
+    usages = [usage_of(c) for c in contexts if isinstance(c, dict) and "usage" in c]
+    if not usages:
+        return True
+    if path == "/access/v1/search/resource" or body.get("evaluations"):
+        return False
+    context = body.get("context") or {}
+    if context.get("match", "node") != "node":
+        return False
+    usage = usage_of(context)
+    return usage is not None and usage.get("units") == 1 and len(usage) == 1
+
+
+def usage_rules(answer: dict, path: str, body: dict) -> dict:
+    """The rules of /control/answer "usage" for the action of a request with context.usage (delay, drop, status), else {}."""
+    if path != "/access/v1/evaluation" or usage_of(body.get("context")) is None:
+        return {}
+    rules = (answer["usage"] or {}).get(str((body.get("action") or {}).get("name", "")))
+    return rules if isinstance(rules, dict) else {}
 
 
 def search(answer: dict, body: dict) -> dict:

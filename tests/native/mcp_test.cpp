@@ -6421,6 +6421,145 @@ void test_identity_access() {
 }
 
 // The protocol in the identity mode, with the backend of the subject and a fake PDP (conformance cases U25 to U31, U85 to U99).
+// The budgets of the identity mode (binding 3.4, 3.6a, 5.3, 5.4; ProcurAuth 6.4, 6.12, 10.1): a request with no tool, the tool run_query and
+// the tools of the action mcp.session are uses and ask with context.usage. The other tools ask as before.
+void test_identity_budgets() {
+  struct UsePdp {
+    std::vector<std::pair<std::string, AccessQuestion>> asked;
+    AccessDecision answer;
+  };
+  UsePdp use;
+  IdentityPdp pdp;
+  const chdash_test::GrantRules rules("db");
+  pdp.grants["alice"] = {"mcp.session@service:db", "explorer.read@service:db", "query.run.read@service:db", "system.read@service:db"};
+  const McpSubjectAccess::DecideUse use_fn = [&use](const std::string& subject, const AccessQuestion& question) {
+    use.asked.emplace_back(subject, question);
+    return use.answer;
+  };
+  McpSubjectAccess access("db", {"prod", "stage"}, AccessFeatures{}, identity_decide(pdp, rules), use_fn);
+  const auto granted = [](std::optional<uint64_t> units, PdpLimits limits = {}) {
+    AccessDecision d;
+    d.allowed = true;
+    d.source = "pdp";
+    d.usage_units = units;
+    d.limits = std::move(limits);
+    return d;
+  };
+  const auto spent = [](uint64_t retry_after) {
+    AccessDecision d;
+    d.source = "pdp";
+    d.reason = PdpReason::BudgetExceeded;
+    d.retry_after = retry_after;
+    return d;
+  };
+  const rapidjson::Document none = args_of("{}");
+  const auto prod = args_of(R"({"host":"prod","sql":"select 1"})");
+
+  // mcp.session: one question with usage, and none without it.
+  use.answer = granted(1);
+  const size_t plain_before = pdp.asked.size();
+  CHECK(access.session("alice") == McpAccess::Allowed);
+  CHECK_EQ(use.asked.size(), size_t(1));
+  CHECK_EQ(question_text(use.asked.back().second), std::string("mcp.session@service:db"));
+  CHECK_EQ(pdp.asked.size(), plain_before);
+  uint64_t retry = 0;
+  use.answer = spent(12);
+  CHECK(access.session("alice", &retry) == McpAccess::BudgetExceeded && retry == 12);
+  use.answer = AccessDecision{};
+  CHECK(access.session("alice") == McpAccess::Denied);
+  use.answer.failed = true;
+  CHECK(access.session("alice") == McpAccess::Failed);
+
+  // run_query: one use of query.run.read on the host of the call, with usage. No question without usage.
+  use.asked.clear();
+  use.answer = granted(1, {{"max_rows", 2}});
+  McpCallInfo info;
+  CHECK(access.call("alice", *mcp_find_tool("run_query"), prod, &info) == McpAccess::Allowed);
+  CHECK_EQ(use.asked.size(), size_t(1));
+  CHECK_EQ(question_text(use.asked.back().second), std::string("query.run.read@service:db/host:prod"));
+  CHECK(info.ceilings.max_rows && *info.ceilings.max_rows == 2);  // the ceilings of the answer with usage
+  CHECK_EQ(pdp.asked.size(), plain_before);
+  // A budget that is spent: BudgetExceeded with retry_after. A true answer without units is false (6.12): Denied.
+  use.answer = spent(30);
+  McpCallInfo spent_info;
+  CHECK(access.call("alice", *mcp_find_tool("run_query"), prod, &spent_info) == McpAccess::BudgetExceeded);
+  CHECK(spent_info.retry_after == uint64_t(30));
+  use.answer = AccessDecision{};
+  use.answer.usage_invalid = true;
+  CHECK(access.call("alice", *mcp_find_tool("run_query"), prod, &info) == McpAccess::Denied);
+  // A ceiling that the action does not list in the answer with usage: Denied (ProcurAuth 7.5).
+  use.answer = granted(1, {{"max_conformance_unknown", 5}});
+  CHECK(access.call("alice", *mcp_find_tool("run_query"), prod, &info) == McpAccess::Denied);
+  use.answer = AccessDecision{};
+  use.answer.failed = true;
+  CHECK(access.call("alice", *mcp_find_tool("run_query"), prod, &info) == McpAccess::Failed);
+
+  // The other tools ask without usage: a tool of the Explorer, explain_query, system, and a call of run_query without a host (nothing runs).
+  use.asked.clear();
+  use.answer = granted(1);
+  CHECK(access.call("alice", *mcp_find_tool("list_databases"), args_of(R"({"host":"prod"})"), &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("explain_query"), prod, &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("system_overview"), args_of(R"({"host":"prod"})"), &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("run_query"), none, &info) == McpAccess::Allowed);
+  CHECK(use.asked.empty());
+  // The tools of the action mcp.session are uses of its budget.
+  CHECK(access.call("alice", *mcp_find_tool("list_hosts"), none, &info) == McpAccess::Allowed);
+  CHECK_EQ(use.asked.size(), size_t(1));
+  CHECK_EQ(question_text(use.asked.back().second), std::string("mcp.session@service:db"));
+
+  // Without the function of the uses (the tests of the other cases), or without the action in the document, no question has usage.
+  McpSubjectAccess plain("db", {"prod"}, AccessFeatures{}, identity_decide(pdp, rules));
+  use.asked.clear();
+  CHECK(plain.session("alice") == McpAccess::Allowed && plain.call("alice", *mcp_find_tool("run_query"), prod, &info) == McpAccess::Allowed);
+  CHECK(use.asked.empty());
+  AccessFeatures no_session;
+  no_session.mcp_session = false;
+  McpSubjectAccess keys_features("db", {"prod"}, no_session, identity_decide(pdp, rules), use_fn);
+  CHECK(keys_features.session("alice") == McpAccess::Allowed && use.asked.empty());
+
+  // The protocol: HTTP 429 with -31429 on a request with no tool, the tool error on tools/call.
+  FakeBackend inner;
+  McpSubjectAccess served("db", {"prod", "stage"}, AccessFeatures{}, identity_decide(pdp, rules), use_fn);
+  McpSubjectTools backend(inner, served);
+  McpServerInfo server;
+  const McpKey key = mcp_identity_key("alice");
+  const int64_t now = 1'800'000'000;
+  const std::string meta = R"({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})";
+  use.answer = spent(12);
+  const auto ping = mcp_handle_message(rpc("ping", meta, "7"), key, backend, server, now, modern_headers("ping"));
+  CHECK_EQ(ping.http_status, 429);
+  CHECK_EQ(ping.rpc_error, kRpcRateLimited);
+  CHECK(ping.retry_after == uint64_t(12));
+  CHECK_EQ(ping.body, std::string(R"({"jsonrpc":"2.0","id":7,"error":{"code":-31429,"message":"rate_limited","data":{"retry_after":12}}})"));
+  // A notification: the refusal comes before the id is known, so it has no body, and it keeps the status and the seconds.
+  const auto note = mcp_handle_message(R"({"jsonrpc":"2.0","method":"notifications/initialized"})", key, backend, server, now, McpRequestHeaders{});
+  CHECK_EQ(note.http_status, 429);
+  CHECK(note.body.empty() && note.retry_after == uint64_t(12));
+  // tools/call: HTTP 200 and a tool error with the fixed message; the tool never runs.
+  const std::string call = rpc("tools/call", R"({"name":"run_query","arguments":{"host":"prod","sql":"select 1"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}})");
+  const auto refused = mcp_handle_message(call, key, backend, server, now, modern_headers("tools/call", "run_query"));
+  CHECK_EQ(refused.http_status, 200);
+  CHECK(inner.calls.empty());
+  const auto doc = parse(refused.body);
+  CHECK(!doc.HasMember("error"));
+  CHECK_EQ(std::string(doc["result"]["resultType"].GetString()), std::string("complete"));
+  CHECK(doc["result"]["isError"].GetBool());
+  const auto& error = doc["result"]["structuredContent"]["error"];
+  CHECK_EQ(std::string(error["code"].GetString()), std::string("budget_exceeded"));
+  CHECK(error["retryable"].GetBool() && error["retry_after"].GetUint64() == 12);
+  CHECK_EQ(std::string(error["message"].GetString()), std::string("The budget of this action is spent."));
+  CHECK_EQ(std::string(doc["result"]["content"][0]["text"].GetString()),
+           std::string(R"({"error":{"code":"budget_exceeded","message":"The budget of this action is spent.","retryable":true,"retry_after":12}})"));
+  CHECK_EQ(refused.outcome.error_code, std::string("budget_exceeded"));
+  // The reason of the PDP is in no answer.
+  CHECK(!contains(ping.body, "budget_exceeded") && !contains(refused.body, "reason"));
+  // With a budget left, the call runs with the ceilings of the answer.
+  use.answer = granted(1);
+  const auto ran = mcp_handle_message(call, key, backend, server, now, modern_headers("tools/call", "run_query"));
+  CHECK_EQ(ran.http_status, 200);
+  CHECK_EQ(inner.calls.size(), size_t(1));
+}
+
 void test_identity_protocol() {
   struct Spy : FakeBackend {
     McpCeilings ceilings;
@@ -6737,6 +6876,7 @@ void test_identity_usage_bound() {
 void test_identity_mode(const std::string& dir) {
   test_identity_key_and_ceilings();
   test_identity_access();
+  test_identity_budgets();
   test_identity_protocol();
   test_identity_tools();
   test_identity_usage(dir);

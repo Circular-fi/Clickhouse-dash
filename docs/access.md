@@ -144,7 +144,8 @@ ChDash publishes its actions at `GET /.well-known/procurauth/actions`, without a
     { "path": "host:prod", "label": "Production" }
   ],
   "limits": [
-    { "name": "max_rows", "label": "Most rows in the result of one run", "description": "...", "unit": "rows", "kind": "ceiling", "min": 1, "max": 1000000000000000 }
+    { "name": "max_rows", "label": "Most rows in the result of one run", "description": "...", "unit": "rows", "kind": "ceiling", "min": 1, "max": 1000000000000000 },
+    { "name": "queries", "label": "Queries run", "description": "...", "unit": "query", "kind": "budget" }
   ]
 }
 ```
@@ -171,9 +172,9 @@ The navigation follows the document: a page whose actions are not published has 
 
 | Action | Resource types | Routes |
 |---|---|---|
-| `query.run.read` | `service`, `host`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta` |
+| `query.run.read` | `service`, `host`, `database` | `POST /api/query/run`, `POST /api/query`, `POST /api/query/analysis`, `POST` and `GET /api/query/deep-analysis`, `GET /api/query/execution`, `POST /api/format`, `GET /api/meta`. A run, and the start of Deep Analyze, take a unit of the budget `queries` ([Budgets](#budgets)). |
 | `query.run.write` | `service`, `host`, `database` | The same routes. Without it, the statements of a run run with `readonly = 1`. |
-| `query.export` | `service`, `host` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. The stream asks the actions on the host of the export (refer to [The stream of an export](#the-stream-of-an-export)). |
+| `query.export` | `service`, `host` | `POST /api/export/run`, `/api/export/stream`. An export also needs `query.run.read` or `query.run.write`. The stream asks the actions on the host of the export (refer to [The stream of an export](#the-stream-of-an-export)). The stream takes a unit of the budget `exports` ([Budgets](#budgets)). |
 | `library.read` | `service` | `GET /api/query-library...` |
 | `library.write` | `service` | `POST`, `PATCH` and `DELETE /api/query-library...` |
 | `explorer.read` | `service`, `host`, `database` | `/api/explorer/...`, except `/api/explorer/ops/...` |
@@ -182,13 +183,13 @@ The navigation follows the document: a page whose actions are not published has 
 | `mcp.keys.read` | `service` | `GET /api/mcp/keys`, `GET /api/mcp/keys/<id>/access`, `GET /api/mcp/access` |
 | `mcp.keys.write` | `service` | `POST /api/mcp/keys`, `DELETE /api/mcp/keys/<id>`, `POST /api/mcp/keys/<id>/adopt` |
 | `mcp.usage.read` | `service` | `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET /api/mcp/keys/<id>/usage`, `GET /api/mcp/keys/<id>/cost` |
-| `mcp.session` | `service` | `POST /mcp` in the mode `identity`: each request that calls no tool, and the tools that use no action of the pages |
+| `mcp.session` | `service` | `POST /mcp` in the mode `identity`: each request that calls no tool, and the tools that use no action of the pages. Each one takes a unit of the budget `requests` ([Budgets](#budgets)). |
 
 The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
 
 A route that is not in this table is refused with `403` and the action `unknown` (fail closed), and the log has the line `access.no_rule`. A path that has no route gets `404`.
 
-The member `limits` of the document declares the six ceilings, and each action lists the names of its ceilings (refer to [Limits of a grant](#limits-of-a-grant)).
+The member `limits` of the document declares the six ceilings and the three budgets, and each action lists the names of its limits (refer to [Limits of a grant](#limits-of-a-grant) and [Budgets](#budgets)).
 
 When you remove or rename an action, or change its resource types, write the change in the release notes.
 
@@ -254,7 +255,7 @@ Rules:
 - A `host_id` that is not a host of the configuration makes a question on the service. Thus the PDP never receives a host name that the client chose.
 - A `database` that no grant can name makes a question on its host. Such a name is empty, has more than 256 bytes, is not UTF-8 or has a control character. Only a grant on the host or on the service can cover it.
 - `query.export` does not take `database` since 1.1.0. ChDash 1.0.8 never asked it for a database.
-- For a route that has the host in its JSON body, ChDash reads the body first. Before it reads the body, a run needs `query.run.read` or `query.run.write` on one host at least (match `node`). An export also needs `query.export` on one host at least. Without them, the answer is `403` before the body is read.
+- For a route that has the host in its JSON body, ChDash reads the body first. Before it reads the body, an export needs `query.export`, and `query.run.read` or `query.run.write`, on one host at least (match `node`). Without them, the answer is `403` before the body is read. A run of the Query page (`POST /api/query/run`, `POST /api/query`) and the start of Deep Analyze have no such check, because they are uses of a budget ([Budgets](#budgets)): their handler asks the PDP when it has the SQL.
 
 ### Hidden hosts
 
@@ -378,7 +379,7 @@ Rules:
 
 ## Limits of a grant
 
-A grant can carry limits (ProcurAuth section 6). ChDash declares six limits of the kind ceiling. A ceiling is the most that one use of an action can take. The portal reads the declaration in the action document and shows the form of the values. The PDP gives the value of each ceiling in `context.limits` of a `true` answer. ChDash holds no value itself.
+A grant can carry limits (ProcurAuth section 6). ChDash declares six limits of the kind ceiling and three of the kind budget ([Budgets](#budgets)). A ceiling is the most that one use of an action can take. The portal reads the declaration in the action document and shows the form of the values. The PDP gives the value of each ceiling in `context.limits` of a `true` answer. ChDash holds no value itself.
 
 ### The six ceilings
 
@@ -414,6 +415,8 @@ Every value is below 2^53. A reader that uses floating point numbers reads each 
 | `explorer.read` | `max_rows`, `max_rows_read`, `max_duration`, `max_memory`. |
 | `system.read`, `observability.read` | `max_rows_read`, `max_rows`, `max_duration`. |
 | `library.read`, `library.write`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read`, `mcp.session` | None. |
+
+The same actions also list budgets: `queries` on `query.run.read` and `query.run.write`, `exports` on `query.export`, `requests` on `mcp.session`. A budget is not a ceiling: the PDP never sends it in `context.limits`.
 
 An action lists its ceilings only when the action is published. In the mode `identity`, the MCP endpoint applies the declared ceilings of the action of each tool ([mcp.md](mcp.md#ceilings)). In the mode `keys`, an MCP key never has more than its creator. A `true` answer for the creator with a ceiling is `false` for the key.
 
@@ -470,7 +473,7 @@ A `SETTINGS` clause does not change the class. A person with only one of the two
 
 ### The stream of an export
 
-The body of `POST /api/export/stream` holds only the token of the export. It names no host. ChDash stores in the job, at `POST /api/export/run`, the ceilings, the class of the SQL and `readonly = 1`. At the stream, ChDash asks `query.export`, `query.run.read` and `query.run.write` again on the host of the job. The stream applies the lower value of each ceiling of the new answer and of the stored ones. A failure of the PDP gives `503` and keeps the token, so the person can try again.
+The body of `POST /api/export/stream` holds only the token of the export. It names no host. ChDash stores in the job, at `POST /api/export/run`, the ceilings, the class of the SQL and `readonly = 1`. At the stream, ChDash asks `query.run.read` and `query.run.write` again on the host of the job, without `context.usage`. These are the other permissions of the use. Then, when the stream is ready to start, ChDash asks `query.export` with `context.usage`: the stream is the use of the export ([Budgets](#budgets)). The stream applies the lower value of each ceiling of the new answers and of the stored ones. The ceilings of `query.export` come from the answer with `context.usage`. A refusal of the other permissions, a failure of the PDP and a spent budget keep the job, so the person can try again with the same token while the token lives.
 
 ### Questions of the navigation
 
@@ -479,6 +482,88 @@ A question of the navigation has the match `subtree`. It shows or hides a page, 
 ### A ceiling that ChDash cannot apply
 
 A `true` answer for an operation is `false` when it has a ceiling that the action does not list, a name that ChDash does not know, or a value below 1. The route answers `403` with no reason. The log has the line `access.ceiling_unenforceable`.
+
+## Budgets
+
+A grant can carry budgets (ProcurAuth section 6). A budget is an amount of units for one window or more. The PDP counts each budget. ChDash holds no counter. ChDash declares three budgets in the member `limits` of the action document. Each declaration has the kind `budget`, a name, a label, a description and a unit. It has no `min` and no `max`.
+
+### The three budgets
+
+| Budget | Unit | Listed on | ChDash takes one unit when |
+|---|---|---|---|
+| `queries` | query | `query.run.read`, `query.run.write` | A run of SQL is accepted: `POST /api/query/run` and `POST /api/query`. Also when the replay of Deep Analyze starts (`POST /api/query/deep-analysis`). Also at a call of the MCP tool `run_query` in the mode `identity`. |
+| `exports` | export | `query.export` | The download of an export starts (`POST /api/export/stream`). |
+| `requests` | request | `mcp.session` | An MCP request reads no data of a host (mode `identity`): `initialize`, `ping`, `server/discover`, a notification, a method that ChDash does not know, and the tools that use `mcp.session`. |
+
+No other action lists a budget. The pages, the Explorer, the System page, the query library and the MCP keys of the page take no unit. The tools of the MCP mode `keys` take no unit. A budget is listed only when its action is published: `requests` is not in the document when `mcp.session` is not.
+
+### What is a use
+
+A use is one run of an action for one operation (ProcurAuth section 2). A question for a display is not a use. These routes ask `query.run.read` or `query.run.write` but run no SQL of the person, so they ask without `context.usage` and take no unit: `POST /api/format`, `GET /api/meta`, `POST /api/query/analysis`, `GET /api/query/execution`, `GET /api/query/deep-analysis` (the state of a job) and the MCP tool `explain_query`. A request that finds a Deep Analyze job that already runs takes no unit. The questions of the navigation (the match `subtree`) take none. `GET /api/query/stream` and `POST /api/query/cancel` ask nothing: the run of `POST /api/query/run` already took its unit.
+
+A run takes its unit at `POST /api/query/run`, not at the stream of its result. ChDash takes the unit after the checks of the shape of the body (JSON, `sql`, `host_id`, the size, the `KILL` rule) and before it looks at the host. A request that ChDash refuses later has used its unit: an unknown host, a host that is down and too many sessions. An export is different. `POST /api/export/run` only prepares the job. The unit is taken at `POST /api/export/stream`, when the download starts. An export that nobody downloads costs nothing, and a refused stream keeps the job.
+
+### The questions
+
+ChDash sends the question of a use as one Access Evaluation request:
+
+```json
+POST {pdp.url}/access/v1/evaluation
+{
+  "subject":  { "type": "user", "id": "<sub of the identity token>" },
+  "action":   { "name": "query.run.read" },
+  "resource": { "type": "host", "id": "<host>", "properties": { "ancestors": [ { "type": "service", "id": "<identity.audience>" } ] } },
+  "context":  { "usage": { "units": 1 } }
+}
+```
+
+Rules:
+
+- **One question for each use.** ChDash never sends `context.usage` in a batch, and never with the match `subtree` (ProcurAuth 6.11). It never sends the same question without `context.usage` before this question (ProcurAuth 10.1). The other permissions of the operation go before it, without `context.usage` (ProcurAuth 5.5a).
+- **A run.** ChDash classifies the SQL ([Read and write](#read-and-write)). A read is a use of `query.run.read`. A write, and an SQL that ChDash does not know, are a use of `query.run.write`. ChDash first asks the action of the use with `context.usage`. No question without `context.usage` comes before it, because the other run action is no required permission: a person needs one of the two. When the answer is `true`, ChDash asks the other run action without `context.usage`. This answer gives `readonly` and the ceilings of the other class. A failure of this second question gives `503` after the unit is taken. When the first answer is a plain `false` and the unit is not taken, ChDash asks the other action with `context.usage` (ProcurAuth 10.1). It chooses in this order and stops at the first answer. A person who holds `query.run.write` only can thus run a read. ChDash never asks a second action after an answer that took a unit, after `budget_exceeded` and after a failure.
+- **An export.** The other permissions are `query.run.read` and `query.run.write` on the host of the job, without `context.usage`. The use is `query.export`, with `context.usage`.
+- **MCP.** The mode `identity` sends one question with `context.usage` for each request that calls no tool (`mcp.session`), for `run_query` (`query.run.read` on the host of the call) and for the tools that use `mcp.session`. A call without `host` runs nothing: it asks the match `subtree` without `context.usage` and takes no unit. The questions of `tools/list` have no `context.usage`.
+- **No other question.** An action that the document lists with no budget gets no `context.usage`.
+
+The check of the rule of a run asks nothing, because the action of the use depends on the SQL. The handler of the route asks, when it has the SQL. Until then the statements of the request run with `readonly = 1` and with the lowest value of each ceiling (fail closed).
+
+### The answers
+
+| Answer of the PDP | What ChDash does |
+|---|---|
+| `true` with `context.usage.units` 1 or 0 | The use runs. The ceilings of `context.limits` apply (below). |
+| `true` without `context.usage.units` | ChDash treats it as `false` with no reason: `403` (ProcurAuth 6.12). |
+| `true` with a ceiling that ChDash cannot apply | `403`. The PDP took the unit: ChDash does not try another action (refer to [A ceiling that ChDash cannot apply](#a-ceiling-that-chdash-cannot-apply)). |
+| `false` with the reason `budget_exceeded` and `retry_after` | `429` with `Retry-After` set to `retry_after`. The body has the code `too_many_requests`. It never shows the reason. |
+| `false`, any other reason | `403`. |
+| `budget_exceeded` without a whole `retry_after` of 1 or more | The answer is not valid: `503`. |
+| No answer before the wait, an error, a status that is not `200`, a body that is not valid | `503` with `pdp_unavailable`. |
+
+For an action with a budget, the ceilings of the use come from the answer with `context.usage`. The answers of the other permissions give their own ceilings to their part (ProcurAuth 5.5a, 10 step 6). For MCP: the tool error `budget_exceeded` on `tools/call`, and `429` with the code `-31429` on another request ([mcp.md](mcp.md#budgets)).
+
+### Kept answers
+
+The cache of the PDP (`pdp.cache_ttl`) keeps the answers to the questions with `context.usage` apart from all other answers (ProcurAuth 10.1):
+
+- ChDash never keeps a `true` answer with `units` above 0. Each use asks the PDP.
+- ChDash keeps a `true` answer with `units` equal to 0 for `pdp.cache_ttl` at most. The kept answer lets the next use of this subject, action and resource run with no question.
+- ChDash keeps a `false` answer with `budget_exceeded` for the lower of `retry_after` and `pdp.cache_ttl`. The kept answer gives `429` with the seconds that remain in `Retry-After`. This value is never more than the first `retry_after`.
+- ChDash keeps no other answer to a question with `context.usage`.
+- A kept answer to a question without `context.usage` never starts a use. A kept answer of a use never answers a question without it.
+
+With `pdp.cache_ttl = "0s"`, ChDash keeps nothing.
+
+### No second try
+
+ChDash never sends a question with `context.usage` again (ProcurAuth 10.6). The client of the PDP sends it with `post_once`: the transport does not send it again after a kept connection that the PDP closed, and ChDash does not send it after a timeout, a lost answer or a connection error. The PDP can have counted the use. The units of a lost answer stay counted, and the route answers `503`. The wait for the answer is longer than `procurauth_usage_max_seconds` of the metadata of the PDP, and never shorter than `pdp.timeout` ([Metadata of the PDP](#metadata-of-the-pdp)). The log line `access.decision` of a use has `usage` true, the `units` and `retry_after`.
+
+### Choices of ChDash
+
+- A budget has no key in the configuration. The document declares it, and the PDP holds the amounts.
+- The unit of a run is taken at `POST /api/query/run`. The Query page starts the SQL at the stream of the result. A client that posts a run and never reads its stream uses its unit. The session also uses one place until it ends.
+- ChDash asks nothing about a run before its handler has the SQL: the pre-check of the hosts of the former versions is gone, because it would send the question of the use without `context.usage` first. ChDash reads the body of a person that holds a valid identity token, as it does for the other routes.
+- A run that ChDash refuses after its unit (a host that is down, too many sessions) does not give the unit back. ChDash cannot undo a count of the PDP.
+- The tools of the MCP mode `keys` take no unit. Their questions go to the PDP for the creator of the key, and the creator is not the subject of the use.
 
 ## Navigation
 
@@ -612,6 +697,7 @@ The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run 
 | The questions, the decisions and the failures of the PDP | `test_the_pdp_receives_the_subject_the_action_and_the_host`, `test_a_false_decision_gives_403_with_the_action_and_a_true_one_200`, `test_no_answer_or_an_error_of_the_pdp_gives_503` and `test_a_change_of_the_answer_applies_after_cache_ttl_at_most` of `test_access.py` |
 | The log of the decisions | `test_the_log_has_each_decision` of `test_access.py` when `ACCESS_LOGS_CMD` prints the log of `chdash_access` |
 | The identity mode of MCP (MCP binding, cases U18, U23, U25 to U31 and U85 to U99) | `tests/native/mcp_test.cpp` (`test_identity_mode`), and `tests/backend-functional/test_mcp_identity.py` against the compose service `chdash_mcp_identity` (`tests/config/mcp.identity.hcl`) |
+| The budgets (ProcurAuth 6.4, 6.11, 6.12, 10.1, 10.6; MCP binding 3.4, 3.6a, 5.3, 5.4) | `tests/native/access_test.cpp` (`test_budgets_in_the_document`, `test_pdp_use`, `test_pdp_use_waits_for_the_pdp`, `test_run_use`), `tests/native/mcp_test.cpp` (`test_identity_budgets`), `tests/backend-functional/test_access.py` (the tests `test_a_run_sends_one_question_with_usage_and_no_same_question_without_it`, `test_budget_exceeded_gives_429_with_retry_after_for_a_run`, `test_a_failure_of_the_question_with_usage_gives_503_and_it_is_sent_one_time` and `test_the_stream_of_an_export_takes_the_unit_and_the_run_takes_none`), `tests/backend-functional/test_mcp_identity.py` (the tests `test_u18...` to `test_u95...` on the budgets) and the cases of the ProcurAuth runner U04, U19, U21, U22, U24, U32, U33, U58, U62, U63, U67, U68 (`tests/conformance`) |
 | The reason `unknown_subject` (ProcurAuth 11.1) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).

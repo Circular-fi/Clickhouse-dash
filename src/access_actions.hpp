@@ -105,6 +105,11 @@ struct AccessRule {
   // then keeps only the databases with a decision "node" true (docs/access.md, "Hidden hosts"). A request that names a database asks "node"
   // on that database, as the other routes do.
   bool list_filter = false;
+  // A route of kind Run whose use takes a unit of a budget (ProcurAuth 6.4): the run of SQL. The check of the rule asks nothing. The handler
+  // asks the PDP when it knows the SQL, with Server::access_use_run: one question without context.usage for the other of the two run
+  // actions, then one question with context.usage for the action of the use. The routes that run no SQL (the formatter, the names of the
+  // editor, the plan of a run) keep the questions without usage.
+  bool spend = false;
 };
 
 // The rule of a request. HEAD has the rule of GET.

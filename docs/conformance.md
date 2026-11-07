@@ -86,37 +86,40 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 |---|---|---|
 | `use_plain` | `GET /api/explorer/functions?host_id=conf` | `explorer.read` on the host `conf`. The route asks exactly one question. |
 | `use_ceiling` | The same request | `explorer.read` with the ceiling `max_rows`. |
+| `use_budget` | `POST /api/query/run` with the body `{"host_id": "conf", "sql": "SELECT 1"}` | `query.run.read` on the host `conf`, with `context.usage` ([Budgets](access.md#budgets)). The SQL is a read, so the use is `query.run.read`. |
 | `use_service` | `GET /api/query-library?host_id=conf` | `library.read` on the service. |
 | `list_options` | `GET /.well-known/procurauth/resources?type=host` | The route of the options (the profile has `options_type` = `host`). |
 | `mcp_call_plain` | `POST /mcp`, `tools/call` of `list_databases` with the argument `host` = `conf` | `explorer.read` on the host `conf`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
+| `mcp_call_budget` | `POST /mcp`, `tools/call` of `run_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.run.read` on the host `conf`, with `context.usage`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 
-The profile has the member `mcp` (`path` = `/mcp`). It has no `use_budget`, `use_multi` and no MCP operation other than `mcp_call_plain`. The reasons are:
+The profile has the member `mcp` (`path` = `/mcp`, `session_budget` = `true`: the action `mcp.session` lists the budget `requests`). It has no `use_multi`, no `mcp_call_multi`, no tool that asks for input and no tool that waits for an approval. The reasons are:
 
-- ChDash lists no budget in its action document. The budget cases are skipped. A PDP can still answer `budget_exceeded`. ChDash then gives `429`.
-- ChDash has no action that needs two permissions for one use, so the profile has no `use_multi` and no `mcp_call_multi`.
-- ChDash has no tool that asks for input or that waits for an approval.
+- ChDash has no use that needs two permissions. A run needs `query.run.read` or `query.run.write`: one of the two is enough, so the other action is no required permission. The cases U34, U35, U96 and U97 refuse a use when the second permission is `false`, and they need such a use. These cases are skipped.
+- ChDash has no tool that asks for input or that waits for an approval. The cases U30 and the related steps are skipped.
+- The route of the export has two permissions, but its use is the stream of a token that the run made. A case sends one request, so it cannot make this use.
 
 ### The headers of an MCP request
 
 The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. The MCP cases that write their own request do not send them, so they fail. These cases are in `expected.txt`. A test build that accepts a request without the two headers passes each of them (run of 2026-11-07: 79 passed, 0 failed, 20 skipped).
 
-## Result of 2026-11-07
+## Result of 2026-11-07, with the budgets
 
-The run used the binary of the branch `feat/procurauth-1.3` (the five phases of ProcurAuth: document path, resources route, token checks, PDP failures, ceilings, PDP transport and the identity mode of MCP). The runner is the one of the ProcurAuth repository of the same day.
+The run used the binary of the branch `wip/budgets` (the branch `feat/procurauth-1.3` and the budgets `queries`, `exports` and `requests`). The runner is the one of the ProcurAuth repository of the same day.
 
 ```text
-99 cases: 70 passed, 9 failed, 20 skipped
+99 cases: 83 passed, 11 failed, 5 skipped
 ```
 
 | Result | Cases |
 |---|---|
-| Failed (expected) | U18, U26, U29, U31, U88, U89, U91, U94, U98: the request of the case has no header `Mcp-Method` |
-| Skipped, no budget action | U04, U19, U21 to U24, U30, U32 to U35, U58, U62, U63, U67, U68, U93, U96, U97 |
-| Skipped, `mcp.session` lists no budget | U95 |
+| Failed (expected), the request of the case has no header `Mcp-Method` | U18, U23, U26, U29, U31, U88, U89, U91, U94, U95, U98 |
+| Skipped, the profile has no use with two permissions | U34, U35, U96, U97 |
+| Skipped, no tool that waits for an approval | U30 |
 
-U37 (a ceiling that the action lists) and U69 (the PEP keeps its connection to the PDP open) pass since the ceilings and the PDP transport.
+The cases of the budgets pass: U04, U19, U21, U22, U24, U32, U33, U58, U62, U63, U67 and U68 (the HTTP route `POST /api/query/run`), and U92 and U93 (the tool `run_query`). U18 and U23 pass their step of the tool and fail their step of `tools/list` or `ping`. U95 fails at its `ping`. In these three cases, only the missing header makes the step fail: the native test `test_identity_budgets` and `test_mcp_identity.py` test the same answers with the headers.
 
 ### Notes
 
 - The cases U02, U40, U59 and U84 use `use_service`. They failed during the first run, because `GET /api/query-library` needs the parameter `host_id` (`400`). The profile has the parameter since.
-- A case that the run skips does not pass. It tests nothing. The number of skipped cases falls when ChDash declares budgets.
+- A case that the run skips does not pass. It tests nothing.
+- The case U04 has no scripted answer for a question without `context.usage`. ChDash therefore asks the action of a run with `context.usage` first, and asks the other run action after it ([Budgets](access.md#budgets)).

@@ -47,6 +47,9 @@ struct AccessRequestState {
   // at check_rule. The handler that runs SQL sets the class (access_classify_sql).
   AccessRunCeilings ceilings;
   SqlStatementClass sql_class = SqlStatementClass::Unsure;
+  // A route that runs SQL and takes a unit of a budget (AccessRule::spend): the handler has not yet called access_use_run. Until it does,
+  // the statements run with readonly = 1 and with the lowest value of each ceiling: a handler that forgets the call runs nothing useful.
+  bool use_pending = false;
 };
 
 AccessRequestState& access_state() {
@@ -277,7 +280,18 @@ void Server::init_access() {
       if (!host.mcp_uri.empty()) hosts.push_back(host.id);
     }
     // The tools of the identity mode apply the ceilings that the document declares for their actions (mcp_host_limits).
-    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, std::move(hosts), access_features(), decide_for(true));
+    // A use of an action that lists a budget (the tool run_query, mcp.session) asks with context.usage: PdpClient::decide_use never sends it
+    // again after a timeout (ProcurAuth 10.6).
+    const auto use_for = [this](const std::string& subject, const AccessQuestion& question) {
+      PdpCallContext context;
+      context.request_id = current_request_context().request_id;
+      AccessDecision decision = pdp_->decide_use(subject, question, context);
+      std::vector<AccessQuestion> questions = {question};
+      std::vector<AccessDecision> decisions = {decision};
+      access_enforce_ceilings(context.request_id, questions, &decisions, access_features(), true);
+      return decisions.front();
+    };
+    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, std::move(hosts), access_features(), decide_for(true), use_for);
   }
 }
 
@@ -372,6 +386,16 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
     return true;
   };
   if (rule.kind != AccessRuleKind::Action && rule.kind != AccessRuleKind::Run && rule.kind != AccessRuleKind::Export) return false;
+
+  if (rule.kind == AccessRuleKind::Run && rule.spend) {
+    // A run of SQL is a use of query.run.read or query.run.write, and these actions list the budget `queries`. ProcurAuth 10.1: the PEP
+    // never sends the question of a use without context.usage before the question with it. So this check asks nothing: the handler calls
+    // access_use_run when it has the SQL (the class of the SQL gives the action of the use). Fail closed until then.
+    state.use_pending = true;
+    state.read_only = true;
+    state.ceilings = AccessRunCeilings{};
+    return false;
+  }
 
   if (rule.body && !body_read) {
     // The body is not read yet. A run or an export first needs its actions on one host at least (or on the service): a human without
@@ -647,6 +671,12 @@ AccessCeilings Server::access_ceilings() const {
   // A route that an MCP tool calls applies the ceilings of the call (identity mode); a key of ChDash has none.
   if (current_request_context().is_mcp()) return current_request_context().mcp_ceilings;
   if (!state.enforced) return AccessCeilings{};
+  if (state.use_pending) {
+    // The handler did not call access_use_run (a fault of the code, never a request): the lowest value of each ceiling applies.
+    AccessCeilings lowest;
+    for (const AccessCeilingInfo& info : access_ceiling_table()) lowest.set(info.name, 1);
+    return lowest;
+  }
   return state.ceilings.resolve(state.sql_class);
 }
 
@@ -687,16 +717,77 @@ AccessCeilings Server::access_ceiling_bounds() const {
 bool Server::access_check_export_stream(httplib::Response& res, const std::string& host_id, const ExportJobAccess& stored) {
   AccessRequestState& state = access_state();
   if (!state.enforced || current_request_context().is_mcp()) return true;
-  // The same three questions as the run, on the host of the job: the stream body holds the token only, so no host is in the request.
+  // The permissions of the run, on the host of the job: the stream body holds the token only, so no host is in the request. They are the
+  // other permissions of the use (ProcurAuth 5.5a): they are asked without context.usage. The action of the use, query.export, is asked
+  // later with context.usage (access_use_export), when the download starts.
   const AccessResource resource = access_resource_of(host_id, std::string());
-  const auto decisions = access_decide({AccessQuestion{"query.export", resource}, AccessQuestion{"query.run.read", resource},
-                                        AccessQuestion{"query.run.write", resource}});
-  if (refuse_export(res, decisions, false)) return false;
-  state.ceilings = export_ceilings(decisions);
+  const auto decisions = access_decide({AccessQuestion{"query.run.read", resource}, AccessQuestion{"query.run.write", resource}});
+  if (!decisions[0].allowed && !decisions[1].allowed) {
+    refuse_decision(res, access_refusal_of(decisions), "query.run.read");
+    return false;
+  }
+  state.ceilings = AccessRunCeilings{};
+  state.ceilings.has_read = decisions[0].allowed;
+  state.ceilings.has_write = decisions[1].allowed;
+  if (decisions[0].allowed) state.ceilings.read = access_ceilings_of(decisions[0].limits);
+  if (decisions[1].allowed) state.ceilings.write = access_ceilings_of(decisions[1].limits);
   // The run decided too: the stream is never looser than the run was.
-  state.ceilings.base = access_ceilings_lowest(state.ceilings.base, stored.ceilings);
+  state.ceilings.base = stored.ceilings;
   state.sql_class = stored.sql_class;
-  state.read_only = !decisions[2].allowed || stored.read_only;
+  state.read_only = !decisions[1].allowed || stored.read_only;
+  return true;
+}
+
+AccessDecision Server::access_decide_use(const AccessQuestion& question, bool* pdp_true) {
+  const AccessRequestState& state = access_state();
+  if (pdp_true) *pdp_true = false;
+  if (!pdp_ || !state.enforced || state.subject.empty()) return access_refusal_of({});
+  // An action that the document lists with no budget has no question with context.usage (ProcurAuth 6.4).
+  if (!access_action_has_budget(question.action, access_features())) {
+    AccessDecision decision = access_decide({question}).front();
+    if (pdp_true) *pdp_true = decision.allowed;
+    return decision;
+  }
+  AccessDecision decision = pdp_->decide_use(state.subject, question, state.call);
+  if (pdp_true) *pdp_true = decision.allowed;
+  // A true answer with a ceiling that ChDash cannot apply is false (ProcurAuth 7.5). The PDP took the unit already: the caller never asks
+  // another action for this use after a true answer (pdp_true).
+  std::vector<AccessQuestion> questions = {question};
+  std::vector<AccessDecision> decisions = {decision};
+  access_enforce_ceilings(state.call.request_id, questions, &decisions, access_features(), true);
+  return decisions.front();
+}
+
+bool Server::access_use_run(httplib::Response& res, const std::string& host_id, const std::vector<std::string>& sql_texts) {
+  AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return true;
+  const SqlStatementClass sql_class = access_classify_sql(sql_texts);
+  const AccessResource resource = access_resource_of(host_id, std::string());
+  const AccessRunUse use = access_run_use(
+      sql_class, [&](const std::string& action) { return access_decide({AccessQuestion{action, resource}}).front(); },
+      [&](const std::string& action, bool* pdp_true) { return access_decide_use(AccessQuestion{action, resource}, pdp_true); });
+  if (!use.allowed) {
+    refuse_decision(res, use.refusal, use.action);
+    return false;
+  }
+  state.ceilings = use.ceilings;
+  // readonly = 1 without query.run.write on this host.
+  state.read_only = use.read_only;
+  state.use_pending = false;
+  return true;
+}
+
+bool Server::access_use_export(httplib::Response& res, const std::string& host_id) {
+  AccessRequestState& state = access_state();
+  if (!state.enforced || current_request_context().is_mcp()) return true;
+  const AccessResource resource = access_resource_of(host_id, std::string());
+  const AccessDecision used = access_decide_use(AccessQuestion{"query.export", resource}, nullptr);
+  if (!used.allowed) {
+    refuse_decision(res, used, "query.export");
+    return false;
+  }
+  // The ceilings of query.export come from the answer of the use (ProcurAuth 10, step 6). The lower value of the run and of the stream applies.
+  state.ceilings.base = access_ceilings_lowest(state.ceilings.base, access_ceilings_of(used.limits));
   return true;
 }
 

@@ -41,6 +41,14 @@ std::string database_of(const McpToolInfo& tool, const rapidjson::Value& argumen
   return std::string_view(tool.group) == "data" ? text_member(arguments, "database") : std::string();
 }
 
+// The calls that are one use (binding 3.4): the tool that runs the SQL of the person, and the tools whose action is mcp.session (they
+// read no data of a host). explain_query and the API tools of the Query page (the formatter, the names of the editor, the plan of a run)
+// run no query and take no unit.
+bool takes_unit(const McpToolInfo& tool) {
+  if (!tool.api && std::string_view(tool.name) == "run_query") return true;
+  return std::string_view(mcp_tool_identity_action(tool)) == "mcp.session";
+}
+
 } // namespace
 
 McpKey mcp_identity_key(const std::string& subject) {
@@ -67,18 +75,32 @@ const char* mcp_tool_identity_action(const McpToolInfo& tool) {
   return tool.api ? "unknown" : "mcp.session";
 }
 
-McpSubjectAccess::McpSubjectAccess(std::string service_id, std::vector<std::string> hosts, AccessFeatures features, Decide decide)
-    : service_id_(std::move(service_id)), hosts_(std::move(hosts)), features_(features), decide_(std::move(decide)) {}
+McpSubjectAccess::McpSubjectAccess(std::string service_id, std::vector<std::string> hosts, AccessFeatures features, Decide decide,
+                                   DecideUse decide_use)
+    : service_id_(std::move(service_id)),
+      hosts_(std::move(hosts)),
+      features_(features),
+      decide_(std::move(decide)),
+      decide_use_(std::move(decide_use)) {}
 
-McpAccess McpSubjectAccess::session(const std::string& subject) {
-  std::vector<AccessDecision> decisions = decide_(subject, {AccessQuestion{"mcp.session", access_service_resource(service_id_)}});
-  decisions.resize(1);
-  switch (access_outcome(decisions.front())) {
+McpAccess McpSubjectAccess::session(const std::string& subject, uint64_t* retry_after) {
+  const AccessQuestion question{"mcp.session", access_service_resource(service_id_)};
+  // The request is one use of mcp.session (binding 3.6a): with the budget `requests` in the document, the question has context.usage.
+  AccessDecision decision;
+  if (decide_use_ && access_action_has_budget(question.action, features_)) {
+    decision = decide_use_(subject, question);
+  } else {
+    std::vector<AccessDecision> decisions = decide_(subject, {question});
+    decisions.resize(1);
+    decision = decisions.front();
+  }
+  switch (access_outcome(decision)) {
     case AccessOutcome::Allowed: return McpAccess::Allowed;
     case AccessOutcome::Failed: return McpAccess::Failed;
-    // A budget that is spent is a refusal for now: the budgets are not asked yet.
-    case AccessOutcome::Denied:
-    case AccessOutcome::BudgetExceeded: return McpAccess::Denied;
+    case AccessOutcome::BudgetExceeded:
+      if (retry_after) *retry_after = decision.retry_after.value_or(1);
+      return McpAccess::BudgetExceeded;
+    case AccessOutcome::Denied: return McpAccess::Denied;
   }
   return McpAccess::Denied;
 }
@@ -148,14 +170,24 @@ std::optional<std::vector<std::string>> McpSubjectAccess::visible_hosts(const st
 McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* info) {
   const std::optional<AccessQuestion> question = call_question(tool, arguments);
   if (!question) return McpAccess::Denied;
-  std::vector<AccessDecision> decisions = decide_(subject, {*question});
-  decisions.resize(1);
-  const AccessDecision& decision = decisions.front();
+  // The call is one use (binding 3.4) when the tool runs SQL, the question names a node (a call with no host runs nothing) and the
+  // document lists a budget on the action. Then the question has context.usage and no question without it comes first (protocol 10.1).
+  const bool use = decide_use_ && takes_unit(tool) && question->match == AccessMatch::Node && access_action_has_budget(question->action, features_);
+  AccessDecision decision;
+  if (use) {
+    decision = decide_use_(subject, *question);
+  } else {
+    std::vector<AccessDecision> decisions = decide_(subject, {*question});
+    decisions.resize(1);
+    decision = decisions.front();
+  }
   switch (access_outcome(decision)) {
     case AccessOutcome::Allowed: break;
     case AccessOutcome::Failed: return McpAccess::Failed;
-    case AccessOutcome::Denied:
-    case AccessOutcome::BudgetExceeded: return McpAccess::Denied;
+    case AccessOutcome::BudgetExceeded:
+      if (info) info->retry_after = decision.retry_after.value_or(1);
+      return McpAccess::BudgetExceeded;
+    case AccessOutcome::Denied: return McpAccess::Denied;
   }
   // A true answer with a ceiling that MCP cannot apply is false (ProcurAuth 7.5). MCP applies the ceilings that the document declares for
   // the action of the tool, as the pages do. The server already checks this for a question on a node; a question with the match "subtree"
