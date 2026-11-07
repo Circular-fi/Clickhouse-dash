@@ -176,6 +176,11 @@ class ChInternalScope {
   std::optional<ChQueryScope> scope_;
 };
 
+// True when the statements of this thread carry a ceiling of a grant: the current scope is not internal and holds at least one ceiling.
+// A shared cache of the answers of the pages (docs/access.md, "Shared caches and ceilings") then gives no kept answer and keeps no new
+// answer: the work runs for this request alone, so the ceilings bound it. A cache hit would run no statement, and no ceiling would apply.
+bool ch_scope_has_ceilings();
+
 // The caller of the scope went away. Its statements stop.
 class ChQueryCanceled : public std::runtime_error {
  public:

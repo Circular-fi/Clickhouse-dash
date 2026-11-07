@@ -6,6 +6,8 @@
 // The replica counts (the "nR" badge and the degraded check) are cached per server for kReplicaCountTtl.
 // They are read again only for new tables, or when the entry expired. The read is restricted to the databases that are shown.
 // Local-replica health (read-only, expired session, queue, delay) stays live on every build.
+// A request with a ceiling of a grant (ch_scope_has_ceilings) reads every count itself and keeps none (docs/access.md, "Shared caches and
+// ceilings").
 #include "explorer_catalog.hpp"
 
 #include "explorer_sql.hpp"
@@ -36,13 +38,15 @@ public:
     std::unordered_map<std::string, Counts> out;
     std::set<std::string> stale_databases;
     std::set<std::string> stale_tables;
+    // A request with a ceiling reads the counts itself: a kept count would reach it with no statement, so no ceiling.
+    const bool alone = ch_scope_has_ceilings();
     {
       std::lock_guard<std::mutex> lk(mu_);
       auto& entries = scopes_[scope];
       for (const auto& [database, table] : tables) {
         const std::string key = table_key(database, table);
         const auto it = entries.find(key);
-        if (it != entries.end() && now - it->second.fetched_at < kReplicaCountTtl) {
+        if (!alone && it != entries.end() && now - it->second.fetched_at < kReplicaCountTtl) {
           out[key] = it->second.counts;
         } else {
           stale_databases.insert(database);
@@ -64,6 +68,10 @@ public:
         }
       }, error);
     if (!ok) return out;
+    if (alone) {
+      for (auto& [key, counts] : fetched) out[key] = counts;
+      return out;
+    }
     std::lock_guard<std::mutex> lk(mu_);
     auto& entries = scopes_[scope];
     for (auto& [key, counts] : fetched) {

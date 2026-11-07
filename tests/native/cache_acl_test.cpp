@@ -5,6 +5,7 @@
 //     a transport error is not an answer and is not kept. An object in error is left out alone. Budgets say truncated.
 //   - DdlTextCache (src/ddl_text_cache.hpp). One identity never gets the texts of another identity. It checks bounded reads and memory.
 //   - FormatCache (src/format_cache.cpp). A hit needs the same text.
+//   - A request with a ceiling of a grant neither reads nor writes a shared cache of a page (TtlCache::Options::bypass, DdlTextCache).
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_CACHE_TESTS=ON
 //        cmake --build build --target chdash_cache_acl_test
@@ -12,6 +13,7 @@
 
 #include "acl_service.hpp"
 #include "allowed_objects.hpp"
+#include "ch_query.hpp"
 #include "ddl_text_cache.hpp"
 #include "format_cache.hpp"
 #include "meta_cache_key.hpp"
@@ -797,6 +799,93 @@ void ddl_text_cache_reads_names_in_batches_and_is_bounded() {
   CHECK(by_bytes.bytes() <= 64 * 1024 && by_bytes.size() < 100 && by_bytes.size() > 0);
 }
 
+// The limits of a request with a ceiling of a grant (apply_ceilings), as a route of a page makes them.
+ChQueryLimits limits_with_ceiling() {
+  ChQueryLimits limits;
+  AccessCeilings ceilings;
+  ceilings.max_rows = 5;
+  apply_ceilings(ceilings, limits);
+  return limits;
+}
+
+// docs/access.md, "Shared caches and ceilings" (owner decision of 2026-11-07): a request with a ceiling neither reads the shared cache of a
+// page nor writes its answer into it. A request without a ceiling, and an internal statement, use the cache as before.
+void ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps() {
+  auto opts = options(ms(60000));
+  opts.bypass = [] { return ch_scope_has_ceilings(); };
+  Cache cache(opts);
+  Counter counter;
+  CHECK(!ch_scope_has_ceilings());
+  // A request without a ceiling fills the cache.
+  CHECK(*cache.get("k", counter.fetch()).value == "v1" && counter.calls == 1);
+  {
+    ChQueryScope scope(limits_with_ceiling());
+    CHECK(ch_scope_has_ceilings());
+    // It runs its own fetch: the kept value v1 never reaches it.
+    const auto own = cache.get("k", counter.fetch());
+    CHECK(own.has_value && *own.value == "v2" && own.fetched && !own.stale && counter.calls == 2);
+    // The same for the revalidating read and for refresh = 1.
+    CHECK(*cache.get_revalidating("k", counter.fetch()).value == "v3");
+    CHECK(*cache.get("k", counter.fetch(), true).value == "v4" && counter.calls == 4);
+    // A key that nobody read: its answer is not kept.
+    CHECK(*cache.get("new", counter.fetch()).value == "v5");
+    // A failure is answered as a failure, and an exception is kept for the caller.
+    const auto failed = cache.get("k", [](std::string&, std::string& code, std::string& message) {
+      code = "page_failed";
+      message = "it failed";
+      return false;
+    });
+    CHECK(!failed.has_value && failed.had_error && failed.error_code == "page_failed");
+    const auto thrown = cache.get("k", [](std::string&, std::string&, std::string&) -> bool { throw std::runtime_error("boom"); });
+    CHECK(!thrown.has_value && thrown.exception && thrown.error_code == "refresh_exception");
+    // An internal statement inside the request ignores the ceilings, so it uses the cache.
+    {
+      ChInternalScope internal;
+      CHECK(!ch_scope_has_ceilings());
+      CHECK(*cache.get("k", counter.fetch()).value == "v1" && counter.calls == 5);
+    }
+  }
+  // After the request: the cache still holds v1 (nothing of the request with a ceiling was kept), and "new" was never kept.
+  CHECK(*cache.get("k", counter.fetch()).value == "v1" && counter.calls == 5);
+  CHECK(*cache.get("new", counter.fetch()).value == "v6" && counter.calls == 6);
+  CHECK(cache.stats().bypasses == 6);
+  // A scope without a ceiling uses the cache too.
+  ChQueryScope plain(ChQueryLimits{});
+  CHECK(!ch_scope_has_ceilings() && *cache.get("k", counter.fetch()).value == "v1");
+  // A cache without the option ignores the ceilings (the caches of internal statements).
+  Cache internal_cache(options(ms(60000)));
+  CHECK(*internal_cache.get("k", counter.fetch()).value == "v7");
+  ChQueryScope scope(limits_with_ceiling());
+  CHECK(*internal_cache.get("k", counter.fetch()).value == "v7" && counter.calls == 7);
+}
+
+void ddl_text_cache_a_request_with_a_ceiling_reads_every_text_and_keeps_none() {
+  DdlTextCache cache;
+  const auto objects = ddl_objects("db", 3);
+  int reads = 0;
+  std::string engine = "first";
+  auto fetch = [&](const std::string& database, const std::vector<std::string>& names) {
+    ++reads;
+    std::vector<std::pair<std::string, DdlTexts>> out;
+    for (const auto& name : names) out.emplace_back(DdlTextCache::object_key(database, name), DdlTexts{engine, "", ""});
+    return out;
+  };
+  cache.get("id", objects, fetch);
+  CHECK(reads == 1 && cache.size() == 3);
+  engine = "second";
+  {
+    ChQueryScope scope(limits_with_ceiling());
+    const auto own = cache.get("id", objects, fetch);
+    CHECK(reads == 2 && own.size() == 3 && own.at(DdlTextCache::object_key("db", "t2")).engine_full == "second");
+    // A new object is read and not kept.
+    cache.get("id", ddl_objects("other", 2), fetch);
+    CHECK(reads == 3 && cache.size() == 3);
+  }
+  // The kept texts did not change.
+  const auto kept = cache.get("id", objects, fetch);
+  CHECK(reads == 3 && kept.at(DdlTextCache::object_key("db", "t0")).engine_full == "first");
+}
+
 // The caller names the database and the table of a column catalog. Two different names never share one entry of the cache.
 void meta_cache_key_separates_what_the_caller_names() {
   const auto key = [](const char* database, const char* table) { return meta_catalog_cache_key("local", "runner", "columns", true, database, table); };
@@ -852,6 +941,8 @@ int main() {
   acl_view_asks_each_database_once();
   ddl_text_cache_never_shares_texts_between_identities();
   ddl_text_cache_reads_names_in_batches_and_is_bounded();
+  ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps();
+  ddl_text_cache_a_request_with_a_ceiling_reads_every_text_and_keeps_none();
   meta_cache_key_separates_what_the_caller_names();
   format_cache_compares_the_text();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;

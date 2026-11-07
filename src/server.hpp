@@ -7,6 +7,7 @@
 #include "acl_service.hpp"
 #include "admission.hpp"
 #include "ch_client_pool.hpp"
+#include "ch_query.hpp"
 #include "format_cache.hpp"
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
@@ -865,6 +866,18 @@ private:
     options.submit = [this](std::function<void()> task) { return cache_refresher_ && cache_refresher_->submit(std::move(task)); };
     return options;
   }
+  // A shared cache of the answers of a page: a request with a ceiling of a grant does not use it (docs/access.md, "Shared caches and
+  // ceilings"). Its work runs for the request alone, so the ceilings bound it, and its answer, which a ceiling can cut, is not kept.
+  // The caches of the Explorer, of the System page and of the data of the observability (facets, prefill, metric catalog) use it, and so do
+  // the DDL texts and the replica counts (ExplorerCaches). The caches of internal statements do not (the ACL, the capabilities, the metadata
+  // of the editor and of the signals, the structure of the signal tables, the functions of the server): no ceiling applies to an internal
+  // statement. The databases of
+  // the route of the options and the cost of an MCP key have no ceiling: their actions declare none. The formatted shape text holds no data.
+  template <typename Options>
+  static Options skip_with_ceilings(Options options) {
+    options.bypass = [] { return ch_scope_has_ceilings(); };
+    return options;
+  }
   AclService::Options acl_options();
   // The runner identity of a host for the ACL. A page with refresh=1 calls acl_.invalidate() with it.
   AclAccess runner_access(const HostSpec& host) const { return make_acl_access(client_pool_, host.runner_uri); }
@@ -900,21 +913,22 @@ private:
       [](const std::vector<std::string>& v) { return sizeof(v) + 64 * v.size(); })};
   // Browse uses a small catalog that holds only the identity (one entry for each host and database).
   // The rich summaries are loaded only when a table is opened or when Graph needs them.
-  TtlCache<std::string, ExplorerCatalog> explorer_catalog_list_cache_{cache_options<ExplorerCatalog>(
-      explorer_ttl(), std::chrono::minutes(1), 4096, 64u << 20, cache_size::catalog)};
-  TtlCache<std::string, ExplorerCatalog> explorer_catalog_cache_{cache_options<ExplorerCatalog>(
-      explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::catalog)};
+  TtlCache<std::string, ExplorerCatalog> explorer_catalog_list_cache_{skip_with_ceilings(cache_options<ExplorerCatalog>(
+      explorer_ttl(), std::chrono::minutes(1), 4096, 64u << 20, cache_size::catalog))};
+  TtlCache<std::string, ExplorerCatalog> explorer_catalog_cache_{skip_with_ceilings(cache_options<ExplorerCatalog>(
+      explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::catalog))};
   // The detail of each table comes from a request, and it expires after 30 s.
   // There is no periodic refresh.
-  TtlCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_{cache_options<ExplorerTableDetail>(
-      std::chrono::seconds(30), {}, 1024, 64u << 20, cache_size::table_detail)};
-  TtlCache<std::string, ExplorerGraph> explorer_graph_cache_{cache_options<ExplorerGraph>(
-      explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::graph)};
+  TtlCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_{skip_with_ceilings(cache_options<ExplorerTableDetail>(
+      std::chrono::seconds(30), {}, 1024, 64u << 20, cache_size::table_detail))};
+  TtlCache<std::string, ExplorerGraph> explorer_graph_cache_{skip_with_ceilings(cache_options<ExplorerGraph>(
+      explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::graph))};
+  // The functions of the server: an internal read (the metadata of the server), so every request shares this cache.
   TtlCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_{cache_options<ExplorerFunctionsCatalog>(
       std::chrono::milliseconds(std::max(1000, cfg_.explorer.function_cache_ttl_ms)), {}, 256, 64u << 20, cache_size::functions)};
   // The storage distribution of the whole server. The Explorer System section uses it.
-  TtlCache<std::string, ExplorerStorageMap> explorer_storage_cache_{cache_options<ExplorerStorageMap>(
-      explorer_ttl(), std::chrono::minutes(1), 256, 32u << 20, cache_size::storage)};
+  TtlCache<std::string, ExplorerStorageMap> explorer_storage_cache_{skip_with_ceilings(cache_options<ExplorerStorageMap>(
+      explorer_ttl(), std::chrono::minutes(1), 256, 32u << 20, cache_size::storage))};
 
   // The Explorer service (explorer_service.hpp) uses the privileges of the runner, these caches, and two connections for a read.
   explorer::ExplorerService explorer_service_{
@@ -924,31 +938,31 @@ private:
                                explorer_functions_cache_, explorer_storage_cache_}};
   // These short-lived snapshots are shared by every viewer of a host.
   // So an auto-refreshing page costs one read for each TTL.
-  TtlCache<std::string, SystemActivity> system_activity_cache_{cache_options<SystemActivity>(
-      live_ttl(), std::chrono::seconds(10), 256, 32u << 20, cache_size::activity)};
-  TtlCache<std::string, SystemKeeperStatus> system_keeper_cache_{cache_options<SystemKeeperStatus>(
-      live_ttl(), std::chrono::seconds(10), 256, 8u << 20)};
+  TtlCache<std::string, SystemActivity> system_activity_cache_{skip_with_ceilings(cache_options<SystemActivity>(
+      live_ttl(), std::chrono::seconds(10), 256, 32u << 20, cache_size::activity))};
+  TtlCache<std::string, SystemKeeperStatus> system_keeper_cache_{skip_with_ceilings(cache_options<SystemKeeperStatus>(
+      live_ttl(), std::chrono::seconds(10), 256, 8u << 20))};
   // This cache keeps what each host exposes, for 10 min.
   // It keeps the result for 1 min while an optional log table is still missing. ClickHouse creates such a table at its first flush.
   // A failed detection is not kept beyond the short back-off.
   TtlCache<std::string, MonitorCapabilities>::Options capabilities_cache_options();
   TtlCache<std::string, MonitorCapabilities> system_monitor_caps_cache_{capabilities_cache_options()};
-  TtlCache<std::string, SystemMonitorOverview> system_monitor_overview_cache_{cache_options<SystemMonitorOverview>(
-      live_ttl(), std::chrono::seconds(10), 256, 16u << 20)};
+  TtlCache<std::string, SystemMonitorOverview> system_monitor_overview_cache_{skip_with_ceilings(cache_options<SystemMonitorOverview>(
+      live_ttl(), std::chrono::seconds(10), 256, 16u << 20))};
   // Performance: 15 s for each host and aligned window (the step-aligned from and to).
   // So relative windows that refresh within a step share one read.
-  TtlCache<std::string, SystemMonitorSeries> system_monitor_series_cache_{cache_options<SystemMonitorSeries>(
-      std::chrono::seconds(15), {}, 256, 32u << 20, cache_size::series)};
+  TtlCache<std::string, SystemMonitorSeries> system_monitor_series_cache_{skip_with_ceilings(cache_options<SystemMonitorSeries>(
+      std::chrono::seconds(15), {}, 256, 32u << 20, cache_size::series))};
   // Queries: 60 s for each host, minute-aligned window and allowlisted choice (one read in flight for each key).
   // A drill-down for each shape works the same way.
-  TtlCache<std::string, SystemMonitorQueries> system_monitor_queries_cache_{cache_options<SystemMonitorQueries>(
-      std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::queries)};
+  TtlCache<std::string, SystemMonitorQueries> system_monitor_queries_cache_{skip_with_ceilings(cache_options<SystemMonitorQueries>(
+      std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::queries))};
   // The cost of an MCP key: 60 s for each host, key and window (one read in flight for each key).
   // The parameter refresh=1 reads again.
   TtlCache<std::string, McpCost> mcp_cost_cache_{cache_options<McpCost>(
       std::chrono::minutes(1), {}, 256, 8u << 20, [](const McpCost& value) { return sizeof(McpCost) + value.rows.size() * 160 + value.tables.size() * 96; })};
-  TtlCache<std::string, SystemMonitorQuery> system_monitor_query_cache_{cache_options<SystemMonitorQuery>(
-      std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::query)};
+  TtlCache<std::string, SystemMonitorQuery> system_monitor_query_cache_{skip_with_ceilings(cache_options<SystemMonitorQuery>(
+      std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::query))};
   // The formatted text of a shape. The layout depends only on the text, the host and its version.
   // So the server keeps the result for 10 min for each host and text, whatever the window.
   // A text that cannot be formatted is kept for the same time.
@@ -960,10 +974,10 @@ private:
   }()};
   // Disks: 60 s for each host.
   // The growth of the disks: 5 min for each host and aligned window.
-  TtlCache<std::string, SystemMonitorDisks> system_monitor_disks_cache_{cache_options<SystemMonitorDisks>(
-      std::chrono::minutes(1), {}, 256, 16u << 20)};
-  TtlCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_{cache_options<SystemMonitorDiskGrowth>(
-      std::chrono::minutes(5), {}, 64, 16u << 20, cache_size::growth)};
+  TtlCache<std::string, SystemMonitorDisks> system_monitor_disks_cache_{skip_with_ceilings(cache_options<SystemMonitorDisks>(
+      std::chrono::minutes(1), {}, 256, 16u << 20))};
+  TtlCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_{skip_with_ceilings(cache_options<SystemMonitorDiskGrowth>(
+      std::chrono::minutes(5), {}, 64, 16u << 20, cache_size::growth))};
   // The System service (system_service.hpp) uses the caches above.
   system_page::SystemService system_service_{
       system_page::SystemService::Ports{
@@ -983,25 +997,25 @@ private:
                                 system_monitor_queries_cache_, system_monitor_query_cache_, system_shape_format_cache_, system_monitor_disks_cache_,
                                 system_monitor_growth_cache_, system_activity_cache_, system_keeper_cache_},
       acl_};
-  trace::PrefillCache trace_prefill_cache_{cache_options<trace::Prefill>(
+  trace::PrefillCache trace_prefill_cache_{skip_with_ceilings(cache_options<trace::Prefill>(
       std::chrono::minutes(1), {}, 256, 64u << 20,
-      [](const trace::Prefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); })};
-  trace::FacetKeysCache trace_facet_keys_cache_{cache_options<trace::FacetKeys>(
+      [](const trace::Prefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); }))};
+  trace::FacetKeysCache trace_facet_keys_cache_{skip_with_ceilings(cache_options<trace::FacetKeys>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
-      [](const trace::FacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
-  trace::FacetValuesCache trace_facet_values_cache_{cache_options<trace::FacetValues>(
+      [](const trace::FacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); }))};
+  trace::FacetValuesCache trace_facet_values_cache_{skip_with_ceilings(cache_options<trace::FacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
-      [](const trace::FacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
-  logs::FacetKeysCache log_facet_keys_cache_{cache_options<logs::LogFacetKeys>(
+      [](const trace::FacetValues& v) { return sizeof(v) + cache_size::counted(v.values); }))};
+  logs::FacetKeysCache log_facet_keys_cache_{skip_with_ceilings(cache_options<logs::LogFacetKeys>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
-      [](const logs::LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
-  logs::FacetValuesCache log_facet_values_cache_{cache_options<logs::LogFacetValues>(
+      [](const logs::LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); }))};
+  logs::FacetValuesCache log_facet_values_cache_{skip_with_ceilings(cache_options<logs::LogFacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
-      [](const logs::LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
+      [](const logs::LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); }))};
 
   // The catalog of the Metrics page, for each host, source and minute-aligned window.
-  metrics::CatalogCache metrics_catalog_cache_{cache_options<metrics::CatalogSnapshot>(
-      std::chrono::minutes(1), {}, 256, 64u << 20, [](const metrics::CatalogSnapshot& v) { return metrics::snapshot_bytes(v); })};
+  metrics::CatalogCache metrics_catalog_cache_{skip_with_ceilings(cache_options<metrics::CatalogSnapshot>(
+      std::chrono::minutes(1), {}, 256, 64u << 20, [](const metrics::CatalogSnapshot& v) { return metrics::snapshot_bytes(v); }))};
 
   // These caches hold what the Logs, Metrics and Traces-logs routes read about a source (otel_caches.hpp).
   SignalMetaCache signal_meta_cache_{signal_meta_cache_options()};

@@ -113,6 +113,10 @@ size_t cache_key_bytes(const Key&) { return sizeof(Key); }
 //     This does not apply when an invalidation asked for a newer one.
 //
 //   - Bounded by `max_entries` and `max_bytes` (LRU). No value older than `max_age` is served or kept.
+//
+//   - Options::bypass: when it gives true for a request, the cache is not used. The fetch runs in the thread of the request, for this request
+//     alone: no kept value is answered, the request waits for no shared fetch, and the result is not kept. A page cache sets it for a
+//     request with a ceiling of a grant (ch_scope_has_ceilings, docs/access.md, "Shared caches and ceilings").
 template <typename Key, typename Value, typename Clock = std::chrono::steady_clock>
 class TtlCache {
 public:
@@ -135,6 +139,8 @@ public:
     std::function<Duration(const Value&)> ttl_of;
         // The function starts a background refresh. It returns false when it cannot. No background refresh runs when not set.
     std::function<bool(std::function<void()>)> submit;
+        // True for a request that must not use the cache: the fetch runs for the request alone, and nothing is read or kept. Not set: false.
+    std::function<bool()> bypass;
   };
 
   struct Result {
@@ -156,6 +162,7 @@ public:
     uint64_t fetches = 0;
     uint64_t failures = 0;
     uint64_t evictions = 0;
+    uint64_t bypasses = 0;  // the requests that did not use the cache (Options::bypass)
     size_t entries = 0;
     size_t bytes = 0;
   };
@@ -229,7 +236,41 @@ private:
     std::condition_variable cv;
   };
 
+  // The fetch of a request that does not use the cache (Options::bypass). It runs now, in this thread. Its result is answered and not kept.
+  Result fetch_alone(const Fetch& fetch) {
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      ++stats_.bypasses;
+    }
+    Result out;
+    out.fetched = true;
+    Value fetched{};
+    std::string code;
+    std::string message;
+    try {
+      if (fetch(fetched, code, message)) {
+        out.value = std::make_shared<const Value>(std::move(fetched));
+        out.has_value = true;
+        return out;
+      }
+    } catch (const std::exception& error) {
+      out.exception = std::current_exception();
+      code = "refresh_exception";
+      message = error.what();
+    } catch (...) {
+      out.exception = std::current_exception();
+      code = "refresh_exception";
+      message = "unknown error while reading the data";
+    }
+    out.had_error = true;
+    out.error_code = code.empty() ? "refresh_failed" : std::move(code);
+    out.error_message = message.empty() ? "The data could not be read." : std::move(message);
+    return out;
+  }
+
   Result lookup(const Key& key, const Fetch& fetch, bool force, bool revalidate) {
+    // A request that must not use the cache reads no kept value, shares no fetch and keeps nothing.
+    if (options_.bypass && options_.bypass()) return fetch_alone(fetch);
     std::unique_lock<std::mutex> lk(mu_);
     const TimePoint arrival = Clock::now();
     const std::shared_ptr<Entry> entry = find_or_insert_locked(key, arrival);

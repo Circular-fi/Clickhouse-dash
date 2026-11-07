@@ -441,7 +441,36 @@ A run that goes past a ceiling ends with an `error` event that has the code in t
 
 The statements that ChDash writes for the pages (Explorer, System, Traces, Logs, Metrics, the metadata of the editor) have the same backstop, because many of them carry their own `SETTINGS` clause. Each statement counts the rows and bytes read, the rows of its result and its time. Past a ceiling it ends, and the route answers as for the ClickHouse code of the same meaning (`<page>_scan_limit` or `<page>_timeout`, [operations.md](operations.md#errors)). The pages have no backstop for `max_result_size`: its setting is the only bound there. The progress packets of ClickHouse give the rows and bytes read, so a statement that reads very little can end before a packet arrives.
 
-The pages keep shared caches of their answers (the Explorer, the System page). An answer that comes from a cache runs no statement, so no ceiling applies to it. A ceiling bounds the work that the request does itself.
+The pages keep shared caches of their answers. A request with a ceiling does not use them (refer to [Shared caches and ceilings](#shared-caches-and-ceilings)).
+
+### Shared caches and ceilings
+
+The pages keep caches of their answers, and all the persons share them ([configuration.md](configuration.md#caches-and-privileges)). An answer that comes from a cache runs no statement, so no ceiling bounds it. Thus ChDash applies this rule (decision of 2026-11-07):
+
+- A request with a ceiling does not read a shared cache of a page. It runs its own statements, and its ceilings bound them.
+- ChDash does not keep the answer of such a request in the cache. A ceiling can cut an answer, and the cut answer must not reach another person.
+- A request with a ceiling also waits for no read that another request started. Its read is its own.
+- A request without a ceiling uses the caches as before. The open mode has no ceiling, so it always uses the caches.
+- A request has a ceiling when the answer of the PDP for the action of its route has one in `context.limits`. A route that an MCP tool calls in the mode `identity` has the ceilings of the call.
+
+The caches that a request with a ceiling does not use:
+
+| Page | Caches |
+|---|---|
+| Explorer | The catalog (the list and the objects of a database), the table card, the graph and the storage map. Also the DDL texts and the replica counts, which these answers use. |
+| System | Overview, Activity, Keeper, the series, the queries, the detail of a query, the disks and the growth of the disks. The replica counts of Activity. |
+| Observability | The prefill and the facets of the traces, the facets of the logs and the catalog of the metrics. |
+
+The caches that every request uses, because a ceiling cannot change their value:
+
+| Cache | Why |
+|---|---|
+| The runner ACL, the capabilities of the System page, the metadata of the editor (`GET /api/meta`) and of the signals, the functions of the Explorer (`GET /api/explorer/functions`) | The statements are internal ([Statements that a ceiling bounds](#statements-that-a-ceiling-bounds)). No ceiling applies to them. |
+| The structure of the tables of the signals (the columns of the logs table, the tables of the metrics, the map columns of the traces) | The same: these reads of the schema are internal since 1.3.0. |
+| The databases of the route of the options, the cost of an MCP key | The routes have no ceiling: `GET /.well-known/procurauth/resources` asks no action with a ceiling, and `mcp.usage.read` declares none. |
+| The format cache, the formatted texts of the shapes of System > Queries, the DESCRIBE plans of the runs | The value is the layout of a SQL text or the types of its columns. It holds no row of a table and no count of the server. |
+
+A request with a ceiling costs one read of ClickHouse for each request, as a cache with no entry does. The background refresh of a cache never runs for such a request.
 
 ### Statements that a ceiling bounds
 
@@ -454,7 +483,9 @@ A ceiling bounds the work of the person. It does not bound the work that ChDash 
 | The discovery of the ACL (`CHECK GRANT`, `SHOW`, the zero-row probes and `DESCRIBE`), for the Explorer, the System page, exports, analysis and MCP | No. |
 | The probes of the capabilities of the server (the tables and the columns of `system` that the System page needs, the refreshable views of the Explorer graph) | No. |
 | The reads of the schema for the editor (`GET /api/meta`: keywords, functions, databases, tables, columns) | No. |
+| The read of the functions of the server for the Explorer (`GET /api/explorer/functions`, `system.functions`) | No. It is the same metadata as the functions of the editor. |
 | The lookup of `system.query_log` for the execution of a run, the reads of the tables of the signals of OpenTelemetry, and `SYSTEM FLUSH LOGS` | No. |
+| The reads of the structure of the tables of the signals: the columns of the logs table and its skipping indexes, the tables and the scope columns of the metrics, the map columns of the traces | No. |
 | The probe of the settings profile of a connection, and the checks of the health runner | No. They have no scope of a request, so no ceiling reaches them. |
 
 The rule is in the code. A scope of statements has the flag `internal` (`ChQueryLimits::internal`). The object `ChInternalScope` sets it for the statements that follow in the same thread. The builder of an internal statement opens this object. It never opens it for the SQL of a person or for a statement that shows data.
@@ -708,6 +739,7 @@ The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run 
 | The identity mode of MCP (MCP binding, cases U18, U23, U25 to U31 and U85 to U99) | `tests/native/mcp_test.cpp` (`test_identity_mode`), and `tests/backend-functional/test_mcp_identity.py` against the compose service `chdash_mcp_identity` (`tests/config/mcp.identity.hcl`) |
 | The budgets (ProcurAuth 6.4, 6.11, 6.12, 10.1, 10.6; MCP binding 3.4, 3.6a, 5.3, 5.4) | `tests/native/access_test.cpp` (`test_budgets_in_the_document`, `test_pdp_use`, `test_pdp_use_waits_for_the_pdp`, `test_run_use`), `tests/native/mcp_test.cpp` (`test_identity_budgets`), `tests/backend-functional/test_access.py` (the tests `test_a_run_sends_one_question_with_usage_and_no_same_question_without_it`, `test_budget_exceeded_gives_429_with_retry_after_for_a_run`, `test_a_failure_of_the_question_with_usage_gives_503_and_it_is_sent_one_time` and `test_the_stream_of_an_export_takes_the_unit_and_the_run_takes_none`), `tests/backend-functional/test_mcp_identity.py` (the tests `test_u18...` to `test_u95...` on the budgets) and the cases of the ProcurAuth runner U04, U19, U21, U22, U24, U32, U33, U58, U62, U63, U67, U68 (`tests/conformance`) |
 | The budget `queries` of the creator of an MCP key of the mode `keys` (decision of 2026-11-07) | `tests/native/mcp_test.cpp` (`test_creator_budgets`): one question with `context.usage` on the host of the call for each tool of `query.run.read`, none without it, `budget_exceeded`, `503` for a failure, no unit for the other tools; `test_a_query_tool_of_an_mcp_key_takes_a_unit_of_the_budget_of_its_creator` of `test_access.py` |
+| A request with a ceiling neither reads nor fills a shared cache of a page (decision of 2026-11-07) | `tests/native/cache_acl_test.cpp` (`ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps`, `ddl_text_cache_a_request_with_a_ceiling_reads_every_text_and_keeps_none`), and `test_a_request_with_a_ceiling_neither_reads_nor_fills_the_shared_cache_of_a_page` of `test_access.py` |
 | The reason `unknown_subject` (ProcurAuth 11.1) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).

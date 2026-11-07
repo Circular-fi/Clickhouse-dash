@@ -16,6 +16,7 @@
 #include "api_error.hpp"
 #include "api_params.hpp"
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
@@ -107,6 +108,8 @@ LogColumns load_log_columns(clickhouse::Client& client, const LogSettings& logs)
 LogColumns cached_log_columns(LogColumnsCache& cache, clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
   const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
   const auto result = cache.get(key, [&](LogColumns& columns, std::string&, std::string&) {
+    // The read of the structure of the table is a statement of ChDash, not of a person: the ceilings of the grant never apply.
+    ChInternalScope internal;
     columns = load_log_columns(client, logs);
     return true;
   });

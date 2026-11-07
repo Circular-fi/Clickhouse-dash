@@ -422,6 +422,7 @@ The backend keeps what it reads from ClickHouse in bounded caches (`src/ttl_cach
 - The live answers are the Explorer catalog and graph, and the Overview, Activity and Keeper of the System page. They are sent at once after their TTL ends, with `"stale": true`. One read runs in the background meanwhile.
 - Each cache has a limit in entries and in bytes (the least recently used entry goes first). An entry older than 10 minutes, or than its TTL when the TTL is longer, is removed.
 - A key never holds the text of a client in full. The filters of the trace and log facets and of the trace prefill are held as a SHA-256 digest. `read_rows_limit` is rounded down to 1, 2 or 5 times a power of ten.
+- In the mode `authzen`, a request with a ceiling of a grant does not use the caches of the answers of the pages. It reads the data itself, and its answer is not kept. Refer to [access.md](access.md#shared-caches-and-ceilings).
 
 **The runner ACL.** What the runner of a host may read decides which objects are shown. The Explorer, the System pages, the execution statistics, the analysis, the exports and MCP show only these objects. The backend discovers it as the runner, with `CHECK GRANT` and zero-row probes. It never reads the grant list. It keeps one answer for each identity: the SHA-256 of the runner URI. The derived MCP identity has its own answer. These rules apply:
 

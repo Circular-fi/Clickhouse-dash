@@ -317,6 +317,11 @@ const ChQueryLimits* ChQueryScope::current() { return t_scope ? &t_scope->limits
 
 ChQueryLimits ChQueryScope::current_copy() { return t_scope ? t_scope->limits_ : ChQueryLimits{}; }
 
+bool ch_scope_has_ceilings() {
+  const ChQueryLimits* limits = ChQueryScope::current();
+  return limits && !limits->internal && limits->ceilings.any();
+}
+
 std::string ch_statement_query_id() {
   const ChQueryLimits* limits = ChQueryScope::current();
   return limits && limits->query_id ? limits->query_id() : std::string();

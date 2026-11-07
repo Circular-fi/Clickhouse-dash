@@ -145,7 +145,7 @@ A host change aborts every read of the old host at once. A page restored from th
 - `system.clusters` (`LIMIT 1001`).
 - The in-memory columns of `system.replicas`, restricted to the databases of the runner (`LIMIT 10001`). The route counts a row only when the runner reads that table.
 
-`log_max_index`, `log_pointer`, `total_replicas` and `active_replicas` cost one Keeper request for each table. The route does not read them. The backend caches the snapshot for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). For this reason, any number of open pages costs one read for each interval.
+`log_max_index`, `log_pointer`, `total_replicas` and `active_replicas` cost one Keeper request for each table. The route does not read them. The backend caches the snapshot for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). For this reason, any number of open pages costs one read for each interval. A person with a ceiling of a grant does not use this cache: each of the pages of this person reads the snapshot itself ([access.md](access.md#shared-caches-and-ceilings)).
 
 After the TTL, and for 10 s more, the backend sends the previous snapshot at once (`"stale": true`). One read runs in the background meanwhile. `refresh=1` reads again. It includes the runner ACL. The Keeper card adds `/api/system/keeper` (*Activity* below).
 

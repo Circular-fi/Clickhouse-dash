@@ -35,6 +35,9 @@ namespace chdash {
 // Entries are re-read after kMaxAge regardless.
 //
 // Memory: the cache is an LRU, bounded in entries and in bytes.
+//
+// Ceilings: a request with a ceiling of a grant (ch_scope_has_ceilings) does not use the cache. It reads every text of its objects, and the
+// cache keeps none of them (docs/access.md, "Shared caches and ceilings").
 struct DdlTexts {
   std::string engine_full;
   std::string create_table_query;
@@ -82,6 +85,23 @@ public:
     out.reserve(objects.size());
     std::map<std::string, std::set<std::string>> missing_by_database;
     std::unordered_map<std::string, const DdlObjectVersion*> wanted;
+    // A request with a ceiling reads each text itself and keeps none: a kept text would reach it with no statement, so no ceiling.
+    const bool alone = ch_scope_has_ceilings();
+    if (alone) {
+      for (const auto& object : objects) missing_by_database[object.database].insert(object.name);
+      for (const auto& [database, names] : missing_by_database) {
+        std::vector<std::string> batch;
+        batch.reserve(std::min(names.size(), kMaxNamesPerQuery));
+        for (auto name = names.begin(); name != names.end();) {
+          batch.push_back(*name);
+          ++name;
+          if (batch.size() < kMaxNamesPerQuery && name != names.end()) continue;
+          for (auto& [key, texts] : fetch(database, batch)) out[key] = std::move(texts);
+          batch.clear();
+        }
+      }
+      return out;
+    }
     {
       std::lock_guard<std::mutex> lk(mu_);
       for (const auto& object : objects) {

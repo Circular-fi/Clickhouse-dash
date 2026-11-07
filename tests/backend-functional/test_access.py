@@ -483,6 +483,29 @@ def test_a_low_explorer_ceiling_does_not_stop_the_acl_discovery():
 
 
 @needs_access
+def test_a_request_with_a_ceiling_neither_reads_nor_fills_the_shared_cache_of_a_page():
+    # Owner decision 2026-11-07 (docs/access.md, "Shared caches and ceilings"): a cache hit runs no statement, so no ceiling would bound it.
+    # The catalog of the Explorer gives the time of its read: a request with a ceiling gets its own read, and the cache never keeps it.
+    path = "/api/explorer/catalog?host_id=local"
+    answer(default=True)
+    first = call("GET", path, tok=token("nolimit"))
+    assert first.status_code == 200, first.text[:300]
+    kept = first.json()["generated_at_ms"]
+    assert call("GET", path, tok=token("nolimit")).json()["generated_at_ms"] == kept
+    answer(default=True, limits={"explorer.read": {"max_rows": 100000}})
+    own = call("GET", path, tok=token("limited"))
+    assert own.status_code == 200, own.text[:300]
+    second_own = call("GET", path, tok=token("limited"))
+    assert second_own.status_code == 200, second_own.text[:300]
+    assert own.json()["generated_at_ms"] != kept and second_own.json()["generated_at_ms"] != own.json()["generated_at_ms"]
+    assert own.json()["stale"] is False
+    # A person without a ceiling never gets the answer of the person with a ceiling.
+    answer(default=True)
+    after = call("GET", path, tok=token("nolimit")).json()["generated_at_ms"]
+    assert after not in (own.json()["generated_at_ms"], second_own.json()["generated_at_ms"]), (after, own.text[:200])
+
+
+@needs_access
 def test_the_stream_of_an_export_asks_the_host_of_the_job():
     # The body of the stream holds the token only. A person with grants on the host "local" only (none on the service or on "other") has
     # an export that works: the stream asks the host of the job, not the service.

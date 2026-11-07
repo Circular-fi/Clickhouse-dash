@@ -1,6 +1,7 @@
 #include "trace_attributes.hpp"
 
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 #include "log.hpp"
 #include "trace_sql.hpp"
 
@@ -25,6 +26,8 @@ std::string cache_key(const HostSpec& host, const TraceSettings& cfg) { return h
 bool read_attribute_maps(ChExecutor& db, const TraceSettings& cfg, bool* span_map, bool* resource_map, std::string* error) {
   *span_map = false;
   *resource_map = false;
+  // The read of the structure of the table is a statement of ChDash, not of a person: the ceilings of the grant never apply.
+  ChInternalScope internal;
   try {
     db.select(attribute_maps_sql(cfg.database, cfg.table), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
