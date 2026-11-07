@@ -249,11 +249,26 @@ struct McpHostLimits {
   McpHostLimit timeout_seconds;
 };
 
-McpHostLimits mcp_host_limits(const McpSettings& settings, const HostAccess* access) {
+// The ceilings of a true answer of the PDP (the identity mode, ProcurAuth 7.3) lower these limits. The source of a limit that a ceiling
+// binds is "access". A call of a tool applies the ceilings in McpTools::call_tool_for, with the same function.
+McpHostLimits mcp_host_limits(const McpSettings& settings, const HostAccess* access, const McpCeilings* ceilings = nullptr) {
   McpHostLimits out;
   out.max_rows.value = settings.max_rows;
   out.timeout_seconds.value = settings.query_timeout_seconds;
-  if (!access || !access->mcp_profile_known) return out;
+  const auto ceiled = [&] {
+    if (!ceilings) return;
+    const auto lower = [](McpHostLimit* limit, const std::optional<int64_t>& ceiling) {
+      bool binds = false;
+      limit->value = mcp_apply_ceiling(limit->value, ceiling, &binds);
+      if (binds) limit->source = "access";
+    };
+    lower(&out.max_rows, ceilings->max_rows);
+    lower(&out.timeout_seconds, ceilings->max_duration_seconds);
+  };
+  if (!access || !access->mcp_profile_known) {
+    ceiled();
+    return out;
+  }
   const auto bind = [](McpHostLimit* limit, int64_t profile) {
     if (profile <= 0) return;
     if (profile < limit->value) {
@@ -266,6 +281,7 @@ McpHostLimits mcp_host_limits(const McpSettings& settings, const HostAccess* acc
   bind(&out.max_rows, static_cast<int64_t>(std::min<uint64_t>(access->mcp_max_result_rows, static_cast<uint64_t>(INT64_MAX))));
   // A fraction of a second is rounded up to a full second. For example, a limit of 0.5 s still lets a call ask for 1.
   bind(&out.timeout_seconds, access->mcp_max_execution_time > 0 ? std::max<int64_t>(1, static_cast<int64_t>(access->mcp_max_execution_time)) : 0);
+  ceiled();
   return out;
 }
 
@@ -470,8 +486,10 @@ public:
                                const McpCallInfo& info) override {
     return inner_.call_tool_for(key, tool, arguments, now, info);
   }
-  std::vector<std::string> permitted_tools(const McpKey& key, std::vector<std::string> tools) override {
-    tools = inner_.permitted_tools(key, std::move(tools));
+  std::optional<std::vector<std::string>> permitted_tools(const McpKey& key, std::vector<std::string> tools) override {
+    const auto kept = inner_.permitted_tools(key, std::move(tools));
+    if (!kept) return std::nullopt;
+    tools = *kept;
     tools.erase(std::remove_if(tools.begin(), tools.end(),
                                [&](const std::string& name) {
                                  return std::find(state_.tools.begin(), state_.tools.end(), name) == state_.tools.end();
@@ -479,12 +497,13 @@ public:
                 tools.end());
     return tools;
   }
-  bool tool_permitted(const McpKey& key, const McpToolInfo& tool) override {
-    if (!inner_.tool_permitted(key, tool)) return false;
+  // A failure of the PDP refuses the tool as a denial: the mode "keys" keeps this answer (docs/mcp.md, "Keys and the access of humans").
+  McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
+    if (inner_.tool_permitted(key, tool, arguments, call) != McpAccess::Allowed) return McpAccess::Denied;
     const std::string refused = gate_.tool_refused_action(key, tool);
-    if (refused.empty()) return true;
+    if (refused.empty()) return McpAccess::Allowed;
     log_event(LogLevel::Warn, "mcp.tool_refused", {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", refused}});
-    return false;
+    return McpAccess::Denied;
   }
 
 private:
@@ -554,6 +573,9 @@ public:
     const McpUsageWindow window = window_of(window_name, now);
     std::vector<McpUsageKeyRef> live;
     for (const auto& key : server_.mcp_keys_->list()) live.push_back(mcp_usage_key_ref(key));
+    if (server_.cfg_.mcp.identity_auth()) {
+      for (auto& subject : usage.identity_keys()) live.push_back(std::move(subject));
+    }
     rapidjson::StringBuffer sb;
     Writer w(sb);
     usage.write_overview(w, query, live, window, now);
@@ -752,19 +774,48 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     return;
   }
 
-  // 2. Check the key. No key, an unknown key and an expired key get the same answer (contract 3.3).
-  const std::string token = bearer_token(req, cfg_.mcp.auth_header);
-  const bool standard_header = lower_ascii(cfg_.mcp.auth_header) == "authorization";
-  const auto auth = mcp_keys_->authenticate(token, now);
-  if (auth.status != McpKeyStore::AuthStatus::Ok) {
-    if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
+  // The refusals before the message have an empty body, in the two modes: the client reads the status and the headers (binding 5.2, 5.6a, 7.4).
+  const auto refuse_empty = [&](int status) {
     res.set_header("Connection", "close");
-    res.status = 401;
-    res.set_content(kMcpUnauthorizedBody, "application/json");
-    log_call("401");
-    return;
+    res.status = status;
+    res.set_content("", 0, "application/json");
+  };
+
+  // 2. Check the caller. In the mode "keys": the key. No key, an unknown key and an expired key get the same answer (contract 3.3).
+  // In the mode "identity": the identity token only, and the own keys are ignored (binding 3.3, 3.3a, 7.3). The 401 comes before the
+  // body is read, so its body is empty.
+  const bool standard_header = lower_ascii(cfg_.mcp.auth_header) == "authorization";
+  McpKeyStore::AuthResult auth;
+  McpKey identity_key;
+  const McpKey* caller = nullptr;
+  if (cfg_.mcp.identity_auth()) {
+    // The token comes from its header only, as for the pages. Two copies of the header are refused.
+    const size_t copies = req.get_header_value_count(cfg_.access.header);
+    const IdentityResult identity = identity_ && mcp_subject_ && copies == 1
+                                        ? identity_->verify(req.get_header_value(cfg_.access.header), unix_seconds())
+                                        : IdentityResult{false, {}, 0, !identity_ || !mcp_subject_ ? "unavailable" : copies == 0 ? "missing" : "malformed"};
+    if (!identity.ok) {
+      log_event(LogLevel::Info, "access.unauthenticated",
+                {{"request_id", req.get_header_value("X-Request-Id")}, {"method", req.method}, {"path", req.path.substr(0, 512)}, {"reason", identity.reason}});
+      res.set_header("WWW-Authenticate", copies == 0 ? "Bearer realm=\"chdash\"" : "Bearer realm=\"chdash\", error=\"invalid_token\"");
+      refuse_empty(401);
+      log_call("401");
+      return;
+    }
+    identity_key = mcp_identity_key(identity.subject);
+    caller = &identity_key;
+  } else {
+    const std::string token = bearer_token(req, cfg_.mcp.auth_header);
+    auth = mcp_keys_->authenticate(token, now);
+    if (auth.status != McpKeyStore::AuthStatus::Ok) {
+      if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
+      refuse_empty(401);
+      log_call("401");
+      return;
+    }
+    caller = &auth.key;
   }
-  const McpKey& key = auth.key;
+  const McpKey& key = *caller;
   // A key of the page in the authzen mode never has more than its creator (docs/mcp.md, "Keys and the access of humans"). A key with no
   // creator, or whose creator the PDP does not know (the reason "unknown_subject", contract 11.5), gets the answer of a key that does not
   // exist (contract 3.3) until a person adopts it; the log tells why. The other keys lose only the tools whose actions the creator lost.
@@ -776,9 +827,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
                 {{"key", key.id}, {"creator", key.creator.empty() ? std::string("-") : key.creator},
                  {"reason", mcp_creator_status_name(creator_state->status)}});
       if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
-      res.set_header("Connection", "close");
-      res.status = 401;
-      res.set_content(kMcpUnauthorizedBody, "application/json");
+      refuse_empty(401);
       log_call("401");
       return;
     }
@@ -793,7 +842,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     McpUsageEvent event;
     event.key_id = key.id;
     event.key_name = key.name;
-    event.key_host = key.hosts.size() == 1 ? std::string_view(key.hosts.front()) : std::string_view();
+    event.key_host = key.hosts.size() == 1 && !mcp_key_is_identity(key) ? std::string_view(key.hosts.front()) : std::string_view();
     event.key_source = key.source;
     event.at = now;
     event.kind = kind;
@@ -816,9 +865,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   const int64_t per_minute = key.rate_limit_per_minute.value_or(cfg_.mcp.rate_limit_per_minute);
   if (!mcp_rate_.allow(key.id, steady_ms(), per_minute, &retry_after)) {
     res.set_header("Retry-After", std::to_string(retry_after));
-    res.set_header("Connection", "close");
-    res.status = 429;
-    res.set_content(kMcpRateLimitedBody, "application/json");
+    refuse_empty(429);
     log_call("429");
     account(McpUsageKind::RateLimited, "429_rate_limited", 0, nullptr);
     return;
@@ -872,10 +919,16 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   info.version = cfg_.version_semver;
   std::optional<CreatorGatedTools> gated;
   if (creator_state) gated.emplace(*mcp_tools_, *mcp_creator_, *creator_state);
-  McpToolBackend& backend = gated ? static_cast<McpToolBackend&>(*gated) : static_cast<McpToolBackend&>(*mcp_tools_);
+  // The identity mode asks the PDP for the subject of the request, for each method (binding 3.6a, 4.1, 3.2).
+  std::optional<McpSubjectTools> by_subject;
+  if (cfg_.mcp.identity_auth()) by_subject.emplace(*mcp_tools_, *mcp_subject_);
+  McpToolBackend& backend = by_subject ? static_cast<McpToolBackend&>(*by_subject)
+                            : gated    ? static_cast<McpToolBackend&>(*gated)
+                                       : static_cast<McpToolBackend&>(*mcp_tools_);
   McpRpcResult result = mcp_handle_message(body, key, backend, info, now, headers);
   res.status = result.http_status;
-  if (result.http_status == 202) {
+  // A notification (202) and a refusal that has no id (binding 5.6a) have no body.
+  if (result.http_status == 202 || result.body.empty()) {
     res.set_content("", 0, "application/json");
   } else {
     // The body can be as large as max_result_bytes. The body moves into the answer.
@@ -924,7 +977,9 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     if (cfg_.mcp.enabled && mcp_keys_) {
       const McpSettings& s = cfg_.mcp;
       w.Key("endpoint_path"); w.String("/mcp");
-      w.Key("auth_header"); put(w, s.auth_header);
+      // The identity mode reads the token in the header of the access gateway. The keys of ChDash do not count (docs/mcp.md).
+      w.Key("auth_mode"); put(w, s.auth_mode);
+      w.Key("auth_header"); put(w, s.identity_auth() ? cfg_.access.header : s.auth_header);
       w.Key("storage_configured"); w.Bool(mcp_keys_->storage_configured());
       w.Key("manage_from_ui"); w.Bool(mcp_keys_->manage_from_ui());
       w.Key("keys_mode"); w.String(mcp_keys_mode_name(mcp_keys_->mode()));
@@ -1325,6 +1380,10 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     }
     std::vector<McpUsageKeyRef> live;
     for (const auto& key : store.list()) live.push_back(mcp_usage_key_ref(key));
+    // The identity mode counts the usage by subject: the subjects that this instance saw are its live keys.
+    if (cfg_.mcp.identity_auth()) {
+      for (auto& subject : mcp_usage_->identity_keys()) live.push_back(std::move(subject));
+    }
     rapidjson::StringBuffer sb;
     Writer w(sb);
     if (route == McpApiRoute::Usage) {
@@ -1354,7 +1413,11 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
   // A read of the page also uses this cost.
   if (route == McpApiRoute::KeyCost) return handle_mcp_key_cost(req, res, now);
   if (!store.manage_from_ui()) {
-    api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
+    if (cfg_.mcp.identity_auth()) {
+      api_error(res, 403, "manage_disabled", "the keys live in the portal (mcp.auth_mode = \"identity\"): ChDash has no key of its own");
+    } else {
+      api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
+    }
     return;
   }
   if (route == McpApiRoute::KeyCreate && req.body.size() > 256 * 1024) {

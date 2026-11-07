@@ -1046,7 +1046,8 @@ void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
 // ---- keys, windows, text --------------------------------------------------------------------------
 
 McpUsageKeyRef mcp_usage_key_ref(const McpKey& key) {
-  return McpUsageKeyRef{key.id, key.name, key.hosts.size() == 1 ? key.hosts.front() : std::string(), key.source};
+  // The virtual key of the identity mode has "*" for its hosts: it names no host.
+  return McpUsageKeyRef{key.id, key.name, key.hosts.size() == 1 && !mcp_key_is_identity(key) ? key.hosts.front() : std::string(), key.source};
 }
 
 bool mcp_valid_key_id(std::string_view id) {
@@ -1178,7 +1179,8 @@ void McpUsage::sync_live_keys(const std::vector<McpUsageKeyRef>& live, int64_t n
     dirty_ = true;
   }
   for (auto& [id, entry] : state_.entries) {
-    if (ids.count(id) || entry.deleted_at != 0) continue;
+    // A subject of the identity mode is in no store of keys: it is never a deleted key.
+    if (ids.count(id) || entry.deleted_at != 0 || entry.key.source == kMcpSourceIdentity) continue;
     entry.deleted_at = now;
     dirty_ = true;
   }
@@ -1188,6 +1190,9 @@ void McpUsage::sync_live_keys(const std::vector<McpUsageKeyRef>& live, int64_t n
 void McpUsage::record(const McpUsageEvent& event) {
   if (event.key_id.empty()) return;
   std::lock_guard<std::mutex> lock(mu_);
+  // A file holds kMcpUsageMaxEntries entries at most (the store refuses a larger file). The subjects of the identity mode come from the
+  // identity tokens, not from a store of keys of a fixed size: past the largest count, a new subject is not counted.
+  if (state_.entries.size() >= kMcpUsageMaxEntries && state_.entries.find(std::string(event.key_id)) == state_.entries.end()) return;
   Entry& entry = state_.entries[std::string(event.key_id)];
   if (entry.deleted_at == 0) {
     // The key as it is now. A key of the configuration can change its host from one start to the next.
@@ -1292,6 +1297,16 @@ std::unordered_map<std::string, int64_t> McpUsage::last_used_all() const {
       last = std::max(last, entry.last_used);
     }
   }
+  return out;
+}
+
+std::vector<McpUsageKeyRef> McpUsage::identity_keys() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<McpUsageKeyRef> out;
+  for (const auto& [id, entry] : state_.entries) {
+    if (entry.key.source == kMcpSourceIdentity && entry.deleted_at == 0) out.push_back(entry.key);
+  }
+  std::sort(out.begin(), out.end(), [](const McpUsageKeyRef& a, const McpUsageKeyRef& b) { return a.id < b.id; });
   return out;
 }
 

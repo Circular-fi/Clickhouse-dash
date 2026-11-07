@@ -79,6 +79,7 @@ const std::vector<AccessAction>& access_actions() {
       {"mcp.keys.read", false, false, "See the MCP keys and what each key can read."},
       {"mcp.keys.write", false, false, "Make, delete and adopt MCP keys."},
       {"mcp.usage.read", false, false, "See the usage and the cost of the MCP keys."},
+      {"mcp.session", false, false, "Use the MCP endpoint: its requests that call no tool, and the tools that read no data of a host."},
   };
   return actions;
 }
@@ -100,6 +101,7 @@ bool access_action_published(const AccessAction& action, const AccessFeatures& f
   if (name == "mcp.keys.read") return features.mcp;
   if (name == "mcp.keys.write") return features.mcp && features.mcp_keys_write;
   if (name == "mcp.usage.read") return features.mcp;
+  if (name == "mcp.session") return features.mcp && features.mcp_session;
   return true;
 }
 

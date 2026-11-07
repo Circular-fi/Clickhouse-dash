@@ -31,7 +31,7 @@ namespace {
 using namespace mcp_usage;
 
 // The bounds of a file that is read, apart from the bounds of McpUsageFileLimits. They set the keys and the cells that a file may hold, and the instances that are read.
-constexpr size_t kMaxFileKeys = 10000;
+constexpr size_t kMaxFileKeys = kMcpUsageMaxEntries;
 constexpr size_t kMaxFileCells = 2000000;
 constexpr size_t kMaxInstances = 256;
 // The window of a zstd frame that is read has a maximum of 16 MiB. A frame that asks for more memory is refused.

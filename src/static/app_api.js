@@ -633,6 +633,8 @@ function normalizeMcpMeta(raw) {
     authHeader: mcpText(meta.auth_header),
     storageConfigured: meta.storage_configured === true,
     manageFromUi: meta.manage_from_ui !== false,
+    // "keys" (the keys of ChDash) or "identity" (the identity token of the portal: the keys live in the portal).
+    authMode: mcpText(meta.auth_mode) || "keys",
     canManage: can,
     protocolVersions: mcpList(meta.protocol_versions),
     hosts: (Array.isArray(meta.hosts) ? meta.hosts : []).map((host) => ({

@@ -702,6 +702,55 @@ void test_access_block() {
            std::string(""));
 }
 
+// ---- mcp.auth_mode: the keys of ChDash or the identity token (docs/mcp.md, "The identity mode") ----
+
+void test_mcp_auth_mode() {
+  write_file(dir + "/mode-identity.pem",
+             "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n-----END PUBLIC KEY-----\n");
+  write_file(dir + "/mode-pdp-token", "pdp-secret\n");
+  const std::string authzen = "access {\n mode = \"authzen\"\n identity {\n issuer = \"https://issuer\"\n audience = \"db\"\n public_keys_file = \"" + dir +
+                              "/mode-identity.pem\"\n }\n pdp {\n url = \"http://pdp:4182\"\n token_file = \"" + dir + "/mode-pdp-token\"\n }\n}\n";
+  const std::string hosts =
+      "clickhouse {\n host {\n name = \"h\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\"\n }\n}\n";
+  const auto source = [&](const AppConfig& cfg, const std::string& name) {
+    for (const auto& value : config::effective_config(cfg)) {
+      if (value.name == name) return value.source + "|" + value.value;
+    }
+    return std::string("missing");
+  };
+  // The default is the keys of ChDash: nothing changes for a configuration that does not name the key.
+  const AppConfig keys = load("mcp {\n enabled = true\n storage_file = \"" + dir + "/mode-keys.json\"\n}\n" + hosts, false);
+  CHECK_EQ(keys.mcp.auth_mode, std::string("keys"));
+  CHECK(!keys.mcp.identity_auth());
+  CHECK_EQ(source(keys, "mcp.auth_mode"), std::string("default|keys"));
+  // The identity mode needs no key of ChDash and the authzen mode.
+  const AppConfig identity = load("mcp {\n enabled = true\n auth_mode = \"identity\"\n}\n" + authzen + hosts, false);
+  CHECK(identity.mcp.identity_auth());
+  CHECK_EQ(source(identity, "mcp.auth_mode"), std::string("file|identity"));
+  CHECK(identity.mcp.keys.empty());
+  CHECK(!identity.mcp.manage_from_ui);
+  CHECK(identity.mcp.keys_mode == McpKeysMode::Static);
+  // A value outside the list stops the start and names the key and the value.
+  const std::string bad = error_of("mcp {\n auth_mode = \"both\"\n}\n" + authzen + hosts, false);
+  CHECK(contains(bad, "mcp.auth_mode") && contains(bad, "both"));
+  // The contradictions name the two keys.
+  const std::string open = error_of("mcp {\n auth_mode = \"identity\"\n}\n" + hosts, false);
+  CHECK(contains(open, "mcp.auth_mode") && contains(open, "access.mode") && contains(open, "contradict"));
+  // The same, with MCP off: the file still contradicts itself.
+  CHECK(contains(error_of("mcp {\n enabled = false\n auth_mode = \"identity\"\n}\n" + hosts, false), "access.mode"));
+  for (const char* extra : {"storage_file = \"/tmp/k.json\"", "manage_from_ui = true", "auth_header = \"X-Key\""}) {
+    const std::string message = error_of(std::string("mcp {\n enabled = true\n auth_mode = \"identity\"\n ") + extra + "\n}\n" + authzen + hosts, false);
+    CHECK(contains(message, "mcp.auth_mode") && contains(message, "contradict"));
+  }
+  const std::string with_block = error_of("mcp {\n enabled = true\n auth_mode = \"identity\"\n keys {\n mode = \"static\"\n }\n}\n" + authzen + hosts, false);
+  CHECK(contains(with_block, "mcp.keys") && contains(with_block, "contradict"));
+  const std::string with_key = error_of("mcp {\n enabled = true\n auth_mode = \"identity\"\n mcp_key \"a\" {\n token_file = \"" + dir + "/mode-pdp-token\"\n }\n}\n" +
+                                        authzen + hosts, false);
+  CHECK(contains(with_key, "mcp_key") && contains(with_key, "contradict"));
+  // The mode keys with no key source still stops the start, as before.
+  CHECK(contains(error_of("mcp {\n enabled = true\n}\n" + hosts, false), "mcp.storage_file"));
+}
+
 // ---- the identity block: clock_skew, JWK Set, and the network warning (docs/access.md) ----
 
 void test_access_identity_extras() {
@@ -1059,6 +1108,7 @@ int main() {
   test_telemetry_block();
   test_access_block();
   test_access_identity_extras();
+  test_mcp_auth_mode();
   try {
     test_mcp_key_block();
   } catch (const std::exception& e) {

@@ -284,6 +284,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 | `auth_header` | text | `Authorization` | an HTTP header name | The request header that carries the key. Authorization takes Bearer <key>. |
 | `allowed_origins` | list of texts | `[]` | https://host[:port], at most 256 bytes each | The origins of the pages that may call from a browser. A call with no Origin is always accepted. |
 | `enabled` | boolean | `false` |  | Serve the MCP endpoint, POST /mcp. |
+| `auth_mode` | one of keys\|identity | `keys` |  | How POST /mcp knows the caller. keys: the keys of ChDash (the mcp_key blocks and the keys of the page), as in older versions. identity: the identity token of the access gateway, in the header access.identity.header. The subject of the token is a person or a key of the portal. The PDP decides each request, and the keys of ChDash do not count. identity needs access.mode = "authzen". It stops the start when the file has an mcp_key block, mcp.storage_file, mcp.keys, mcp.manage_from_ui or mcp.auth_header. Use identity only behind the portal. |
 | `storage_file` | text |  |  | The JSON file of the keys that are made on the MCP page. |
 | `manage_from_ui` | boolean | `true` |  | Deprecated: use keys.mode. false is the static mode, true the hybrid mode. It stops the start when keys.mode is also in the file. |
 | `max_rows` | integer | `1000` | 1 to 1000000 rows | Rows that a call returns, at most. A key can lower it. |

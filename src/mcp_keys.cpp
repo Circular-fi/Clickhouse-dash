@@ -16,6 +16,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <iterator>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -882,6 +883,14 @@ bool McpRateLimiter::allow(const std::string& key_id, int64_t now_ms, int64_t pe
   if (per_minute <= 0) return true;
   std::lock_guard<std::mutex> lock(mu_);
   const double capacity = static_cast<double>(per_minute);
+  // The identity mode has one bucket for each subject, and the identity tokens give the subjects. A bucket that a minute of rest
+  // filled again is the same as no bucket: the map drops these buckets when it grows large.
+  constexpr size_t kMaxBuckets = 65536;
+  if (buckets_.size() >= kMaxBuckets && buckets_.find(key_id) == buckets_.end()) {
+    for (auto bucket = buckets_.begin(); bucket != buckets_.end();) {
+      bucket = now_ms - bucket->second.at_ms >= 60000 ? buckets_.erase(bucket) : std::next(bucket);
+    }
+  }
   const auto it = buckets_.try_emplace(key_id, Bucket{capacity, now_ms}).first;
   Bucket& bucket = it->second;
   const double rate = capacity / 60000.0;  // tokens per millisecond

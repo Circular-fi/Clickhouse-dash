@@ -41,6 +41,10 @@ inline constexpr size_t kMcpCreatorMaxBytes = 256;  // the longest `sub` of an i
 
 using McpHash = std::array<uint8_t, 32>;
 
+// The source of the virtual key of a request in the identity mode (mcp.auth_mode = "identity"): the subject of the identity token.
+// It is never in the store of the keys. The other sources are "config" and "ui".
+inline constexpr const char* kMcpSourceIdentity = "identity";
+
 struct McpKey {
   std::string id;      // config: the name; UI: ui_<12 hex>
   std::string name;
@@ -67,6 +71,9 @@ struct McpKey {
   std::optional<int64_t> created_at;  // Unix seconds; config keys have none
   std::optional<int64_t> updated_at;
 };
+
+// True for the virtual key of the identity mode (mcp_identity_key in mcp_subject_access.hpp).
+inline bool mcp_key_is_identity(const McpKey& key) { return key.source == kMcpSourceIdentity; }
 
 // ---- time ---------------------------------------------------------------
 

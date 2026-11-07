@@ -47,6 +47,8 @@ class McpUsageStore;
 
 inline constexpr int kMcpUsageFileVersion = 1;
 inline constexpr int64_t kMcpUsageMaxRetentionDays = 365;
+// The most entries of one state. The file of the store (kMaxFileKeys in mcp_usage_store.cpp) has no more.
+inline constexpr size_t kMcpUsageMaxEntries = 10000;
 // The tiers of an entry: m1, m5, m15, h3, h12 and d1. They are the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours and 1 day.
 inline constexpr size_t kMcpUsageTiers = 6;
 // The values of each filter of the overview.
@@ -202,6 +204,9 @@ public:
   // The key as an entry names it. A deleted key counts too, and so does a key that only another instance saw. The result is nullopt when no entry has the key.
   std::optional<McpUsageKeyRef> entry_key(const std::string& id) const;
 
+  // The subjects of the identity mode that this instance counted and that are not deleted, by id. They are the live keys of the answers in
+  // that mode: no store of keys holds them.
+  std::vector<McpUsageKeyRef> identity_keys() const;
   // The instances that the answers read. This instance comes first, then the others by name.
   std::vector<McpUsageInstance> instances() const;
 

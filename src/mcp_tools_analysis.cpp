@@ -207,6 +207,8 @@ std::string tool_analysis_my_usage(Ctx& ctx, const rapidjson::Value& args) {
   query.instances = opt_names(args, "instance");
   check_instances(&query.instances);
   const bool include_cost = opt_bool(args, "include_cost").value_or(false);
+  // The cost reads the host of a key. The identity mode has no such host: its statements name the subject, on many hosts.
+  if (include_cost && mcp_key_is_identity(ctx.key)) fail("invalid_argument", "include_cost is not available when the endpoint takes the identity token");
 
   std::string json = relay([&] { return server.my_usage(ctx.key, window, query, ctx.now); });
   if (include_cost) {
