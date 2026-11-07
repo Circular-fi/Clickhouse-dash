@@ -12,6 +12,7 @@
 #include "access_actions.hpp"
 #include "access_pages.hpp"
 #include "access_identity.hpp"
+#include "access_options.hpp"
 #include "access_grants.hpp"
 #include "access_pdp.hpp"
 #include "access_resource.hpp"
@@ -24,9 +25,11 @@ extern "C" {
 }
 
 #include <array>
+#include <cstdio>
 #include <chrono>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -536,10 +539,10 @@ void test_actions_document() {
     CHECK(std::strlen(action["description"].GetString()) > 0);
   }
   const std::vector<std::string> expected = {"query.run.read", "query.run.write", "query.export", "library.read", "library.write", "explorer.read",
-                                             "system.read", "system.kill_query", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"};
+                                             "system.read", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"};
   CHECK_EQ(types.size(), expected.size());
   for (const auto& name : expected) CHECK(types.count(name) == 1);
-  CHECK(types.count("access") == 0);
+  CHECK(types.count("access") == 0 && types.count("system.kill_query") == 0);
   // The tree under the service (contract 11.4): host under the service, database under the host.
   CHECK(doc["resource_types"].IsArray() && doc["resource_types"].Size() == 2);
   CHECK(doc["resource_types"][0]["name"].GetString() == std::string("host") && doc["resource_types"][0]["parent"].GetString() == std::string("service"));
@@ -549,7 +552,7 @@ void test_actions_document() {
   const std::vector<std::string> host = {"service", "host"};
   const std::vector<std::string> service = {"service"};
   for (const auto& name : {"query.run.read", "query.run.write", "explorer.read"}) CHECK(types[name] == three);
-  for (const auto& name : {"query.export", "system.read", "system.kill_query", "observability.read"}) CHECK(types[name] == host);
+  for (const auto& name : {"query.export", "system.read", "observability.read"}) CHECK(types[name] == host);
   for (const auto& name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(types[name] == service);
   // The table of the code agrees with the document.
   for (const AccessAction& action : access_actions()) CHECK(!action.database || action.host);
@@ -568,8 +571,8 @@ std::set<std::string> published_names(const AccessFeatures& features) {
 
 void test_actions_of_the_features_that_are_on() {
   const std::set<std::string> always = {"query.run.read", "query.run.write", "query.export"};
-  // Every feature on: the 12 actions.
-  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(12));
+  // Every feature on: the 11 actions.
+  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(11));
   // Every feature off: the query, the run and the export only.
   AccessFeatures off;
   off.query_library = off.query_library_writable = off.explorer = off.system = off.observability = off.mcp = off.mcp_keys_write = false;
@@ -578,7 +581,7 @@ void test_actions_of_the_features_that_are_on() {
   AccessFeatures mcp_off;
   mcp_off.mcp = false;
   const auto without_mcp = published_names(mcp_off);
-  CHECK_EQ(without_mcp.size(), size_t(9));
+  CHECK_EQ(without_mcp.size(), size_t(8));
   for (const auto& name : {"mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(without_mcp.count(name) == 0);
   // MCP on with the keys in static mode: the keys and their usage can be read, and the page makes no key.
   AccessFeatures mcp_static;
@@ -594,11 +597,11 @@ void test_actions_of_the_features_that_are_on() {
   no_library.query_library = false;
   const auto library_off = published_names(no_library);
   CHECK(library_off.count("library.read") == 0 && library_off.count("library.write") == 0);
-  // The System page: both of its actions go. The observability and the Explorer have one action each.
+  // The System page: its action goes. The observability and the Explorer have one action each.
   AccessFeatures system_off;
   system_off.system = false;
   const auto without_system = published_names(system_off);
-  CHECK(without_system.count("system.read") == 0 && without_system.count("system.kill_query") == 0);
+  CHECK(without_system.count("system.read") == 0);
   AccessFeatures observability_off;
   observability_off.observability = false;
   CHECK(published_names(observability_off).count("observability.read") == 0);
@@ -613,13 +616,13 @@ void test_actions_of_the_features_that_are_on() {
   CHECK(access_navigation_questions("db", hosts, "analytics", mcp_off).size() < access_navigation_questions("db", hosts, "analytics").size());
   for (const auto& q : access_navigation_questions("db", hosts, "analytics", explorer_off)) CHECK(std::string(q.action) != "explorer.read");
   // The summary of GET /api/version lists the published actions.
-  CHECK_EQ(access_action_summary({}, {}, mcp_off).size(), size_t(9));
-  CHECK_EQ(access_action_summary({}, {}).size(), size_t(12));
+  CHECK_EQ(access_action_summary({}, {}, mcp_off).size(), size_t(8));
+  CHECK_EQ(access_action_summary({}, {}).size(), size_t(11));
 }
 
 std::string rule_text(const char* method, const char* path) {
   const AccessRule rule = access_rule(method, path);
-  const std::string where = std::string(rule.host ? "@host" : "") + (rule.database_param ? "/database" : "") + (rule.body ? " body" : "");
+  const std::string where = std::string(rule.host ? "@host" : "") + (rule.database_param ? "/database" : "") + (rule.body ? " body" : "") + (rule.list_filter ? " list" : "");
   switch (rule.kind) {
     case AccessRuleKind::Exempt: return "exempt";
     case AccessRuleKind::Identity: return "identity";
@@ -635,7 +638,7 @@ void test_route_rules() {
   // Every route of server.cpp, with what it needs.
   const std::vector<std::tuple<const char*, const char*, const char*>> table = {
       {"GET", "/livez", "exempt"}, {"GET", "/readyz", "exempt"}, {"GET", "/healthz", "exempt"}, {"GET", "/metrics", "exempt"},
-      {"GET", "/.well-known/access-actions", "exempt"}, {"POST", "/mcp", "exempt"}, {"GET", "/mcp", "exempt"},
+      {"GET", "/.well-known/procurauth/actions", "exempt"}, {"POST", "/mcp", "exempt"}, {"GET", "/mcp", "exempt"},
       {"GET", "/", "identity"}, {"GET", "/query", "identity"}, {"GET", "/system/queries/123", "identity"}, {"GET", "/explorer/catalog", "identity"},
       {"GET", "/observability/traces", "identity"}, {"GET", "/mcp-integration/usage", "identity"}, {"GET", "/static/app_common.js", "identity"},
       {"HEAD", "/static/app_common.js", "identity"},
@@ -658,10 +661,16 @@ void test_route_rules() {
       {"GET", "/api/mcp/keys/k1", "unknown"}, {"GET", "/api/mcp/keys/k1/other", "unknown"}, {"GET", "/api/mcp/other", "unknown"},
       {"POST", "/api/mcp/keys/k1/adopt", "mcp.keys.write"}, {"GET", "/api/mcp/keys/k1/adopt", "unknown"},
       {"GET", "/api/system/overview", "system.read@host"}, {"GET", "/api/system/queries/123", "system.read@host"}, {"GET", "/api/explorer/ops/activity", "system.read@host"},
-      {"GET", "/api/explorer/catalog", "explorer.read@host/database"}, {"GET", "/api/explorer/table", "explorer.read@host/database"},
-      {"GET", "/api/explorer/graph/definition", "explorer.read@host/database"}, {"GET", "/api/explorer/storage", "explorer.read@host/database"},
+      {"GET", "/api/explorer/catalog", "explorer.read@host/database list"}, {"GET", "/api/explorer/table", "explorer.read@host/database"},
+      {"GET", "/api/explorer/graph", "explorer.read@host/database list"}, {"POST", "/api/explorer/catalog", "unknown"},
+      {"GET", "/api/explorer/graph/definition", "explorer.read@host/database"}, {"GET", "/api/explorer/storage", "explorer.read@host/database list"},
+      {"GET", "/api/explorer/functions", "explorer.read@host/database"},
       {"POST", "/api/explorer/table/data", "explorer.read@host/database body"},
       {"GET", "/api/unknown", "unknown"}, {"DELETE", "/api/version", "unknown"},
+      // The route of the options needs the token. The former path of the document and any other path under /.well-known/ have no route: the
+      // router answers 404, also without a token.
+      {"GET", "/.well-known/procurauth/resources", "identity"}, {"POST", "/.well-known/procurauth/resources", "unknown"},
+      {"GET", "/.well-known/access-actions", "exempt"}, {"GET", "/.well-known/other", "exempt"},
   };
   for (const auto& [method, path, expected] : table) {
     const std::string got = rule_text(method, path);
@@ -1293,7 +1302,7 @@ void test_navigation_pages() {
   size_t host_actions = 0;
   for (const auto& action : access_actions()) (action.host ? host_actions : service_actions) += 1;
   CHECK_EQ(service_actions, size_t(5));
-  CHECK_EQ(host_actions, size_t(7));
+  CHECK_EQ(host_actions, size_t(6));
   const auto questions = access_navigation_questions("db", hosts, "chdash_ui");
   CHECK_EQ(questions.size(), service_actions + 2 * host_actions + 2);
   CHECK(questions.back().action == "explorer.read" && questions.back().resource.type == "database" && questions.back().resource.id == "chdash_ui");
@@ -1367,6 +1376,246 @@ void test_navigation_pages() {
   CHECK(access_first_page({}) == nullptr);
 }
 
+
+// ---- the resources of the document and the route of the options (ProcurAuth 5.2, 5.3c, 5.6 to 5.9) -------------------------
+
+namespace {
+
+size_t code_points(const std::string& text) {
+  size_t n = 0;
+  for (const unsigned char c : text) n += (c & 0xC0) != 0x80;
+  return n;
+}
+
+rapidjson::Document parse_json(const std::string& text) {
+  rapidjson::Document doc;
+  doc.Parse(text.c_str(), text.size());
+  return doc;
+}
+
+} // namespace
+
+// "resources" has one node for each host: path host:<encoded id>, label of 60 characters at most, and no "actions".
+void test_resources_member_of_the_document() {
+  CHECK(!parse_json(access_actions_json("db")).HasMember("resources"));
+
+  const std::vector<AccessHostEntry> hosts = {{"prod", "Production"}, {"a b/c", ""}, {"eu\xC3\xA9", std::string(200, 'x')}};
+  const rapidjson::Document doc = parse_json(access_actions_json("db", AccessFeatures{}, hosts));
+  CHECK(doc.IsObject() && doc.HasMember("resources") && doc["resources"].IsArray());
+  CHECK_EQ(doc["resources"].Size(), rapidjson::SizeType(3));
+  CHECK_EQ(std::string(doc["resources"][0]["path"].GetString()), std::string("host:prod"));
+  CHECK_EQ(std::string(doc["resources"][0]["label"].GetString()), std::string("Production"));
+  // The id is encoded as RFC 3986 says; a missing label is the id.
+  CHECK_EQ(std::string(doc["resources"][1]["path"].GetString()), std::string("host:a%20b%2Fc"));
+  CHECK_EQ(std::string(doc["resources"][1]["label"].GetString()), std::string("a b/c"));
+  CHECK_EQ(std::string(doc["resources"][2]["path"].GetString()), std::string("host:eu%C3%A9"));
+  CHECK_EQ(code_points(doc["resources"][2]["label"].GetString()), size_t(60));
+  for (const auto& node : doc["resources"].GetArray()) CHECK(!node.HasMember("actions"));
+  // The cut counts characters, not bytes, and never cuts a sequence.
+  std::string wide;
+  for (int i = 0; i < 80; ++i) wide += "\xC3\xA9";
+  const std::string cut = access_cut_label(wide);
+  CHECK_EQ(code_points(cut), size_t(60));
+  CHECK_EQ(cut.size(), size_t(120));
+  CHECK_EQ(access_cut_label("a\tb"), std::string("a b"));
+  CHECK_EQ(access_cut_label("\xFF"), std::string());
+}
+
+// A4: the document of the largest configuration stays within the numbers that a reader accepts (5.3c).
+void test_document_limits() {
+  std::vector<AccessHostEntry> hosts;
+  for (int i = 0; i < 256; ++i) {
+    char id[32];
+    std::snprintf(id, sizeof id, "clickhouse-prod-%03d", i);
+    hosts.push_back({id, std::string("A label of a host that is longer than sixty characters, number ") + id});
+  }
+  const std::string json = access_actions_json("clickhouse-dash-production", AccessFeatures{}, hosts);
+  CHECK(json.size() <= 64 * 1024);
+  const rapidjson::Document doc = parse_json(json);
+  CHECK(doc.IsObject());
+  CHECK(doc["actions"].Size() <= 64);
+  CHECK(doc["resource_types"].Size() <= 16);
+  CHECK_EQ(doc["resources"].Size(), rapidjson::SizeType(256));
+  for (const auto& node : doc["resources"].GetArray()) CHECK(code_points(node["label"].GetString()) <= 60);
+  std::set<std::string> names;
+  for (const auto& action : doc["actions"].GetArray()) {
+    const std::string name = action["name"].GetString();
+    CHECK(name.size() >= 1 && name.size() <= 64);
+    CHECK(names.insert(name).second);
+    CHECK(code_points(action["description"].GetString()) <= 300);
+    std::set<std::string> kinds;
+    for (const auto& type : action["resource_types"].GetArray()) CHECK(kinds.insert(type.GetString()).second);
+  }
+  for (const auto& type : doc["resource_types"].GetArray()) {
+    const std::string name = type["name"].GetString();
+    CHECK(name.size() >= 1 && name.size() <= 32 && name != "service");
+    CHECK(code_points(type["description"].GetString()) <= 300);
+  }
+  // The table of the code is within the bounds, also for an action that the features turn off.
+  for (const AccessAction& action : access_actions()) CHECK(code_points(action.description) <= 300);
+  CHECK(access_actions().size() <= 64);
+}
+
+void test_options_parser() {
+  const auto parse = [](const std::string& query) { return access_options_parse(query); };
+  // The first level: hosts.
+  OptionsParse p = parse("type=host");
+  CHECK(p.ok && p.query.type == "host" && p.query.parent.empty() && p.query.limit == 50 && !p.query.after && p.query.q.empty());
+  // The databases of a host (the example of 5.8).
+  p = parse("parent=host%3Aprod&type=database&q=test&limit=2");
+  CHECK(p.ok && p.query.parent.size() == 1 && p.query.parent[0].type == "host" && p.query.parent[0].id == "prod" && p.query.q == "test" &&
+        p.query.limit == 2);
+  // The id of the parent is decoded a second time: %2520 is %20 in the value, and a space in the id.
+  p = parse("parent=host%3Aa%2520b&type=database");
+  CHECK(p.ok && p.query.parent[0].id == "a b");
+  // The sign + is a plus, never a space. An unknown parameter is ignored.
+  p = parse("type=host&q=a+b&x_unknown=1");
+  CHECK(p.ok && p.query.q == "a+b");
+  // The limit is capped at 50, and 50 is the default.
+  CHECK(parse("type=host&limit=500").query.limit == 50);
+  CHECK(parse("type=host&limit=1").query.limit == 1);
+  // U76: no type. U77: a repeated parameter. U78: a limit that is not a whole number from 1. U79: a parent of the type that is asked.
+  // U80: a bad escape.
+  const std::vector<std::string> bad = {"", "limit=5", "type=", "type=host&type=host", "type=host&limit=2&limit=2", "type=host&limit=0",
+                                        "type=host&limit=-1", "type=host&limit=abc", "type=host&limit=1.5", "type=host&limit=",
+                                        "type=host&limit=0000000000", "parent=host%3Ax&type=host", "parent=%zz&type=host", "type=ho%zt",
+                                        "type=host&q=%", "type=host&q=%4", "type=database", "type=nothing", "parent=host%3Aprod&type=host",
+                                        "parent=database%3Ax&type=database", "parent=host%3Ax%2Fdatabase%3Ay&type=database",
+                                        "parent=&type=database", "parent=prod&type=database", "parent=host%3A&type=database",
+                                        "parent=host%3Aa%zz&type=database", "type=host&after=!!", "type=host&q=%FF",
+                                        "parent=host%3Aa%2500b&type=database", "type=host&q=" + std::string(257, 'a')};
+  for (const auto& query : bad) CHECK(!parse(query).ok);
+  CHECK(parse("type=host&q=" + std::string(256, 'a')).ok);
+  // The cursor is the id in base64url. A text that is not a cursor of this route is bad.
+  for (const char* id : {"a", "ab", "abc", "abcd", "a/b c", "caf\xC3\xA9"}) {
+    const std::string cursor = access_options_cursor_encode(id);
+    std::string back;
+    CHECK(access_options_cursor_decode(cursor, &back) && back == id);
+    const OptionsParse with = parse("type=host&after=" + cursor);
+    CHECK(with.ok && with.query.after && *with.query.after == id);
+  }
+  std::string unused;
+  CHECK(!access_options_cursor_decode("", &unused));
+  CHECK(!access_options_cursor_decode("YQ=", &unused));
+  CHECK(!access_options_cursor_decode("YR", &unused));  // not the canonical text of an id
+}
+
+void test_options_page() {
+  std::vector<OptionsCandidate> all;
+  for (const char* id : {"zeta", "Alpha", "beta", "alpha2", "gamma", "delta"}) all.push_back({id, id});
+  std::set<std::string> visible = {"Alpha", "alpha2", "delta", "zeta"};
+  std::vector<std::vector<std::string>> groups;
+  const OptionsDecide decide = [&](const std::vector<std::string>& ids) -> std::optional<std::vector<bool>> {
+    groups.push_back(ids);
+    std::vector<bool> out;
+    for (const auto& id : ids) out.push_back(visible.count(id) != 0);
+    return out;
+  };
+  const auto ids_of = [](const OptionsPage& page) {
+    std::vector<std::string> out;
+    for (const auto& item : page.items) out.push_back(item.id);
+    return out;
+  };
+  OptionsQuery query;
+  // The order has no case: Alpha, alpha2, beta, delta, gamma, zeta. The PDP refuses beta and gamma.
+  OptionsPage page = access_options_page(all, query, 3, decide);
+  CHECK(ids_of(page) == (std::vector<std::string>{"Alpha", "alpha2", "delta", "zeta"}));
+  CHECK(page.next.empty() && !page.failed);
+  CHECK_EQ(page.questions, size_t(18));
+  const rapidjson::Document doc = parse_json(access_options_json(page, false));
+  CHECK(doc["items"].Size() == 4 && doc["next"].IsNull());
+  CHECK(std::string(doc["items"][0]["id"].GetString()) == "Alpha" && std::string(doc["items"][0]["label"].GetString()) == "Alpha");
+  CHECK(doc["items"][0]["has_children"].IsBool() && !doc["items"][0]["has_children"].GetBool());
+  CHECK(parse_json(access_options_json(page, true))["items"][0]["has_children"].GetBool());
+
+  // A limit of two: the cursor continues after the last candidate that was asked. The pages give the whole list, once each.
+  query.limit = 2;
+  std::vector<std::string> walked;
+  std::optional<std::string> after;
+  for (int turn = 0; turn < 10; ++turn) {
+    query.after = after;
+    page = access_options_page(all, query, 1, decide);
+    CHECK(page.items.size() <= 2);
+    for (const auto& item : page.items) walked.push_back(item.id);
+    if (page.next.empty()) break;
+    std::string id;
+    CHECK(access_options_cursor_decode(page.next, &id));
+    after = id;
+  }
+  CHECK(walked == (std::vector<std::string>{"Alpha", "alpha2", "delta", "zeta"}));
+
+  // The search: the id or the label holds the text, without the case.
+  query = OptionsQuery{};
+  query.q = "ALPHA";
+  CHECK(ids_of(access_options_page(all, query, 1, decide)) == (std::vector<std::string>{"Alpha", "alpha2"}));
+  std::vector<OptionsCandidate> labelled = {{"h1", "Production"}, {"h2", "Staging"}};
+  query.q = "stag";
+  visible = {"h1", "h2"};
+  CHECK(ids_of(access_options_page(labelled, query, 1, decide)) == (std::vector<std::string>{"h2"}));
+
+  // U71: nothing is visible: no item, and the key next is there (null).
+  visible.clear();
+  query = OptionsQuery{};
+  page = access_options_page(all, query, 1, decide);
+  CHECK(page.items.empty() && page.next.empty() && !page.failed);
+  CHECK(parse_json(access_options_json(page, false))["next"].IsNull());
+
+  // U74: no valid answer of the PDP gives a failure and no item.
+  const OptionsDecide broken = [](const std::vector<std::string>&) -> std::optional<std::vector<bool>> { return std::nullopt; };
+  page = access_options_page(all, query, 1, broken);
+  CHECK(page.failed && page.items.empty());
+
+  // The bound of the questions: 600 candidates that the PDP refuses, 3 questions for each. A request asks 200 questions at most, gives no item
+  // and gives a cursor that moves on.
+  std::vector<OptionsCandidate> many;
+  for (int i = 0; i < 600; ++i) {
+    char id[16];
+    std::snprintf(id, sizeof id, "db%04d", i);
+    many.push_back({id, id});
+  }
+  groups.clear();
+  query = OptionsQuery{};
+  page = access_options_page(many, query, 3, decide);
+  CHECK(page.items.empty() && !page.next.empty() && page.questions <= kOptionsMaxQuestions);
+  size_t asked = 0;
+  for (const auto& group : groups) asked += group.size();
+  CHECK_EQ(asked * 3, page.questions);
+  std::string last;
+  CHECK(access_options_cursor_decode(page.next, &last) && last == "db0065");
+  query.after = last;
+  page = access_options_page(many, query, 3, decide);
+  CHECK(access_options_cursor_decode(page.next, &last) && last == "db0131");
+
+  // The items are at most 50, and an id that cannot be an id of a node is dropped.
+  visible.clear();
+  for (const auto& candidate : many) visible.insert(candidate.id);
+  many.push_back({"bad\x01id", "bad"});
+  query = OptionsQuery{};
+  query.limit = 500;
+  page = access_options_page(many, query, 1, decide);
+  CHECK_EQ(page.items.size(), size_t(50));
+  CHECK(!page.next.empty());
+  // A label is cut to 60 characters.
+  std::vector<OptionsCandidate> long_label = {{"x", std::string(100, 'l')}};
+  visible = {"x"};
+  query = OptionsQuery{};
+  CHECK_EQ(access_options_page(long_label, query, 1, decide).items[0].label.size(), size_t(60));
+  // The answer stays within 64 KiB: 50 ids of 256 bytes do not fit, and the cursor continues after the last item.
+  std::vector<OptionsCandidate> fat;
+  visible.clear();
+  for (int i = 0; i < 50; ++i) {
+    char head[8];
+    std::snprintf(head, sizeof head, "%03d", i);
+    const std::string id = std::string(head) + std::string(253, '"');
+    fat.push_back({id, id});
+    visible.insert(id);
+  }
+  query = OptionsQuery{};
+  page = access_options_page(fat, query, 1, decide);
+  CHECK(access_options_json(page, false).size() <= 64 * 1024);
+  CHECK(!page.items.empty() && page.items.size() < 50 && !page.next.empty());
+}
+
 int main() {
   RUN(test_ed25519_vectors);
   RUN(test_es256_vectors);
@@ -1390,6 +1639,10 @@ int main() {
   RUN(test_resources);
   RUN(test_host_hierarchy);
   RUN(test_navigation_pages);
+  RUN(test_resources_member_of_the_document);
+  RUN(test_document_limits);
+  RUN(test_options_parser);
+  RUN(test_options_page);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

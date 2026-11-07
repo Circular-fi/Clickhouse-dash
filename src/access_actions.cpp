@@ -1,5 +1,6 @@
 #include "access_actions.hpp"
 
+#include "access_resource.hpp"
 #include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -74,7 +75,6 @@ const std::vector<AccessAction>& access_actions() {
       {"library.write", false, false, "Save, change, move, delete and import the queries of the server query library."},
       {"explorer.read", true, true, "Open the Explorer: databases, tables, columns, data preview, lineage and storage."},
       {"system.read", true, false, "Open the System page: overview, queries, disks, activity and Keeper."},
-      {"system.kill_query", true, false, "Stop the queries of other users. ChDash has no such control yet: the action is reserved."},
       {"observability.read", true, false, "Open the Traces, Logs and Metrics pages."},
       {"mcp.keys.read", false, false, "See the MCP keys and what each key can read."},
       {"mcp.keys.write", false, false, "Make, delete and adopt MCP keys."},
@@ -111,7 +111,7 @@ std::vector<AccessAction> access_published_actions(const AccessFeatures& feature
   return out;
 }
 
-std::string access_actions_json(std::string_view server, const AccessFeatures& features) {
+std::string access_actions_json(std::string_view server, const AccessFeatures& features, const std::vector<AccessHostEntry>& hosts) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -148,16 +148,37 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
     w.EndObject();
   }
   w.EndArray();
+  if (!hosts.empty()) {
+    w.Key("resources");
+    w.StartArray();
+    for (const AccessHostEntry& host : hosts) {
+      w.StartObject();
+      w.Key("path");
+      write_json_text(w, "host:" + access_encode_id(host.id));
+      w.Key("label");
+      std::string label = access_cut_label(host.label);
+      if (label.empty()) label = access_cut_label(host.id);
+      write_json_text(w, label);
+      w.EndObject();
+    }
+    w.EndArray();
+  }
   w.EndObject();
   return std::string(sb.GetString(), sb.GetSize());
 }
 
 AccessRule access_rule(std::string_view method_in, std::string_view path) {
   const std::string_view method = method_in == "HEAD" ? std::string_view("GET") : method_in;
-  if (path == "/livez" || path == "/readyz" || path == "/healthz" || path == "/metrics" || path == "/.well-known/access-actions" ||
+  if (path == "/livez" || path == "/readyz" || path == "/healthz" || path == "/metrics" || path == "/.well-known/procurauth/actions" ||
       path == "/mcp") {
     return rule(AccessRuleKind::Exempt);
   }
+  // The route of the options (ProcurAuth 5.6) lists the children that the person of the token can see: it needs the token (the edge makes
+  // it for the person who fills the form of the grants).
+  if (path == "/.well-known/procurauth/resources") return method == "GET" ? rule(AccessRuleKind::Identity) : rule(AccessRuleKind::Unknown);
+  // Any other path under /.well-known/ has no route and no data. The router answers 404, also without a token. The former path
+  // /.well-known/access-actions is one of them: it has no alias.
+  if (starts_with(path, "/.well-known/")) return rule(AccessRuleKind::Exempt);
   // The pages, their files and the redirects of former addresses: they read no data.
   if (!starts_with(path, "/api/")) return rule(AccessRuleKind::Identity);
 
@@ -196,6 +217,12 @@ AccessRule access_rule(std::string_view method_in, std::string_view path) {
   // The data preview names its host and its database in the body.
   if (path == "/api/explorer/table/data") {
     return method == "POST" ? host_rule(AccessRuleKind::Action, "explorer.read", true, true) : rule(AccessRuleKind::Unknown);
+  }
+  if (path == "/api/explorer/catalog" || path == "/api/explorer/storage" || path == "/api/explorer/graph") {
+    if (method != "GET") return rule(AccessRuleKind::Unknown);
+    AccessRule out = host_rule(AccessRuleKind::Action, "explorer.read", true);
+    out.list_filter = true;
+    return out;
   }
   if (starts_with(path, "/api/explorer/")) {
     return method == "GET" ? host_rule(AccessRuleKind::Action, "explorer.read", true) : rule(AccessRuleKind::Unknown);

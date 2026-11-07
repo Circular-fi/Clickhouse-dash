@@ -59,7 +59,7 @@ These items are startup errors:
 - `telemetry`: optional OTLP export of the spans and of the call log of MCP. Refer to [`docs/server-telemetry.md`](server-telemetry.md).
 - `access`: required. It sets the access of humans to the pages and to the API. Use `mode = "authzen"` (an identity token on each request, and a PDP that decides each action) or `mode = "open"` (no check). Refer to [`docs/access.md`](access.md).
 - `system`: the System page (the health of the selected server). It is enabled by default.
-- `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`. A host can have an `mcp_uri` too.
+- `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`. A host can have an `mcp_uri` too. A configuration has 256 `host` blocks at most: the action document lists each host as a resource, and the start stops with an error that names the key and the count when there are more.
 
 ## The server block
 
@@ -253,7 +253,7 @@ To stop the alert, revoke the privilege. A constraint on the setting does not st
 
 ChDash has no login page and no user directory. The `access` block selects one of two models ([access.md](access.md)):
 
-- `mode = "authzen"`: an access gateway in front of ChDash authenticates each human and sends a signed identity token. ChDash verifies the token on each request of the pages and of the API. It asks an AuthZEN PDP for each action (`query.run.read`, `query.run.write`, `query.export`, `library.read`, `library.write`, `explorer.read`, `system.read`, `system.kill_query`, `observability.read`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read`). Without `query.run.write`, a run has `readonly = 1`.
+- `mode = "authzen"`: an access gateway in front of ChDash authenticates each human and sends a signed identity token. ChDash verifies the token on each request of the pages and of the API. It asks an AuthZEN PDP for each action (`query.run.read`, `query.run.write`, `query.export`, `library.read`, `library.write`, `explorer.read`, `system.read`, `observability.read`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read`). Without `query.run.write`, a run has `readonly = 1`.
 - `mode = "open"`: ChDash checks nothing. Everyone who can reach the port has all the actions.
 
 In the two models, the credentials of the configured host limit the access to ClickHouse:

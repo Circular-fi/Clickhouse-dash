@@ -160,6 +160,19 @@ void test_the_bounds_of_every_number() {
   }
 }
 
+// The action document lists each host as a resource: a reader accepts 256 resources (ProcurAuth 5.3c).
+void test_at_most_256_hosts() {
+  const auto hosts = [](size_t count) {
+    std::string text = "clickhouse {\n";
+    for (size_t i = 0; i < count; ++i) {
+      text += "  host {\n    name = \"h" + std::to_string(i) + "\"\n    runner_uri = \"clickhouse://r@h:9000\"\n    system_uri = \"clickhouse://s@h:9000\"\n  }\n";
+    }
+    return text + "}\n";
+  };
+  CHECK_EQ(error_of(hosts(256), false), std::string());
+  CHECK(contains(error_of(hosts(257), false), "clickhouse.host accepts at most 256 blocks, not 257"));
+}
+
 void test_types_unknown_keys_and_enums() {
   CHECK(contains(error_of("server { worker_threads = \"x\" }"), "server.worker_threads must be an integer, not \"x\""));
   CHECK(contains(error_of("server { metrics = 1 }"), "server.metrics must be a boolean, not 1"));
@@ -1037,6 +1050,7 @@ int main() {
   test_the_table_is_sound();
   test_the_bounds_of_every_number();
   test_types_unknown_keys_and_enums();
+  test_at_most_256_hosts();
   test_values_and_derived_settings();
   test_mcp_usage_block();
   test_uris();

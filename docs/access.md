@@ -107,7 +107,7 @@ ChDash keeps a verified token (its SHA-256, its subject and its `exp`) in memory
 
 ChDash checks the token when a request starts. A stream that started with a valid token (the result of a run, the status of the hosts, an export) continues after the `exp` of the token. The next request needs a new token.
 
-These routes need no token: `/livez`, `/readyz`, `/healthz`, `/metrics`, `GET /.well-known/access-actions` and `/mcp`. Keep `/metrics` on the internal network.
+These routes need no token: `/livez`, `/readyz`, `/healthz`, `/metrics`, `GET /.well-known/procurauth/actions` and `/mcp`. Keep `/metrics` on the internal network.
 
 ## Network
 
@@ -120,7 +120,7 @@ ChDash must be reachable only through the edge (the access gateway and its rever
 
 ## Actions
 
-ChDash publishes its actions at `GET /.well-known/access-actions`, without a token:
+ChDash publishes its actions at `GET /.well-known/procurauth/actions`, without a token. This is the only path: the former path `/.well-known/access-actions` has no alias and gives `404`.
 
 ```json
 {
@@ -131,11 +131,16 @@ ChDash publishes its actions at `GET /.well-known/access-actions`, without a tok
   ],
   "actions": [
     { "name": "query.run.read", "resource_types": ["service", "host", "database"], "description": "..." }
+  ],
+  "resources": [
+    { "path": "host:prod", "label": "Production" }
   ]
 }
 ```
 
 `server` is `identity.audience` (`chdash` in the open mode). The list does not contain `access`. The top-level `resource_types` gives the tree under the service (refer to [Resources and hosts](#resources-and-hosts)). The `resource_types` of an action gives the types on which a grant for this action is valid.
+
+The optional member `resources` has one node for each host of the configuration. Its `path` is `host:<id>` with the id percent-encoded (RFC 3986). Its `label` is the `label` of the host, or its name, cut to 60 characters. A node has no `actions` member: it takes each action that lists the type `host`. The databases are not in the document, because they change. The route of the options lists them (refer to [The route of the options](#the-route-of-the-options)). A configuration has 256 hosts at most (ProcurAuth 5.3c). More hosts stop the start with an error that names the key.
 
 The document lists the published actions only (ProcurAuth 5.2a). An action of a feature that the configuration turns off is not in the document, and ChDash does not ask the PDP for it. This table lists all the actions. The column "Published when" gives the condition:
 
@@ -143,7 +148,7 @@ The document lists the published actions only (ProcurAuth 5.2a). An action of a 
 |---|---|
 | `query.run.read`, `query.run.write`, `query.export` | Always. |
 | `explorer.read` | The Explorer is on: `explorer.browse` or the graph (`explorer.graph`). |
-| `system.read`, `system.kill_query` | `system.enabled` is `true`. |
+| `system.read` | `system.enabled` is `true`. |
 | `observability.read` | The traces, the logs or the metrics are on for at least one host. |
 | `library.read` | At least one `query_library` block is enabled. |
 | `library.write` | At least one enabled `query_library` block has `writable = true`. |
@@ -161,13 +166,12 @@ The navigation follows the document: a page whose actions are not published has 
 | `library.write` | `service` | `POST`, `PATCH` and `DELETE /api/query-library...` |
 | `explorer.read` | `service`, `host`, `database` | `/api/explorer/...`, except `/api/explorer/ops/...` |
 | `system.read` | `service`, `host` | `/api/system/...`, `/api/explorer/ops/...` |
-| `system.kill_query` | `service`, `host` | None now. ChDash has no control that stops the queries of other users. The action is reserved for it. |
 | `observability.read` | `service`, `host` | `/api/traces/...`, `/api/logs/...`, `/api/metrics/...` |
 | `mcp.keys.read` | `service` | `GET /api/mcp/keys`, `GET /api/mcp/keys/<id>/access`, `GET /api/mcp/access` |
 | `mcp.keys.write` | `service` | `POST /api/mcp/keys`, `DELETE /api/mcp/keys/<id>`, `POST /api/mcp/keys/<id>/adopt` |
 | `mcp.usage.read` | `service` | `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET /api/mcp/keys/<id>/usage`, `GET /api/mcp/keys/<id>/cost` |
 
-The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
+The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
 
 A route that is not in this table is refused with `403` and the action `unknown` (fail closed), and the log has the line `access.no_rule`. A path that has no route gets `404`.
 
@@ -222,9 +226,8 @@ ChDash never lets an operation run on a `subtree` decision. A `subtree` question
 |---|---|---|
 | `query.run.read`, `query.run.write` | The host of the run. The database for `GET /api/meta` with `database`. | `host_id` of the body (`POST`) or of the query (`GET`). The parameter `database` of `GET /api/meta`. |
 | `query.export` | The host of the export. | `host_id` of the body. |
-| `explorer.read` | The host, or the database when the request names one. | The parameters `host_id` and `database`. The fields `host_id` and `database` of the body of `POST /api/explorer/table/data`. |
+| `explorer.read` | The host, or the database when the request names one. The catalog, the storage map and the graph ask the match `subtree` on the host when the request names no database (refer to [Databases in the Explorer](#databases-in-the-explorer)). | The parameters `host_id` and `database`. The fields `host_id` and `database` of the body of `POST /api/explorer/table/data`. |
 | `system.read` | The host. | The parameter `host_id`. |
-| `system.kill_query` | The host (no route yet). | None. |
 | `observability.read` | The host. | The parameter `host_id`. |
 | `library.read`, `library.write` | The service. | None: the query library is global. |
 | `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read` | The service. | None: the MCP keys and their usage are global. |
@@ -249,7 +252,41 @@ ChDash shows only the hosts on which the human holds one action at least:
 - `GET /api/health`, `/readyz` and `/metrics` still count all the hosts, as in 1.0.8. `/metrics` names the hosts: keep it on the internal network.
 - The global features still name the host of each item, as in 1.0.8: the folders and the queries of the query library, and the keys of the MCP pages.
 
-Example: a human holds only `explorer.read on service:db/host:local/database:analytics`. The host `local` is visible, and the Explorer page opens. The routes of the database `analytics` of `local` work. The catalog of all the databases of `local`, another database of `local` and a run on `local` get `403`: they ask `node` on their own resource.
+### Databases in the Explorer
+
+The Explorer lists only the databases on which the human holds `explorer.read`:
+
+- The catalog, the storage map and the graph (`GET /api/explorer/catalog`, `/storage` and `/graph`) have the rule `explorer.read` on the host, with the match `subtree`. A grant on the host, above it or on one of its databases lets the route run.
+- The route then keeps only the readable databases. One batch asks `explorer.read` with the match `node` on the host and on each database of the answer. A decision on the host that is `true` keeps every database. Without it, a database stays when its own decision is `true`. The cache of the PDP serves these questions.
+- A request that names a database (the parameter `database` of the catalog, the table card, the definition of a graph object) asks `node` on that database. A database that the human cannot read gets `403`, as before.
+- The catalog, the storage map and the graph never show the name, the tables or the edges of a database that is not readable. The related objects, the targets and the SQL texts of a table card follow the same rule (they show `[HIDDEN]`).
+- The list of functions names no database: it keeps the rule `explorer.read` on the host with the match `node`.
+
+Example: a human holds only `explorer.read on service:db/host:local/database:analytics`. The host `local` is visible, and the Explorer page opens. The catalog of `local` lists the database `analytics` and its tables, and no other database. The routes of the database `analytics` of `local` work. Another database of `local` and a run on `local` get `403`: they ask `node` on their own resource.
+
+### The route of the options
+
+ChDash publishes `GET /.well-known/procurauth/resources` (ProcurAuth 5.6 to 5.9). A form of grants, for example the portal, uses it to show the children of a node. The route needs the identity token of the edge, like the other routes. Without a valid token it gives `401`. In the open mode the route does not exist (`404`).
+
+| Parameter | Rule |
+|---|---|
+| `type` | Required. `host` (the parent is the service) or `database` (the parent is a host). |
+| `parent` | Optional. The path of the node, for example `host%3Aprod`. Without it, the route lists the hosts. With it, the type must be `database`. |
+| `q` | Optional. The route keeps the children whose id or label holds the text, without the case of the ASCII letters. It has 256 bytes at most. |
+| `limit` | Optional. A whole number from 1. The route gives 50 items at most, and less when the answer would pass 60 KiB. |
+| `after` | Optional. The value of `next` of the previous answer. Treat it as opaque text. |
+
+Rules:
+
+- The route decodes each `%XX` one time. It does not read `+` as a space. It reads the raw query, and it ignores a parameter that it does not know.
+- A parameter that occurs two times, a value with a bad escape, a missing `type`, a bad `limit`, a bad `after`, a bad `parent`, and a `type` that is not a child of the type of the `parent` give `400`.
+- The answer is `{"items": [{"id", "label", "has_children"}], "next": <cursor or null>}`. The hosts have `has_children` true. The databases have it false. The list is sorted by id without the case of the ASCII letters. The `label` has 60 characters at most. The cursor is the last id that the route examined, in base64url.
+- A child is visible when the PDP gives `true`, with the match `subtree`, for one published action whose resource types hold the type of the child. For a host: each published action that takes a host. For a database: `query.run.read`, `query.run.write` and `explorer.read`. A grant on the node, above it or below it is enough. The route asks no question with a usage.
+- One request asks the PDP 200 questions at most. When the bound is reached, the answer holds the items found so far and a `next` cursor. The answer can then have no item and a `next` value: ask again with `after`.
+- The databases come from `SHOW DATABASES` with the runner account of the host. The route removes `system` and `information_schema`. ChDash keeps the list for 30 seconds. The list is the same for every human. The decisions are not in it.
+- ChDash runs `SHOW DATABASES` only for a host that the human can see. A host that does not exist or that the human cannot see gives an answer with no item.
+- When the PDP gives no valid answer, the route gives `503` (retryable).
+- ChDash applies no other rule that removes a child.
 
 ### Upgrade from 1.0.8
 

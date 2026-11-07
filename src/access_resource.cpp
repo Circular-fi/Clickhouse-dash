@@ -68,6 +68,23 @@ std::string access_resource_path(const AccessResource& resource) {
   return out;
 }
 
+std::string access_cut_label(std::string_view text) {
+  if (!is_valid_utf8(text)) return {};
+  std::string out;
+  size_t chars = 0;
+  for (size_t at = 0; at < text.size() && chars < kAccessMaxLabelChars;) {
+    const unsigned char c = static_cast<unsigned char>(text[at]);
+    const size_t length = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+    const std::string_view unit = text.substr(at, length);
+    const bool control = c < 0x20 || c == 0x7F || (c == 0xC2 && length == 2 && static_cast<unsigned char>(unit[1]) <= 0x9F);
+    if (control) out.push_back(' ');
+    else out.append(unit);
+    at += length;
+    ++chars;
+  }
+  return out;
+}
+
 std::string access_resource_host(const AccessResource& resource) {
   if (resource.type == "host") return resource.id;
   for (const AccessNode& node : resource.ancestors) {

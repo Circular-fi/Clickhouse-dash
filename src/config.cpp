@@ -392,6 +392,12 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
   if (hosts_it == clickhouse->blocks.end() || hosts_it->second.empty()) {
     throw std::runtime_error(std::string(source) + ": missing clickhouse.host block");
   }
+  // The action document lists each host as a resource, and a reader accepts 256 resources (ProcurAuth 5.3c).
+  constexpr size_t kMaxHosts = 256;
+  if (hosts_it->second.size() > kMaxHosts) {
+    throw std::runtime_error("clickhouse.host accepts at most " + std::to_string(kMaxHosts) + " blocks, not " +
+                             std::to_string(hosts_it->second.size()));
+  }
 
   std::unordered_set<std::string> ids;
   cfg.hosts.clear();
