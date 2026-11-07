@@ -488,8 +488,9 @@ private:
   bool access_read_only() const;
   // Return the access part of /api/version, as a JSON object.
   // The object has the mode, the subject, each action that the subject may use somewhere, and the decisions on each visible host.
-  // The server makes one batch for each page.
-  std::string access_json();
+  // The server makes one batch for each page. *failed (when not null) receives true when a decision of the batch failed: the route then
+  // answers 503, not a list of false decisions (ProcurAuth 10.3).
+  std::string access_json(bool* failed = nullptr);
   // Return the name of this server for the PDP (access.identity.audience).
   // The name is "chdash" in the open mode.
   std::string access_server_name() const;

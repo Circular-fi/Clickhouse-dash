@@ -911,6 +911,12 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
   set_no_store(res);
 
   if (route == McpApiRoute::Meta) {
+    // In the authzen mode, only the hosts that the human can see (docs/access.md, "Hosts"). A failure of the PDP gives 503, not an
+    // empty list of hosts (ProcurAuth 10.3).
+    bool visible_failed = false;
+    const std::optional<std::set<std::string>> visible =
+        cfg_.mcp.enabled && mcp_keys_ ? access_visible_hosts(&visible_failed) : std::optional<std::set<std::string>>();
+    if (visible_failed) return access_unavailable(res, "hosts");
     rapidjson::StringBuffer sb;
     Writer w(sb);
     w.StartObject();
@@ -929,8 +935,6 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       for (const auto& version : mcp_protocol_versions()) put(w, version);
       w.EndArray();
       const HostsSnapshot health = health_ ? health_->snapshot() : HostsSnapshot{};
-      // In the authzen mode, only the hosts that the human can see (docs/access.md, "Hosts").
-      const std::optional<std::set<std::string>> visible = access_visible_hosts();
       w.Key("hosts");
       w.StartArray();
       for (const auto& host : cfg_.hosts) {

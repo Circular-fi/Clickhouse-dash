@@ -85,7 +85,11 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   const ExplorerCatalog& catalog = *answer.value->value;
   std::vector<std::string> names = explorer::catalog_databases(catalog);
   if (!database_filter.empty()) names.push_back(database_filter);
-  if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, names)) {
+  // A failure of the PDP gives 503, never an empty catalog or a 403 (ProcurAuth 10.3).
+  bool failed = false;
+  const auto readable = access_readable_databases({"explorer.read"}, route.host_id, names, &failed);
+  if (failed) return access_unavailable(res, "explorer.read");
+  if (readable) {
     if (!database_filter.empty() && readable->count(database_filter) == 0) return access_forbidden(res, "explorer.read");
     return send_json(res, explorer::catalog_json(route.host_id, database_filter, explorer::keep_catalog_databases(catalog, *readable),
                                                  answer.value->stale));
@@ -103,7 +107,10 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
   std::vector<std::string> databases;
   databases.reserve(map.databases.size());
   for (const auto& database : map.databases) databases.push_back(database.name);
-  if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, databases)) {
+  bool failed = false;
+  const auto readable = access_readable_databases({"explorer.read"}, route.host_id, databases, &failed);
+  if (failed) return access_unavailable(res, "explorer.read");
+  if (readable) {
     return send_json(res, explorer::storage_json(route.host_id, explorer::keep_storage_databases(map, *readable), answer.value->stale));
   }
   send_json(res, explorer::storage_json(route.host_id, map, answer.value->stale));
@@ -124,7 +131,10 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   // databases keeps only those and masks the names of the others (docs/access.md): one batch asks each database of the card.
   const ExplorerTableDetail& detail = *answer.value->value;
   if (cfg_.access.enforced()) {
-    if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::table_detail_databases(detail))) {
+    bool failed = false;
+    const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::table_detail_databases(detail), &failed);
+    if (failed) return access_unavailable(res, "explorer.read");
+    if (readable) {
       return send_json(res, explorer::table_json(route.host_id, explorer::keep_table_detail_databases(detail, *readable), answer.value->stale,
                                                  explorer::kTableDetailCacheTtlMs));
     }
@@ -173,7 +183,9 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   const explorer::GraphScopeRequest scope = explorer::read_graph_scope(req);
   // The focus names its own database: the subject must be able to read it (docs/access.md).
   if (!scope.focus_database.empty()) {
-    const auto readable = access_readable_databases({"explorer.read"}, route.host_id, {scope.focus_database});
+    bool failed = false;
+    const auto readable = access_readable_databases({"explorer.read"}, route.host_id, {scope.focus_database}, &failed);
+    if (failed) return access_unavailable(res, "explorer.read");
     if (readable && readable->count(scope.focus_database) == 0) {
       return access_forbidden(res, "explorer.read");
     }
@@ -184,7 +196,10 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   const explorer::GraphScopeAnswer& graph = *answer.value;
   // A lineage or a cluster topology crosses databases. A grant on some databases keeps only their nodes: one batch asks each
   // database of the answer.
-  if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::graph_databases(graph.scoped))) {
+  bool failed = false;
+  const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::graph_databases(graph.scoped), &failed);
+  if (failed) return access_unavailable(res, "explorer.read");
+  if (readable) {
     return send_json(res, explorer::graph_json(route.host_id, *graph.graph, explorer::keep_graph_databases(graph.scoped, *readable), scope,
                                                graph.scope_has_more, graph.storage_available, graph.stale, cfg_.explorer.live_refresh_ms));
   }
@@ -208,7 +223,10 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   if (cfg_.access.enforced()) {
     const std::vector<std::string> named = explorer::definition_databases(definition);
     if (!named.empty()) {
-      if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, named)) {
+      bool failed = false;
+      const auto readable = access_readable_databases({"explorer.read"}, route.host_id, named, &failed);
+      if (failed) return access_unavailable(res, "explorer.read");
+      if (readable) {
         return send_json(res, explorer::definition_json(route.host_id, *answer.value->node,
                                                         explorer::keep_definition_databases(definition, *readable, answer.value->node->database),
                                                         answer.value->stale));

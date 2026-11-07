@@ -817,12 +817,17 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   // The catalogs of the databases, the tables and the columns name databases. A grant on some databases of the host keeps only their
   // items (docs/access.md): one batch asks the host and each database of the catalog, for query.run.read and query.run.write.
+  // A failure of the PDP on a catalog gives 503 for the whole answer, never a catalog filtered to nothing (ProcurAuth 10.3).
+  bool access_failed = false;
   auto readable_items = [&](const std::string& type, const MetaCatalog& cat) -> std::optional<std::unordered_set<std::string>> {
     if (type != "databases" && type != "tables" && type != "columns") return std::nullopt;
     std::vector<std::string> databases;
     databases.reserve(cat.items.size());
     for (const auto& item : cat.items) databases.push_back(type == "databases" ? item.name : item.database);
-    return access_readable_databases({"query.run.read", "query.run.write"}, host_id, databases);
+    bool failed = false;
+    auto readable = access_readable_databases({"query.run.read", "query.run.write"}, host_id, databases, &failed);
+    if (failed) access_failed = true;
+    return readable;
   };
 
   auto write_catalog = [&](const std::string& type, const MetaCatalog& cat, bool stale) {
@@ -992,6 +997,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   w.EndObject();
 
+  if (access_failed) return access_unavailable(res, "query.run.read");
   if (successful_types == 0 && !errors.empty()) {
     const bool request_error = std::all_of(errors.begin(), errors.end(), [](const ErrItem& error) {
       return error.code == "unsupported_type";

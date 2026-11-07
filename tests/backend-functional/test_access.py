@@ -336,6 +336,11 @@ def test_a_failure_of_the_pdp_gives_the_503_page_and_no_host_list():
     assert "<script" not in page.text
     assert call("GET", "/").status_code == 503
     assert_pdp_unavailable(call("GET", "/api/hosts"), "hosts")
+    # The routes that filter a list with the decisions answer 503 too, never an empty list or false decisions.
+    assert_pdp_unavailable(call("GET", "/api/version"), "access")
+    assert_pdp_unavailable(call("GET", "/api/mcp/meta"), "hosts")
+    assert_pdp_unavailable(call("GET", "/api/explorer/catalog?host_id=local"), "explorer.read")
+    assert_pdp_unavailable(call("GET", "/.well-known/procurauth/resources?type=host"), "resources")
     # A body that is not a valid answer is a failure: a ceiling with a negative value.
     answer(fixed={"system.read": {"decision": True, "context": {"limits": {"max_rows": -1}}}})
     assert_pdp_unavailable(call("GET", SYSTEM), "system.read")

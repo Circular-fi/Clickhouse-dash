@@ -1,6 +1,5 @@
 #include "mcp_creator_access.hpp"
 
-#include <cstring>
 #include <utility>
 
 namespace chdash {
@@ -58,8 +57,8 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
   bool any_allowed = false;
   bool unknown_subject = false;
   for (const auto& decision : decisions) {
-    // The source "error" and AccessDecision::failed tell the same thing: the PDP gave no valid answer (ProcurAuth 10.3).
-    if (std::strcmp(decision.source, "error") == 0) failed = true;
+    // AccessDecision::failed: the PDP gave no valid answer (ProcurAuth 10.3). It is not a denial.
+    if (decision.failed) failed = true;
     if (decision.allowed) any_allowed = true;
     if (decision.unknown_subject) unknown_subject = true;
   }

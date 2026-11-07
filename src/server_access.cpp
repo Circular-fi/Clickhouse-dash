@@ -514,7 +514,8 @@ bool Server::access_read_only() const {
   return state.enforced && state.read_only && !current_request_context().is_mcp();
 }
 
-std::string Server::access_json() {
+std::string Server::access_json(bool* failed) {
+  if (failed) *failed = false;
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -528,6 +529,7 @@ std::string Server::access_json() {
     // pages hide what is false; the server still checks each action on its routes.
     std::vector<AccessQuestion> questions;
     const auto decisions = access_host_decisions(&questions, std::string());
+    if (failed) *failed = any_failed(decisions);
     // An action is true when the human may use it somewhere: on the service or on one host.
     w.Key("actions");
     w.StartObject();

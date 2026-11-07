@@ -1214,6 +1214,11 @@ void Server::redirect_to_system(const httplib::Request& req, httplib::Response& 
 }
 
 void Server::handle_api_version(const httplib::Request&, httplib::Response& res) {
+  // The access part first: a failure of the PDP gives 503 (ProcurAuth 10.3), never a list of false decisions that looks like a denial.
+  // The pages read the code pdp_unavailable and show it in the version badge (app_header.js).
+  bool access_failed = false;
+  const std::string access = access_json(&access_failed);
+  if (access_failed) return access_unavailable(res, "access");
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -1291,7 +1296,6 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   // In the authzen mode, it has the subject and its decisions for each action (one batch to the PDP).
   // The pages hide the actions that are false. The routes check them again.
   w.Key("access");
-  const std::string access = access_json();
   w.RawValue(access.data(), access.size(), rapidjson::kObjectType);
   w.EndObject();
   w.EndObject();

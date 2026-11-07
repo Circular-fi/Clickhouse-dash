@@ -65,7 +65,16 @@ async function loadMeta() {
   try {
     data = await api.getVersion();
   } catch (error) {
-    if (badge) badge.textContent = error?.code === "network_error" ? "meta: offline" : "meta: error";
+    if (error?.code === "pdp_unavailable") {
+      // The access service gave no decision (503, docs/access.md). This is not a denial, so the page keeps its links and does not
+      // move to another page. The badge tells the human to reload. Each route of the server refuses with 503 until the service answers.
+      if (badge) {
+        badge.textContent = "access: unavailable";
+        badge.title = "The access service gave no decision. Reload the page in a few seconds.";
+      }
+    } else if (badge) {
+      badge.textContent = error?.code === "network_error" ? "meta: offline" : "meta: error";
+    }
     markFeaturesLoaded();
     return;
   }

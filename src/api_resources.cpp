@@ -18,10 +18,13 @@
 namespace chdash {
 namespace {
 
-// The one place that tells a failure of the PDP from a refusal: a decision without a valid answer has the source "error".
+// A decision without a valid answer of the PDP (AccessDecision::failed): the route answers 503, not an empty list (ProcurAuth 10.3).
 bool pdp_failed(const std::vector<AccessDecision>& decisions) {
-  return std::any_of(decisions.begin(), decisions.end(), [](const AccessDecision& decision) { return std::string_view(decision.source) == "error"; });
+  return std::any_of(decisions.begin(), decisions.end(), [](const AccessDecision& decision) { return access_outcome(decision) == AccessOutcome::Failed; });
 }
+
+// The action name in the 503 body of this route: the route asks several actions, so the body names the route.
+constexpr const char* kOptionsAction = "resources";
 
 // The published actions whose resource types hold `type`.
 std::vector<std::string> actions_of_type(const AccessFeatures& features, const std::string& type) {
@@ -71,7 +74,7 @@ void Server::handle_procurauth_resources(const httplib::Request& req, httplib::R
     std::vector<AccessQuestion> questions;
     for (const std::string& action : host_actions) questions.push_back(AccessQuestion{action, access_host_resource(service, host_id), AccessMatch::Subtree});
     const auto decisions = access_decide(questions);
-    if (pdp_failed(decisions)) return json_error(res, 503, "pdp_unavailable", "The decision service gave no valid answer.");
+    if (pdp_failed(decisions)) return access_unavailable(res, kOptionsAction);
     if (std::none_of(decisions.begin(), decisions.end(), [](const AccessDecision& decision) { return decision.allowed; })) return empty_answer();
 
     const auto fetch = [this, host](std::vector<std::string>& out, std::string& code, std::string& message) -> bool {
@@ -118,7 +121,7 @@ void Server::handle_procurauth_resources(const httplib::Request& req, httplib::R
     return visible;
   };
   const OptionsPage page = access_options_page(std::move(candidates), query, actions.size(), decide);
-  if (page.failed) return json_error(res, 503, "pdp_unavailable", "The decision service gave no valid answer.");
+  if (page.failed) return access_unavailable(res, kOptionsAction);
   send_options(res, access_options_json(page, query.type == "host"));
 }
 

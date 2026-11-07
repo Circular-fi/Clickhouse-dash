@@ -5473,6 +5473,7 @@ void test_creator_access() {
                             names.push_back(q.action + "@" + access_resource_path(q.resource));
                             AccessDecision d;
                             d.source = pdp.fails ? "error" : "pdp";
+                            d.failed = pdp.fails;  // as PdpClient::decide marks a call without a valid answer
                             d.allowed = !pdp.fails && rules.decide(grants, q.action, q.resource).decision;
                             d.unknown_subject = !pdp.fails && !d.allowed && pdp.unknown.count(subject) != 0;
                             out.push_back(d);
