@@ -34,10 +34,41 @@
 // connection (ProcurAuth 10.6 forbids that for a question with usage), and its TLS support needs the OpenSSL headers in every file that
 // includes it. This client has one small job: a POST or a GET with a bounded answer.
 
+// Linux has SOCK_CLOEXEC, SOCK_NONBLOCK and MSG_NOSIGNAL. macOS has none of them: it sets the flags with fcntl and the option
+// SO_NOSIGPIPE, and a send there has no flag for SIGPIPE.
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 namespace chdash {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+// A non-blocking socket that a child process does not inherit, and that does not raise SIGPIPE. -1 and errno when it fails.
+int open_socket(const addrinfo* a) {
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+  const int fd = ::socket(a->ai_family, a->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK, a->ai_protocol);
+  if (fd < 0) return -1;
+#else
+  const int fd = ::socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+  if (fd < 0) return -1;
+  const int fd_flags = ::fcntl(fd, F_GETFD);
+  const int status_flags = ::fcntl(fd, F_GETFL);
+  if (fd_flags < 0 || status_flags < 0 || ::fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC) < 0 ||
+      ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) < 0) {
+    const int saved = errno;
+    ::close(fd);
+    errno = saved;
+    return -1;
+  }
+#endif
+#ifdef SO_NOSIGPIPE
+  const int one = 1;
+  ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
+  return fd;
+}
 
 // The largest head of a response (the status line and the headers).
 constexpr size_t kMaxHeadBytes = 32 * 1024;
@@ -159,7 +190,7 @@ public:
         last = "timeout";
         break;
       }
-      const int fd = ::socket(a->ai_family, a->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK, a->ai_protocol);
+      const int fd = open_socket(a);
       if (fd < 0) {
         last = std::string("socket: ") + std::strerror(errno);
         continue;
