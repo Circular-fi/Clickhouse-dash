@@ -107,7 +107,7 @@ ChDash keeps a verified token (its SHA-256, its subject and its `exp`) in memory
 
 ChDash checks the token when a request starts. A stream that started with a valid token (the result of a run, the status of the hosts, an export) continues after the `exp` of the token. The next request needs a new token.
 
-These routes need no token: `/livez`, `/readyz`, `/healthz`, `/metrics`, `GET /.well-known/procurauth/actions` and `/mcp`. Keep `/metrics` on the internal network.
+These routes need no token: `/livez`, `/readyz`, `/healthz`, `/metrics`, `GET /.well-known/procurauth/actions` and `/mcp`. Keep `/metrics` on the internal network. `/mcp` checks its caller itself: with `mcp.auth_mode = "identity"`, it needs the identity token (refer to [The MCP endpoint](#the-mcp-endpoint)).
 
 ## Network
 
@@ -154,6 +154,7 @@ The document lists the published actions only (ProcurAuth 5.2a). An action of a 
 | `library.write` | At least one enabled `query_library` block has `writable = true`. |
 | `mcp.keys.read`, `mcp.usage.read` | `mcp.enabled` is `true`. |
 | `mcp.keys.write` | `mcp.enabled` is `true` and `mcp.keys.mode` is not `static`. |
+| `mcp.session` | `mcp.enabled` is `true` and `mcp.auth_mode` is `identity`. |
 
 The navigation follows the document: a page whose actions are not published has no link, and `GET /api/version` lists the published actions only. A system that holds grants (the portal) keeps a grant for an action that is not published. The grant applies again when the action is published again, for example when you set `mcp.enabled = true`. ChDash reads the configuration at start: a change of these settings needs a restart.
 
@@ -170,6 +171,7 @@ The navigation follows the document: a page whose actions are not published has 
 | `mcp.keys.read` | `service` | `GET /api/mcp/keys`, `GET /api/mcp/keys/<id>/access`, `GET /api/mcp/access` |
 | `mcp.keys.write` | `service` | `POST /api/mcp/keys`, `DELETE /api/mcp/keys/<id>`, `POST /api/mcp/keys/<id>/adopt` |
 | `mcp.usage.read` | `service` | `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET /api/mcp/keys/<id>/usage`, `GET /api/mcp/keys/<id>/cost` |
+| `mcp.session` | `service` | `POST /mcp` in the mode `identity`: each request that calls no tool, and the tools that use no action of the pages |
 
 The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
 
@@ -231,6 +233,7 @@ ChDash never lets an operation run on a `subtree` decision. A `subtree` question
 | `observability.read` | The host. | The parameter `host_id`. |
 | `library.read`, `library.write` | The service. | None: the query library is global. |
 | `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read` | The service. | None: the MCP keys and their usage are global. |
+| `mcp.session` | The service. | None: it is the permission to use the MCP endpoint (refer to [The MCP endpoint](#the-mcp-endpoint)). |
 
 Rules:
 
@@ -390,7 +393,12 @@ Rules:
 
 ## The MCP endpoint
 
-`POST /mcp` needs no identity token. It keeps its keys (contract section 3, [mcp.md](mcp.md)). The API tools of MCP call the routes of the API in the process (the context of an MCP call): these calls need no identity token and ask no PDP for each route. The keys, their tools, their scope and the MCP ClickHouse user limit them.
+The setting `mcp.auth_mode` chooses how `POST /mcp` knows its caller. The two modes never apply together on one endpoint.
+
+- `identity`: the caller is the subject of the identity token, in the header `identity.header`. ChDash checks the token as it does for the pages, before it reads the message. A request without a valid token gets `401` with an empty body. The PDP decides each request for this subject: `mcp.session` for a request that calls no tool, one batch with the match `subtree` for `tools/list`, and the action of the tool on the host or the database of the call for `tools/call`. The subject is opaque: it can be a person or a key of the portal. The keys of ChDash are ignored. The mode needs `access.mode = "authzen"`. Refer to [mcp.md](mcp.md#the-identity-mode).
+- `keys` (the default): the text below applies.
+
+In the mode `keys`, `POST /mcp` needs no identity token. It keeps its keys (contract section 3, [mcp.md](mcp.md)). The API tools of MCP call the routes of the API in the process (the context of an MCP call): these calls need no identity token and ask no PDP for each route. The keys, their tools, their scope and the MCP ClickHouse user limit them.
 
 A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use, on the host of the key (and on its databases for the tools of the data). The key keeps its creator. `tools/list` shows only the tools whose actions the creator holds (one batch for each key and each `pdp.cache_ttl`). `tools/call` asks the PDP for the actions of the called tool only. A key with no creator, or whose creator the PDP does not know (the reason `unknown_subject`), gets the `401` of a key that does not exist until a person adopts it ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). A creator who gets `false` without this reason still exists: the key keeps this creator, and each tool of a refused action is refused. A key of the configuration is not checked.
 
@@ -409,6 +417,7 @@ The build has no OpenSSL: the release binary is a static musl executable. ChDash
 | U01 (no `access` block) | `tests/native/config_test.cpp` (`test_access_block`), and `test_u01_...` of `tests/backend-functional/test_access.py` when `MCP_STARTUP_CMD` is set |
 | U02 to U09 | `tests/backend-functional/test_access.py`, against the compose services `chdash_access` (`tests/config/access.authzen.hcl`) and `access_pdp` (the fake PDP, `tests/otel-fixture/fake_pdp.py`) |
 | U10 (the log) | `test_u10_...` of `test_access.py` when `ACCESS_LOGS_CMD` prints the log of `chdash_access` |
+| MCP binding U18, U23, U25 to U31 and U85 to U99 (the mode `identity`) | `tests/native/mcp_test.cpp` (`test_identity_mode`), and the identity tests of `tests/backend-functional/test_mcp.py` against `chdash_access` |
 | U11 (the reason `unknown_subject`) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).
