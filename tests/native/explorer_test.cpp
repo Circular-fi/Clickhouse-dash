@@ -2514,6 +2514,32 @@ void test_a_grant_on_some_databases_cuts_the_graph_and_the_storage_map() {
   CHECK(storage.find("\"total_bytes\":10,") != std::string::npos);
 }
 
+// The catalog lists only the databases that the subject may read (docs/access.md, "Databases in the Explorer").
+void test_a_grant_on_some_databases_cuts_the_catalog() {
+  ExplorerCatalog catalog;
+  catalog.databases = {"tenant_a", "tenant_z"};
+  for (const char* name : {"tenant_a", "tenant_z"}) {
+    ExplorerDatabaseSummary summary;
+    summary.name = name;
+    summary.tables = 1;
+    catalog.database_summaries.push_back(summary);
+    ExplorerTableSummary table;
+    table.database = name;
+    table.name = std::string("t_") + name;
+    catalog.tables.push_back(table);
+  }
+  CHECK(catalog_databases(catalog) == (std::vector<std::string>{"tenant_a", "tenant_z"}));
+  const ExplorerCatalog kept = keep_catalog_databases(catalog, {"tenant_a"});
+  CHECK(kept.databases == (std::vector<std::string>{"tenant_a"}));
+  CHECK_EQ(kept.database_summaries.size(), size_t(1));
+  CHECK_EQ(kept.tables.size(), size_t(1));
+  const std::string json = catalog_json("local", "", kept, false);
+  CHECK(json.find("tenant_z") == std::string::npos);
+  CHECK(json.find("tenant_a") != std::string::npos);
+  CHECK(keep_catalog_databases(catalog, {}).databases.empty());
+  CHECK(keep_catalog_databases(catalog, {}).tables.empty());
+}
+
 // The card of a table and the definition of a graph object name other databases: the related objects, the target of a Distributed
 // table, the target of an MV, a Buffer or a Distributed table. A grant on some databases keeps only those (docs/access.md).
 void test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition() {
@@ -2651,6 +2677,7 @@ int main() {
   RUN(test_the_masked_ddl_texts_are_read_as_the_runner);
   RUN(test_the_catalog_key_of_a_database_filter_never_aliases_the_whole_catalog);
   RUN(test_a_grant_on_some_databases_cuts_the_graph_and_the_storage_map);
+  RUN(test_a_grant_on_some_databases_cuts_the_catalog);
   RUN(test_a_grant_on_some_databases_cuts_the_table_card_and_the_definition);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

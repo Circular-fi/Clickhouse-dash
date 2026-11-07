@@ -303,7 +303,10 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
 
   switch (rule.kind) {
     case AccessRuleKind::Action: {
-      const auto decisions = access_decide({AccessQuestion{rule.action, resource}});
+      // A listing of the databases of a host that names no database: any grant on the host or below it lets the route run, and the route
+      // keeps the databases that the human may read (access_readable_databases). It never runs for a host that the human cannot see.
+      const AccessMatch match = rule.list_filter && resource.type == "host" ? AccessMatch::Subtree : AccessMatch::Node;
+      const auto decisions = access_decide({AccessQuestion{rule.action, resource, match}});
       return decisions.front().allowed ? false : deny(rule.action);
     }
     case AccessRuleKind::Run: {

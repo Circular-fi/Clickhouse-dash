@@ -84,6 +84,27 @@ ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const s
   return out;
 }
 
+ExplorerCatalog keep_catalog_databases(const ExplorerCatalog& catalog, const std::unordered_set<std::string>& readable) {
+  ExplorerCatalog out = catalog;
+  const auto allowed = [&](const std::string& database) { return readable.count(database) != 0; };
+  const auto drop = [&](auto& items, auto&& database_of) {
+    items.erase(std::remove_if(items.begin(), items.end(), [&](const auto& item) { return !allowed(database_of(item)); }), items.end());
+  };
+  drop(out.databases, [](const std::string& name) -> const std::string& { return name; });
+  drop(out.database_summaries, [](const ExplorerDatabaseSummary& item) -> const std::string& { return item.name; });
+  drop(out.tables, [](const ExplorerTableSummary& item) -> const std::string& { return item.database; });
+  return out;
+}
+
+std::vector<std::string> catalog_databases(const ExplorerCatalog& catalog) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  for (const auto& name : catalog.databases) if (seen.insert(name).second) out.push_back(name);
+  for (const auto& item : catalog.database_summaries) if (seen.insert(item.name).second) out.push_back(item.name);
+  for (const auto& item : catalog.tables) if (seen.insert(item.database).second) out.push_back(item.database);
+  return out;
+}
+
 namespace {
 
 // The databases of `named` that the subject may not read. `own` (the database of the object) is always readable.

@@ -16,6 +16,7 @@
 #include "api_params.hpp"
 #include "ch_executor.hpp"
 #include "ch_uri.hpp"
+#include "explorer_graph_scope.hpp"
 #include "explorer_json.hpp"
 #include "explorer_service.hpp"
 #include "host_util.hpp"
@@ -79,7 +80,17 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   const std::string database_filter = param_of(req, "database");
   const auto answer = explorer_service_.catalog(current_request_context(), *route.host, route.host_id, database_filter, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
-  send_json(res, explorer::catalog_json(route.host_id, database_filter, *answer.value->value, answer.value->stale));
+  // The catalog lists only the databases on which the human holds explorer.read (docs/access.md, "Hidden hosts"): one batch asks each
+  // database of the answer. A request for one database that the human may not read stays 403 (the rule of the route asked it).
+  const ExplorerCatalog& catalog = *answer.value->value;
+  std::vector<std::string> names = explorer::catalog_databases(catalog);
+  if (!database_filter.empty()) names.push_back(database_filter);
+  if (const auto readable = access_readable_databases({"explorer.read"}, route.host_id, names)) {
+    if (!database_filter.empty() && readable->count(database_filter) == 0) return access_forbidden(res, "explorer.read");
+    return send_json(res, explorer::catalog_json(route.host_id, database_filter, explorer::keep_catalog_databases(catalog, *readable),
+                                                 answer.value->stale));
+  }
+  send_json(res, explorer::catalog_json(route.host_id, database_filter, catalog, answer.value->stale));
 }
 
 void Server::handle_explorer_storage(const httplib::Request& req, httplib::Response& res) {

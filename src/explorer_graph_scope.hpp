@@ -68,6 +68,11 @@ ExplorerGraph keep_graph_databases(const ExplorerGraph& scoped, const std::unord
 std::vector<std::string> graph_databases(const ExplorerGraph& graph);
 // The storage map with only the databases that the subject may read. The totals of the answer come from the databases that stay.
 ExplorerStorageMap keep_storage_databases(const ExplorerStorageMap& map, const std::unordered_set<std::string>& readable);
+// The catalog of a host with only the databases that the subject may read: the names, the summaries, the tables and the disks of the other
+// databases go. The names of the catalog are the databases to ask (catalog_databases).
+ExplorerCatalog keep_catalog_databases(const ExplorerCatalog& catalog, const std::unordered_set<std::string>& readable);
+// The databases that a catalog names (its list, its summaries and its tables), once each, in that order.
+std::vector<std::string> catalog_databases(const ExplorerCatalog& catalog);
 // The databases that the card of a table names: the related objects (dependencies), the target of a Distributed table, and the
 // databases that its DDL text and its engine_full name (sql::referenced_databases). Once each, in that order.
 std::vector<std::string> table_detail_databases(const ExplorerTableDetail& detail);
