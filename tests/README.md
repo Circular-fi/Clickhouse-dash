@@ -431,7 +431,7 @@ The formatted text of a query shape (`src/system_query_format.cpp`) is tested. T
 
 `conformance/run.sh` runs the conformance runner of ProcurAuth (`access-conformance`, role `pep`) against a `chdash` binary. It needs only Docker. The script starts ClickHouse and ChDash (`config/access.conformance.hcl`) in a Docker network. Then it runs the runner with `conformance/profile.json`. It prints the result of each case.
 
-The list `conformance/expected.txt` names the failed cases that are known, each with its reason. The exit code is 1 only for a failed case that the list does not name. The GitHub workflow `conformance.yml` runs the script on request and on a pull request that changes the access code. Refer to [docs/conformance.md](../docs/conformance.md).
+The list `conformance/expected.txt` names the failed cases that are known, each with its reason. The list is empty since 2026-11-07 (99 cases: 94 passed, 0 failed, 5 skipped). The exit code is 1 only for a failed case that the list does not name. The GitHub workflow `conformance.yml` runs the script on request and on a pull request that changes the access code. Refer to [docs/conformance.md](../docs/conformance.md).
 
 ### Query library
 

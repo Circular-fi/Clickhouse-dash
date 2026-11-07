@@ -1,16 +1,5 @@
 # The cases of the runner that fail today, and are known. One case id, then # and the reason.
 # tests/conformance/run.sh gives the exit code 1 for a failed case that this list does not name.
 # When a case of this list passes, the script says so: remove its line.
-# The MCP cases below write their own request without the headers Mcp-Method and Mcp-Name. The MCP server contract (2.5, case T03)
-# makes ChDash refuse such a 2026-07-28 request with 400 and -32020 before any access check. With the two headers, each case passes.
-U18 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U26 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U29 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U31 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U88 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U89 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U91 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U94 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U98 # A request that the case writes has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
-U23 # The step of the ping has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5). The step of the tool error passes.
-U95 # The request of the ping has no header Mcp-Method: ChDash answers 400 and -32020 (MCP server contract 2.5).
+# The list is empty since 2026-11-07: each MCP request of the cases has the headers Mcp-Method and Mcp-Name (ProcurAuth commit 85b695d),
+# and each case passes or is skipped (99 cases: 94 passed, 0 failed, 5 skipped).

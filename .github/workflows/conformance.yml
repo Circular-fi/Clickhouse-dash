@@ -4,6 +4,9 @@ name: Conformance
 # The job builds the binary as the release does, and runs tests/conformance/run.sh. The script fails only for a failed case that
 # tests/conformance/expected.txt does not list.
 # The ProcurAuth repository is public: the job checks it out without a secret.
+# The expected result (2026-11-07): 99 cases, 94 passed, 0 failed, 5 skipped. tests/conformance/expected.txt is empty. The MCP cases need a
+# runner whose MCP requests have the headers Mcp-Method and Mcp-Name (ProcurAuth commit 85b695d or later): with an older runner, 11 MCP
+# cases fail, and the job fails.
 # On request (Actions > Conformance > Run workflow), and on a pull request that changes the access code or the files of the run.
 on:
   workflow_dispatch:

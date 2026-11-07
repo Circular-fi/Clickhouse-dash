@@ -85,7 +85,7 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 | Operation | Request | Action and resource |
 |---|---|---|
 | `use_plain` | `GET /api/explorer/functions?host_id=conf` | `explorer.read` on the host `conf`. The route asks exactly one question. |
-| `use_ceiling` | The same request | `explorer.read` with the ceiling `max_rows`. |
+| `use_ceiling` | The same request | `explorer.read` with the ceiling `max_rows`. The read of the functions is internal ([access.md](access.md#statements-that-a-ceiling-bounds)), so the ceiling bounds no statement of this route. The case U37 tests that ChDash accepts a `true` answer with a ceiling that the action declares (ProcurAuth 7.5). |
 | `use_budget` | `POST /api/query/run` with the body `{"host_id": "conf", "sql": "SELECT 1"}` | `query.run.read` on the host `conf`, with `context.usage` ([Budgets](access.md#budgets)). The SQL is a read, so the use is `query.run.read`. |
 | `use_service` | `GET /api/query-library?host_id=conf` | `library.read` on the service. |
 | `list_options` | `GET /.well-known/procurauth/resources?type=host` | The route of the options (the profile has `options_type` = `host`). |
@@ -100,25 +100,26 @@ The profile has the member `mcp` (`path` = `/mcp`, `session_budget` = `true`: th
 
 ### The headers of an MCP request
 
-The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. The MCP cases that write their own request do not send them, so they fail. These cases are in `expected.txt`. A test build that accepts a request without the two headers passes each of them (run of 2026-11-07: 79 passed, 0 failed, 20 skipped).
+The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. Since the ProcurAuth commit `85b695d` (2026-11-07), each MCP request that a case writes has them too. With an older runner, the 11 MCP cases U18, U23, U26, U29, U31, U88, U89, U91, U94, U95 and U98 fail for this reason only.
 
-## Result of 2026-11-07, with the budgets
+## Result of 2026-11-07, with the decisions of the owner
 
-The run used the binary of the branch `wip/budgets` (the branch `feat/procurauth-1.3` and the budgets `queries`, `exports` and `requests`). The runner is the one of the ProcurAuth repository of the same day.
+The run used the release binary (`tests/smoke/Dockerfile.release`) of the branch `feat/procurauth-1.3` with the decisions of 2026-11-07: the budget of the MCP keys, the shared caches and the ceilings, and the deadline and the limit of the wait of the PDP. The runner is the one of the ProcurAuth branch `fix/runner-mcp-method` (commit `85b695d`). The run had `CONFORMANCE_STRICT=1`.
 
 ```text
-99 cases: 83 passed, 11 failed, 5 skipped
+99 cases: 94 passed, 0 failed, 5 skipped
 ```
 
 | Result | Cases |
 |---|---|
-| Failed (expected), the request of the case has no header `Mcp-Method` | U18, U23, U26, U29, U31, U88, U89, U91, U94, U95, U98 |
 | Skipped, the profile has no use with two permissions | U34, U35, U96, U97 |
 | Skipped, no tool that waits for an approval | U30 |
 
-The cases of the budgets pass: U04, U19, U21, U22, U24, U32, U33, U58, U62, U63, U67 and U68 (the HTTP route `POST /api/query/run`), and U92 and U93 (the tool `run_query`). U18 and U23 pass their step of the tool and fail their step of `tools/list` or `ping`. U95 fails at its `ping`. In these three cases, only the missing header makes the step fail: the native test `test_identity_budgets` and `test_mcp_identity.py` test the same answers with the headers.
+The list of expected failures (`tests/conformance/expected.txt`) is empty. The cases of the budgets pass: U04, U19, U21, U22, U24, U32, U33, U58, U62, U63, U67 and U68 (the HTTP route `POST /api/query/run`), and U18, U23, U92, U93 and U95 (MCP).
 
 ### Notes
+
+- Before the decision on the shared caches (2026-11-07), U37 passed only because the list of functions came from the cache. With its own read, the list of more than 100 functions went past `max_rows` = 100, and the route answered `503`. The read of the functions is internal since then.
 
 - The cases U02, U40, U59 and U84 use `use_service`. They failed during the first run, because `GET /api/query-library` needs the parameter `host_id` (`400`). The profile has the parameter since.
 - A case that the run skips does not pass. It tests nothing.
