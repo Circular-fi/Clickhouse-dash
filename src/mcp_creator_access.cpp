@@ -160,9 +160,16 @@ McpCreatorCall McpCreatorAccess::call(const McpKey& key, const McpToolInfo& tool
     }
   }
   // The other permissions of the tool first, without context.usage (ProcurAuth 5.5a). A refusal stops the call: no unit is taken (10.1a).
+  // A failure comes before a denial, as on the routes: a failed question can hide a true answer, and the call answers 503 (10.3).
   if (!questions.empty()) {
     std::vector<AccessDecision> decisions = decide_(key.creator, questions);
     decisions.resize(questions.size());
+    for (size_t i = 0; i < questions.size(); ++i) {
+      if (!decisions[i].failed) continue;
+      out.access = McpAccess::Failed;
+      out.action = questions[i].action;
+      return out;
+    }
     for (size_t i = 0; i < questions.size(); ++i) {
       if (decisions[i].allowed) continue;
       out.action = questions[i].action;

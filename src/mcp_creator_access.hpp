@@ -9,8 +9,8 @@
 //   - a creator who exists keeps the key, also without an action of the key: each tool of a refused action is refused, and nobody
 //     can adopt the key. A failure of the PDP never makes an orphan;
 //   - tools/list shows only the tools whose actions the creator holds (the batch of the state);
-//   - tools/call asks the PDP for the actions of the called tool only. The cache of the PDP client applies. A failure refuses
-//     the tool (fail closed);
+//   - tools/call asks the PDP for the actions of the called tool only. The cache of the PDP client applies. A failure of the PDP gives
+//     Failed: the request answers 503 with -32603, as the routes and the identity mode (owner decision of 2026-11-07);
 //   - a call of a tool whose action lists a budget (query.run.read lists `queries`: run_query, explain_query and the API tools of the Query
 //     page) is one use of the creator (call). The question of the host of the call has context.usage, and no question without
 //     context.usage goes before it. A spent budget gives BudgetExceeded and a failure of this question gives Failed, as on the routes.
@@ -95,7 +95,8 @@ public:
   // call is one use of the creator (docs/access.md, "Budgets"): the question of the action on the host of the call goes alone, with
   // context.usage, after the other questions of the tool (without it). The host of the call is the argument `host`, or the only host of the
   // key. A call whose host is not one of the key runs nothing (the tool gives host_required or not_found): it asks without context.usage.
-  // A refused question without context.usage stops the call before the use (Denied, with the ceiling when one made it false). The answer
+  // A failed question without context.usage gives Failed, and a refused one Denied (with the ceiling when one made it false): each stops
+  // the call before the use. The answer
   // of the use gives Allowed, Denied, BudgetExceeded (with retry_after) or Failed (no valid answer). A use that the PDP took is never asked
   // again. A tool whose action lists no budget asks as tool_refused_action does.
   McpCreatorCall call(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments);

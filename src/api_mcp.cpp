@@ -488,6 +488,8 @@ public:
     return inner_.call_tool_for(key, tool, arguments, now, info);
   }
   std::optional<std::vector<std::string>> permitted_tools(const McpKey& key, std::vector<std::string> tools) override {
+    // The batch of the state got no valid answer: tools/list answers 503, never a short list (binding 5.5, ProcurAuth 10.3).
+    if (state_.status == McpCreatorStatus::Unknown) return std::nullopt;
     const auto kept = inner_.permitted_tools(key, std::move(tools));
     if (!kept) return std::nullopt;
     tools = *kept;
@@ -498,9 +500,9 @@ public:
                 tools.end());
     return tools;
   }
-  // A failure of the PDP for a question without context.usage refuses the tool as a denial: the mode "keys" keeps this answer (docs/mcp.md,
-  // "Keys and the access of humans"). A call of a tool whose action lists a budget is one use of the creator (McpCreatorAccess::call): a
-  // spent budget gives the tool error budget_exceeded, and a failure of the question of the use gives 503, as on the routes.
+  // A failure of the PDP for any question of the call gives Failed: HTTP 503 with -32603, as on the routes and in the identity mode
+  // (owner decision of 2026-11-07). A call of a tool whose action lists a budget is one use of the creator (McpCreatorAccess::call): a spent
+  // budget gives the tool error budget_exceeded.
   McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
     if (inner_.tool_permitted(key, tool, arguments, call) != McpAccess::Allowed) return McpAccess::Denied;
     const McpCreatorCall decided = gate_.call(key, tool, arguments);
@@ -513,6 +515,12 @@ public:
               {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", decided.action}, {"ceiling", decided.ceiling.substr(0, 128)},
                {"outcome", outcome}, {"usage", decided.use}});
     return decided.access;
+  }
+  // A request with no tool (initialize, ping, a notification): the batch of the state of the key is its question. No valid answer gives
+  // HTTP 503 with -32603 (a notification gets 503 with no body).
+  McpAccess session_permitted(const McpKey& key, uint64_t* retry_after) override {
+    if (state_.status == McpCreatorStatus::Unknown) return McpAccess::Failed;
+    return inner_.session_permitted(key, retry_after);
   }
 
 private:

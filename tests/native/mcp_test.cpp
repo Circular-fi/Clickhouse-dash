@@ -6709,6 +6709,25 @@ void test_creator_budgets() {
   CHECK(decided.access == McpAccess::Denied && !decided.use && pdp.uses.empty());
   pdp.allowed = {"alice|query.run.read@service:db"};
 
+  // A failure of a question without usage gives Failed (503), before a denial, and no question with usage goes (owner decision of
+  // 2026-11-07: the mode keys answers a failure as the routes and the identity mode).
+  McpCreatorAccess failing("db", std::chrono::milliseconds(30000),
+                           [&](const std::string&, const std::vector<AccessQuestion>& questions) {
+                             std::vector<AccessDecision> out(questions.size());
+                             out.front().failed = true;  // the first fails, the others are plain denials
+                             return out;
+                           },
+                           [] { return int64_t{1000}; },
+                           [&](const std::string& subject, const AccessQuestion& question) {
+                             pdp.uses.push_back(subject + "|" + question_text(question));
+                             return pdp.use_answer;
+                           },
+                           [](const std::string& action) { return action == "query.run.read"; });
+  pdp.uses.clear();
+  decided = failing.call(two, *mcp_find_tool("run_query"), args_of(R"({"host":"stage","sql":"select 1"})"));
+  CHECK(decided.access == McpAccess::Failed && !decided.use && pdp.uses.empty());
+  CHECK(failing.call(key, *mcp_find_tool("list_databases"), none).access == McpAccess::Failed);
+
   // A key with no creator: Denied, nothing asked.
   McpKey orphan = key;
   orphan.creator.clear();
@@ -6748,6 +6767,16 @@ void test_creator_budgets() {
   CHECK_EQ(failed.http_status, 503);
   CHECK_EQ(failed.rpc_error, kRpcInternalError);
   CHECK(backend.calls.empty());
+  // The batch of the state of the key failed: a request with no tool gets 503 with -32603, and tools/list 503 (never a short list).
+  struct StateFailed : FakeBackend {
+    McpAccess session_permitted(const McpKey&, uint64_t*) override { return McpAccess::Failed; }
+    std::optional<std::vector<std::string>> permitted_tools(const McpKey&, std::vector<std::string>) override { return std::nullopt; }
+  };
+  StateFailed unknown;
+  const auto ping = mcp_handle_message(rpc("ping"), key, unknown, info, now);
+  CHECK_EQ(ping.http_status, 503);
+  CHECK_EQ(ping.rpc_error, kRpcInternalError);
+  CHECK_EQ(mcp_handle_message(rpc("tools/list"), key, unknown, info, now).http_status, 503);
 }
 
 void test_identity_protocol() {

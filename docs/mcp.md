@@ -369,7 +369,8 @@ In the `authzen` mode ([access.md](access.md)), a key of the page never has more
 - The key keeps its creator: the member `creator` of the key file and of the key list (the `sub` of the identity token). The value is `null` for a key of the configuration and for a key made in the `open` mode.
 - On each request of the key, ChDash finds the state of the key: one batch to the PDP for the creator, with all the questions of the key. ChDash keeps this state for `pdp.cache_ttl`, so it sends at most one such batch for each key and each period. It never keeps a state that has a failure of the PDP.
 - `tools/list` shows only the tools whose actions the creator holds in this state. The tools that use no action stay.
-- `tools/call` asks the PDP for the actions of the called tool only, not for all the actions of the key. The cache of the decisions applies. When the PDP refuses an action of the tool, or does not answer, the call gets the answer of a tool that does not exist (`-32602`, contract 3.6). The log has the line `mcp.tool_refused` with the key, the creator, the tool and the action. The other tools of the key continue to work.
+- `tools/call` asks the PDP for the actions of the called tool only, not for all the actions of the key. The cache of the decisions applies. When the PDP refuses an action of the tool, the call gets the answer of a tool that does not exist (`-32602`, contract 3.6). The log has the line `mcp.tool_refused` with the key, the creator, the tool and the action. The other tools of the key continue to work.
+- When the PDP gives no valid answer to a question of the request, the request gets HTTP `503` with `-32603`, as the routes and the mode `identity` (decision of 2026-11-07). This applies to each question of `tools/call`, and to the batch of the state of the key: then `tools/list`, `initialize`, `ping` and the other requests with no tool get `503` too (a notification gets `503` with no body). A failure never makes the key an orphan.
 - A call of a tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`) is one use of the creator. It takes one unit of the budget `queries` of the creator (refer to [Budgets of the keys](#budgets-of-the-keys)).
 - A key of the configuration is not checked: the operator writes it in the configuration.
 
@@ -410,7 +411,7 @@ An orphan key is refused:
 
 - Each request of the key gets the `401` of a key that does not exist (contract 3.3). The log has the line `mcp.key_refused` with the key, the creator (`-` when there is none) and the reason (`no_creator` or `creator_gone`).
 - `GET /api/mcp/keys` gives the reason in the member `orphan` of the key. The MCP page shows the warning "Refused" on the key, and the action Adopt.
-- A failure of the PDP never makes a key an orphan. During the failure, each tool that uses an action is refused (fail closed), and nobody can adopt the key.
+- A failure of the PDP never makes a key an orphan. During the failure, the requests of the key get HTTP `503` with `-32603` (fail closed), and nobody can adopt the key.
 
 To adopt a key, a person uses Adopt on the page, or `POST /api/mcp/keys/<id>/adopt`:
 

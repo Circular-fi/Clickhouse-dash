@@ -1172,9 +1172,12 @@ def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
         # The key is not an orphan: the list has no warning for it.
         listed = [k for k in call("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
         assert listed and listed[0]["orphan"] is None, listed
-        # The PDP fails: fail closed for every tool that uses an action, and the key is not called an orphan.
+        # The PDP fails: HTTP 503 with -32603 for a tool that uses an action and for tools/list (owner decision of 2026-11-07), and the key
+        # is not called an orphan. A tool that uses no action asks no question.
         answer(status=500)
-        assert mcp_call(secret, "list_databases").json()["error"]["code"] == -32602
+        failed = mcp_call(secret, "list_databases")
+        assert failed.status_code == 503 and failed.json()["error"]["code"] == -32603, failed.text
+        assert mcp_rpc(secret, "tools/list", {}).status_code == 503
         assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
     finally:
         answer(default=True)
