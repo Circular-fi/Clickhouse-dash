@@ -270,6 +270,27 @@ void test_values_and_derived_settings() {
   CHECK(worker && listen && mode);
 }
 
+// The bounds of the bytes read (the ceiling max_read_size of a grant is lower than them): defaults, values, range, effective values.
+void test_the_bytes_read_bounds() {
+  const AppConfig defaults = load("");
+  CHECK_EQ(defaults.query_options.max_bytes_to_read, uint64_t(0));
+  CHECK_EQ(defaults.generated_queries.max_bytes_to_read, uint64_t(0));
+  const AppConfig set = load("query { max_bytes_to_read = 1048576 }\ngenerated_queries { max_bytes_to_read = 2097152 }");
+  CHECK_EQ(set.query_options.max_bytes_to_read, uint64_t(1048576));
+  CHECK_EQ(set.generated_queries.max_bytes_to_read, uint64_t(2097152));
+  CHECK_EQ(load("query { max_bytes_to_read = 1000000000000000 }").query_options.max_bytes_to_read, uint64_t(1000000000000000ULL));
+  // Nothing is changed to fit: a value out of range or of another type is an error that names the key.
+  CHECK(contains(error_of("query { max_bytes_to_read = 1000000000000001 }"), "query.max_bytes_to_read must be between 0 and 1000000000000000"));
+  CHECK(contains(error_of("generated_queries { max_bytes_to_read = -1 }"), "generated_queries.max_bytes_to_read"));
+  CHECK(contains(error_of("query { max_bytes_to_read = \"big\" }"), "query.max_bytes_to_read"));
+  bool query = false, pages = false;
+  for (const auto& [name, value] : config::effective_values(set)) {
+    if (name == "query.max_bytes_to_read") query = value == "1048576";
+    if (name == "generated_queries.max_bytes_to_read") pages = value == "2097152";
+  }
+  CHECK(query && pages);
+}
+
 // ---- the usage of the MCP keys: mcp { usage { } } ----
 
 void test_mcp_usage_block() {
@@ -1052,6 +1073,7 @@ int main() {
   test_types_unknown_keys_and_enums();
   test_at_most_256_hosts();
   test_values_and_derived_settings();
+  test_the_bytes_read_bounds();
   test_mcp_usage_block();
   test_uris();
   test_secrets();

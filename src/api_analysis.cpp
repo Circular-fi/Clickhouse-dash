@@ -893,6 +893,8 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
     return json_error(res, 503, "server_stopping", "the server is stopping");
   }
 
+  // The statement of the job is the SQL of the person: the ceilings of the action that fits it apply (docs/access.md, "Limits of a grant").
+  access_classify_sql({record->original_sql});
   ChQueryLimits limits = user_sql_limits(req, "chdash-deep-analysis");
   // The request ends, but the job keeps running. The job stops by its own cancel, or when the server stops.
   const std::shared_ptr<DeepJobControl> control = started.control;

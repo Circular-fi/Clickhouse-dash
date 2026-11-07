@@ -27,6 +27,8 @@
 // The scope is a property of the thread. One HTTP request, one run or one export has one scope.
 // A later RequestContext can carry the scope explicitly. Until then, the functions read ChQueryScope::current().
 
+#include "access_ceilings.hpp"
+
 #include <clickhouse/block.h>
 #include <clickhouse/client.h>
 #include <clickhouse/query.h>
@@ -77,7 +79,8 @@ struct ChQueryLimits {
   std::string timeout_overflow_mode;  // sent with max_execution_time: "throw" or "break"; empty: the profile's
   uint64_t max_memory_usage = 0;
   uint64_t max_rows_to_read = 0;
-  std::string read_overflow_mode;  // sent with max_rows_to_read: "throw" or "break"; empty: the profile's
+  uint64_t max_bytes_to_read = 0;
+  std::string read_overflow_mode;  // sent with max_rows_to_read and max_bytes_to_read: "throw" or "break"; empty: the profile's
   uint64_t max_result_rows = 0;
   uint64_t max_result_bytes = 0;
   std::string result_overflow_mode;  // sent with a result cap: "throw" or "break"; empty: the profile's
@@ -92,6 +95,11 @@ struct ChQueryLimits {
   bool read_only_strict = false;
   // True when the caller went away (the browser closed the connection). The code asks at most every 200 ms.
   std::function<bool()> canceled;
+  // The ceilings of the grant that apply to the statements of this scope (apply_ceilings sets them). They already lower the bounds above.
+  // A statement that ChDash builds (ch_select, ch_select_cancelable and ch_execute with a text) also counts the rows and the bytes read, the
+  // rows of the result and the time of the statement, and it ends with ChCeilingExceeded past a ceiling. A SETTINGS clause in the SQL of
+  // the statement, and a profile with readonly = 1, thus never loosen a ceiling.
+  AccessCeilings ceilings;
   // The scope gives each statement a new query_id (ch_statement_query_id).
   // The statements of an MCP call are named for their key and their tool (mcp_cost.hpp).
   // An empty value means that ClickHouse names each statement.
@@ -130,6 +138,18 @@ class ChQueryScope {
 class ChQueryCanceled : public std::runtime_error {
  public:
   ChQueryCanceled() : std::runtime_error("canceled: the client closed the connection") {}
+};
+
+// A statement went past a ceiling of the grant. The client counted it and stopped it (ChQueryLimits::ceilings). `code` is the code of the
+// ClickHouse error that has the same meaning: 158 (rows), 307 (bytes) or 159 (time). The answer of a route follows this code
+// (classify_clickhouse_error). The connection is not clean: the statement did not end, so the pool closes it.
+class ChCeilingExceeded : public std::runtime_error {
+ public:
+  ChCeilingExceeded(int code, const std::string& text) : std::runtime_error(text), code_(code) {}
+  int code() const { return code_; }
+
+ private:
+  int code_;
 };
 
 // Throws ChQueryCanceled when the caller of the current scope went away.
@@ -184,6 +204,7 @@ struct ChSettingsProfile {
   double max_execution_time = 0;  // seconds; 0 = none
   uint64_t max_memory_usage = 0;
   uint64_t max_rows_to_read = 0;
+  uint64_t max_bytes_to_read = 0;
   uint64_t max_result_rows = 0;
   uint64_t max_result_bytes = 0;
 };

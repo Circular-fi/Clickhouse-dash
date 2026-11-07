@@ -12,6 +12,7 @@
 //        cmake --build build --target chdash_ch_query_test
 // Run:   ./build/chdash_ch_query_test   (exit code 0 = every check passed)
 
+#include "access_ceilings.hpp"
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
 #include "facet_limits.hpp"
@@ -110,6 +111,112 @@ void test_settings_follow_the_scope_and_never_loosen_the_profile() {
   CHECK(setting(out, "max_result_bytes") == "2048");
   CHECK(setting(out, "result_overflow_mode") == "break");
   CHECK(setting(out, "log_comment") == "<unset>");
+}
+
+// max_bytes_to_read is a setting of ChDash like the rows read: the lower of the limit and the profile, with the overflow mode of the read.
+void test_the_bytes_read_are_a_bound_like_the_rows_read() {
+  const auto now = std::chrono::steady_clock::now();
+  ChQueryLimits limits;
+  limits.max_bytes_to_read = 4096;
+  limits.max_rows_to_read = 100;
+  limits.read_overflow_mode = "throw";
+  Settings out = ch_query_settings(limits, open_profile(), now);
+  CHECK(setting(out, "max_bytes_to_read") == "4096");
+  CHECK(setting(out, "max_rows_to_read") == "100");
+  CHECK(setting(out, "read_overflow_mode") == "throw");
+  // The mode goes one time, also when the bytes alone are bound.
+  size_t modes = 0;
+  for (const auto& item : out) modes += item.first == "read_overflow_mode" ? 1 : 0;
+  CHECK(modes == 1);
+  ChQueryLimits bytes_only;
+  bytes_only.max_bytes_to_read = 4096;
+  bytes_only.read_overflow_mode = "break";
+  out = ch_query_settings(bytes_only, open_profile(), now);
+  CHECK(setting(out, "max_bytes_to_read") == "4096" && setting(out, "read_overflow_mode") == "break");
+  // A stricter profile wins: nothing is sent. A looser profile is lowered.
+  ChSettingsProfile strict = open_profile();
+  strict.max_bytes_to_read = 1024;
+  CHECK(setting(ch_query_settings(limits, strict, now), "max_bytes_to_read") == "<unset>");
+  ChSettingsProfile loose = open_profile();
+  loose.max_bytes_to_read = 1'000'000;
+  CHECK(setting(ch_query_settings(limits, loose, now), "max_bytes_to_read") == "4096");
+  // A profile with readonly = 1 takes no setting: the backstop of the client is the bound (access_ceilings.hpp).
+  ChSettingsProfile readonly = open_profile();
+  readonly.readonly = 1;
+  CHECK(ch_query_settings(limits, readonly, now).empty());
+}
+
+// apply_ceilings lowers the bound of each statement and never makes one looser (ProcurAuth 7.4, 8.1).
+void test_apply_ceilings_lowers_and_never_loosens() {
+  const auto now = std::chrono::steady_clock::now();
+  AccessCeilings ceilings;
+  ceilings.max_rows_read = 1000;
+  ceilings.max_read_size = 4096;
+  ceilings.max_rows = 10;
+  ceilings.max_result_size = 2048;
+  ceilings.max_duration = 30;
+  ceilings.max_memory = 1'000'000;
+  // No bound before: each ceiling is the bound, with the overflow mode "throw".
+  ChQueryLimits limits;
+  apply_ceilings(ceilings, limits);
+  CHECK(limits.max_rows_to_read == uint64_t(1000));
+  CHECK(limits.max_bytes_to_read == uint64_t(4096));
+  CHECK(limits.max_result_rows == uint64_t(10));
+  CHECK(limits.max_result_bytes == uint64_t(2048));
+  CHECK(limits.max_execution_time_s == int64_t(30));
+  CHECK(limits.max_memory_usage == uint64_t(1'000'000));
+  CHECK(limits.read_overflow_mode == "throw" && limits.result_overflow_mode == "throw" && limits.timeout_overflow_mode == "throw");
+  // The scope keeps the ceilings for the backstop of the statements that ChDash builds. A second call keeps the lower value.
+  CHECK(limits.ceilings == ceilings);
+  AccessCeilings lower_rows;
+  lower_rows.max_rows = 4;
+  ChQueryLimits again = limits;
+  apply_ceilings(lower_rows, again);
+  CHECK(again.ceilings.max_rows == 4 && again.ceilings.max_duration == 30 && again.max_result_rows == 4);
+  // A bound that is lower than the ceiling stays; a bound that is higher is lowered. The mode of the route stays too.
+  ChQueryLimits bounded;
+  bounded.max_rows_to_read = 500;
+  bounded.max_bytes_to_read = 9999;
+  bounded.max_result_rows = 5;
+  bounded.max_result_bytes = 4096;
+  bounded.max_execution_time_s = 10;
+  bounded.max_memory_usage = 2'000'000;
+  bounded.result_overflow_mode = "break";
+  apply_ceilings(ceilings, bounded);
+  CHECK(bounded.max_rows_to_read == uint64_t(500));
+  CHECK(bounded.max_bytes_to_read == uint64_t(4096));
+  CHECK(bounded.max_result_rows == uint64_t(5));
+  CHECK(bounded.max_result_bytes == uint64_t(2048));
+  CHECK(bounded.max_execution_time_s == int64_t(10));
+  CHECK(bounded.max_memory_usage == uint64_t(1'000'000));
+  CHECK(bounded.result_overflow_mode == "break");
+  // No ceiling changes nothing. A duration above the largest signed value does not wrap.
+  ChQueryLimits untouched;
+  untouched.max_rows_to_read = 7;
+  apply_ceilings(AccessCeilings{}, untouched);
+  CHECK(untouched.max_rows_to_read == 7 && untouched.max_result_rows == 0 && untouched.read_overflow_mode.empty());
+  AccessCeilings huge;
+  huge.max_duration = UINT64_MAX;
+  ChQueryLimits wide;
+  apply_ceilings(huge, wide);
+  CHECK(wide.max_execution_time_s > 0);
+  // The applied value is the lowest of the ceiling, the bound and the profile.
+  ChSettingsProfile profile = open_profile();
+  profile.max_rows_to_read = 100;      // lower than the ceiling: the profile wins, nothing is sent
+  profile.max_result_rows = 1000;      // higher than the ceiling: the ceiling is sent
+  profile.max_execution_time = 600;
+  const Settings out = ch_query_settings(limits, profile, now);
+  CHECK(setting(out, "max_rows_to_read") == "<unset>");
+  CHECK(setting(out, "max_result_rows") == "10");
+  CHECK(setting(out, "max_execution_time") == "30");
+  CHECK(setting(out, "max_memory_usage") == "1000000");
+  CHECK(setting(out, "max_bytes_to_read") == "4096");
+  CHECK(setting(out, "max_result_bytes") == "2048");
+  CHECK(setting(out, "result_overflow_mode") == "throw" && setting(out, "timeout_overflow_mode") == "throw");
+  // A user with readonly = 1 gets no setting: the profile is the only bound there, and the backstops of the client apply.
+  ChSettingsProfile readonly = open_profile();
+  readonly.readonly = 1;
+  CHECK(ch_query_settings(limits, readonly, now).empty());
 }
 
 void test_readonly_or_unknown_profile_gets_no_setting() {
@@ -387,6 +494,49 @@ void test_a_callback_that_stops_reading_keeps_the_connection(const std::string& 
   CHECK(select_u64(*again, "SELECT toString(6)") == 6);
 }
 
+// The ceilings of a scope are a backstop: a SETTINGS clause in the SQL wins in ClickHouse, but ChDash counts the progress and the blocks and
+// ends the statement (ChCeilingExceeded). The connection is not reused as it is.
+void test_the_ceilings_of_the_scope_stop_a_statement_that_sets_its_own_limits(const std::string& uri) {
+  auto pool = std::make_shared<ClickHouseClientPool>(4);
+  const auto run = [&](const AccessCeilings& ceilings, const std::string& sql, int* code, std::string* text) {
+    auto client = lease(pool, uri);
+    ChQueryLimits limits;
+    apply_ceilings(ceilings, limits);
+    ChQueryScope scope(std::move(limits));
+    *code = 0;
+    try {
+      ch_select(*client, sql, [](const clickhouse::Block&) {});
+    } catch (const ChCeilingExceeded& error) {
+      *code = error.code();
+      *text = error.what();
+    }
+    return !ch_connection_dirty(*client);
+  };
+  int code = 0;
+  std::string text;
+  // The rows read: the SQL sets max_rows_to_read = 0, and ClickHouse would let it run.
+  AccessCeilings reads;
+  reads.max_rows_read = 1000;
+  CHECK(!run(reads, "SELECT count() FROM numbers(5000000) SETTINGS max_rows_to_read = 0, max_block_size = 1000", &code, &text));
+  CHECK(code == 158 && text.rfind("query_scan_limit: ", 0) == 0);
+  // The rows of the result.
+  AccessCeilings rows;
+  rows.max_rows = 10;
+  CHECK(!run(rows, "SELECT number FROM numbers(100) SETTINGS max_result_rows = 0", &code, &text));
+  CHECK(code == 158 && text.rfind("query_result_limit: ", 0) == 0);
+  // The time of the statement.
+  AccessCeilings time;
+  time.max_duration = 1;
+  CHECK(!run(time, "SELECT sleep(3), sleep(3) SETTINGS max_execution_time = 0, function_sleep_max_microseconds_per_block = 100000000", &code, &text));
+  CHECK(code == 159 && text.rfind("query_timeout: ", 0) == 0);
+  // A statement inside the ceilings runs and keeps its connection clean.
+  AccessCeilings wide;
+  wide.max_rows_read = 1'000'000;
+  wide.max_rows = 100;
+  CHECK(run(wide, "SELECT number FROM numbers(50)", &code, &text));
+  CHECK(code == 0);
+}
+
 void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
   auto pool = std::make_shared<ClickHouseClientPool>(4);
   auto client = lease(pool, uri);
@@ -661,6 +811,8 @@ void test_mcp_settings_follow_the_profile() {
 
 int main() {
   test_settings_follow_the_scope_and_never_loosen_the_profile();
+  test_the_bytes_read_are_a_bound_like_the_rows_read();
+  test_apply_ceilings_lowers_and_never_loosens();
   test_readonly_or_unknown_profile_gets_no_setting();
   test_read_only_and_the_overflow_modes();
   test_strict_read_only_of_the_access();
@@ -677,6 +829,7 @@ int main() {
       test_the_scope_observes_each_statement(uri);
       test_a_callback_that_stops_reading_keeps_the_connection(uri);
       test_the_scope_settings_reach_clickhouse(uri);
+      test_the_ceilings_of_the_scope_stop_a_statement_that_sets_its_own_limits(uri);
       test_a_refused_settings_clause_keeps_the_bounds(uri);
       test_the_query_id_of_the_scope_reaches_clickhouse(uri);
       test_a_passed_deadline_or_a_cancel_stops_before_sending(uri);

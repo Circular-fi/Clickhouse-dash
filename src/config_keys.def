@@ -88,6 +88,7 @@ CFG_INT("query", "cancel_token_ttl_ms", int, c.cancel_token_ttl_ms, "172800000",
 CFG_INT("query", "max_execution_time_s", int64_t, c.query_options.max_execution_time_s, "0", 0, 604800, false, "seconds", "max_execution_time of a run. 0 = the settings profile of the runner user decides. A bound is never looser than the profile.")
 CFG_INT("query", "max_memory_usage", uint64_t, c.query_options.max_memory_usage, "0", 0, 1099511627776, false, "bytes", "max_memory_usage of a run. 0 = the settings profile of the runner user decides.")
 CFG_INT("query", "max_rows_to_read", uint64_t, c.query_options.max_rows_to_read, "0", 0, 1000000000000000, false, "rows", "max_rows_to_read of a run. 0 = the settings profile of the runner user decides.")
+CFG_INT("query", "max_bytes_to_read", uint64_t, c.query_options.max_bytes_to_read, "0", 0, 1000000000000000, false, "bytes", "max_bytes_to_read of a run: the bytes that a run may read. 0 = the settings profile of the runner user decides.")
 
 // ---- client_pool --------------------------------------------------------------------------------------------------------
 CFG_INT("client_pool", "max_idle", size_t, c.client_pool_max_idle_per_key, "4", 0, 64, false, "connections", "Idle connections that are kept for one ClickHouse address.")
@@ -102,6 +103,7 @@ CFG_INT("generated_queries", "timeout_ms", int, c.generated_queries.timeout_ms, 
 CFG_INT("generated_queries", "max_memory_usage", uint64_t, c.generated_queries.max_memory_usage, "4294967296", 0, 1099511627776, false, "bytes", "max_memory_usage of each statement that a page writes. 0 = the settings profile decides.")
 
 CFG_INT("generated_queries", "max_rows_to_read", uint64_t, c.generated_queries.max_rows_to_read, "20000000000", 0, 1000000000000000, false, "rows", "Rows that one statement of a page may read. A statement that would read more fails with <page>_scan_limit. 0 = the settings profile decides.")
+CFG_INT("generated_queries", "max_bytes_to_read", uint64_t, c.generated_queries.max_bytes_to_read, "0", 0, 1000000000000000, false, "bytes", "Bytes that one statement of a page may read. A statement that would read more fails with <page>_scan_limit. 0 = the settings profile decides.")
 
 // ---- admission ----------------------------------------------------------------------------------------------------------
 CFG_INT("admission", "heavy_per_host", size_t, c.admission.heavy_per_host, "16", 0, 1024, true, "requests", "Reads of the Explorer, System, Traces, Logs and Metrics pages that run at once for one ClickHouse host. 0 = no limit.")

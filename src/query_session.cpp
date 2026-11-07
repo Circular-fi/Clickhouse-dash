@@ -1,4 +1,5 @@
 #include "query_session.hpp"
+#include "access_ceilings.hpp"
 #include "api_error.hpp"
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
@@ -418,7 +419,7 @@ void QuerySession::finish_error(const std::string& message) {
       : nullptr;
   std::string error_code = "query_failed";
   std::string public_message = message;
-  for (const char* code : {"result_cell_too_large", "result_event_too_large"}) {
+  for (const char* code : {"result_cell_too_large", "result_event_too_large", "query_scan_limit", "query_result_limit", "query_timeout"}) {
     const std::string prefix = std::string(code) + ":";
     if (public_message.rfind(prefix, 0) == 0) {
       error_code = code;
@@ -483,6 +484,22 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
 
 
 void QuerySession::run_query() {
+  // The ceilings of the grant (access_ceilings.hpp): the meter counts from the start of the run, and the deadline thread ends a run that
+  // takes longer than max_duration with the KILL path of a cancel. Both work with any profile and with any SETTINGS clause of the SQL.
+  const auto run_started = std::chrono::steady_clock::now();
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    ceiling_meter_ = CeilingMeter(options_.ceilings, run_started);
+  }
+  // The error of a breach: the text that finish_error reads (ceiling_breach_text).
+  const auto throw_if_breach = [](const std::optional<CeilingBreach>& breach) {
+    if (breach) throw std::runtime_error(ceiling_breach_text(*breach));
+  };
+  CeilingDeadline duration_deadline(options_.ceilings.max_duration, [this] {
+    ceiling_deadline_hit_.store(true, std::memory_order_release);
+    cancel_native_queries_best_effort(false);
+  });
+
   auto discard_query_connection = [&]() {
     if (!client_query_) return;
     if (client_pool_) client_pool_->invalidate(client_query_);
@@ -514,6 +531,8 @@ void QuerySession::run_query() {
     read_rows_total_ = 0;
     read_bytes_total_ = 0;
     total_rows_to_read_ = 0;
+    // The attempt starts again: the meter counts it from 0, and the time of the run stays the same.
+    ceiling_meter_ = CeilingMeter(options_.ceilings, run_started);
     result_rows_emitted_ = 0;
     result_bytes_emitted_ = 0;
     written_rows_total_ = 0;
@@ -534,6 +553,9 @@ void QuerySession::run_query() {
   limits.max_execution_time_s = options_.max_execution_time_s;
   limits.max_memory_usage = options_.max_memory_usage;
   limits.max_rows_to_read = options_.max_rows_to_read;
+  limits.max_bytes_to_read = options_.max_bytes_to_read;
+  // The ceilings lower the bounds above. The settings profile lowers them again (ch_query_settings).
+  apply_ceilings(options_.ceilings, limits);
   limits.read_only_strict = options_.read_only_strict;
   limits.canceled = [this] { return cancel_requested_.load(std::memory_order_relaxed); };
   ChQueryScope scope(std::move(limits));
@@ -584,6 +606,13 @@ void QuerySession::run_query() {
       }
       clickhouse::Query command(sql_, begin_native_query_attempt());
       apply_explicit_profiling_settings(command);
+      // A statement that is not a SELECT can read many rows (INSERT ... SELECT): the meter counts them too.
+      command.OnProgress([this, throw_if_breach](const clickhouse::Progress& p) {
+        if (cancel_requested_.load(std::memory_order_relaxed)) throw std::runtime_error("canceled");
+        std::lock_guard<std::mutex> lk(mu_);
+        throw_if_breach(ceiling_meter_.on_progress(p.rows, p.bytes));
+        throw_if_breach(ceiling_meter_.on_clock(std::chrono::steady_clock::now()));
+      });
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
@@ -639,10 +668,13 @@ void QuerySession::run_query() {
     ResultEventWriter writer(
         query_id_, event_limits,
         [this](std::string_view event, std::string_view json) { push_sse_json_event(event, json); },
-        [this](size_t rows, size_t bytes) {
+        [this, throw_if_breach](size_t rows, size_t bytes) {
           std::lock_guard<std::mutex> lk(mu_);
           result_rows_emitted_ += rows;
           result_bytes_emitted_ += bytes;
+          // The backstop of the ceilings for the size of the result: the bytes of each event, counted after the event went out. A run
+          // goes past max_result_size by one event at most (the exception ends the run like a cell that is too large).
+          throw_if_breach(ceiling_meter_.on_result(0, bytes));
         });
     const std::string plan_cache_key = describe_cache_key(host_id_, database_, sql_);
     bool attempt_used_cached_plan = false;
@@ -702,12 +734,15 @@ void QuerySession::run_query() {
         q.SetSetting("send_profile_events", f);
       }
 
-      q.OnProgress([self = shared_from_this()](const clickhouse::Progress& p) {
+      q.OnProgress([self = shared_from_this(), throw_if_breach](const clickhouse::Progress& p) {
         if (self->cancel_requested_.load(std::memory_order_relaxed)) {
           throw std::runtime_error("canceled");
         }
         const auto now = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lk(self->mu_);
+        // The backstop of the ceilings: the rows and bytes read, and the time of the run (ProcurAuth 7.5).
+        throw_if_breach(self->ceiling_meter_.on_progress(p.rows, p.bytes));
+        throw_if_breach(self->ceiling_meter_.on_clock(now));
         self->read_rows_total_ += p.rows;
         self->read_bytes_total_ += p.bytes;
         self->written_rows_total_ += p.written_rows;
@@ -779,6 +814,12 @@ void QuerySession::run_query() {
           throw std::runtime_error("canceled");
         }
         const uint64_t block_rows = block.GetRowCount();
+        if (block_rows > 0) {
+          // The backstop of the ceilings: the rows of this block. A block that goes past max_rows is not encoded.
+          std::lock_guard<std::mutex> lk(mu_);
+          throw_if_breach(ceiling_meter_.on_result(block_rows, 0));
+          throw_if_breach(ceiling_meter_.on_clock(std::chrono::steady_clock::now()));
+        }
         if (block_rows > 0 && rows_received >= row_limit) {
           limit_reached = true;
           return false;
@@ -845,7 +886,8 @@ void QuerySession::run_query() {
       // A retry is still safe as long as no result row has reached the client.
       // A second result_meta replaces the provisional schema before any rows are appended.
       const bool can_retry_without_emitted_rows = writer.rows_returned() == 0 &&
-          msg != "canceled" &&
+          msg != "canceled" && ceiling_breach_code(msg).empty() &&
+          !ceiling_deadline_hit_.load(std::memory_order_acquire) &&
           !cancel_requested_.load(std::memory_order_relaxed);
 
       if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_rows) {
@@ -894,6 +936,12 @@ void QuerySession::run_query() {
       cancel_native_queries_best_effort(false);
     }
     client_query_.reset();
+    // The deadline thread of max_duration killed the statement: the error of ClickHouse (QUERY_WAS_CANCELLED) is not the cause.
+    if (ceiling_deadline_hit_.load(std::memory_order_acquire) && ceiling_breach_code(msg).empty() &&
+        !cancel_requested_.load(std::memory_order_relaxed)) {
+      std::lock_guard<std::mutex> lk(mu_);
+      msg = ceiling_breach_text(ceiling_meter_.duration_breach());
+    }
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
     } else {

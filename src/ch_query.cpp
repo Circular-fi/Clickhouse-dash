@@ -1,10 +1,13 @@
 #include "ch_query.hpp"
 
+#include "access_ceilings.hpp"
+
 #include <clickhouse/columns/string.h>
 #include <clickhouse/exceptions.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -74,7 +77,7 @@ uint64_t parse_u64(std::string_view text) {
 bool wants_settings(const ChQueryLimits& limits) {
   return !limits.log_comment.empty() || limits.deadline != std::chrono::steady_clock::time_point{} ||
          limits.max_execution_time_s > 0 || limits.max_memory_usage > 0 || limits.max_rows_to_read > 0 ||
-         limits.max_result_rows > 0 || limits.max_result_bytes > 0 || limits.read_only || limits.read_only_strict;
+         limits.max_bytes_to_read > 0 || limits.max_result_rows > 0 || limits.max_result_bytes > 0 || limits.read_only || limits.read_only_strict;
 }
 
 [[noreturn]] void throw_deadline_passed() {
@@ -258,13 +261,14 @@ class Runner {
     const std::string sql =
         "SELECT toString(getSetting('readonly')), toString(getSetting('max_execution_time')), "
         "toString(getSetting('max_memory_usage')), toString(getSetting('max_rows_to_read')), "
-        "toString(getSetting('max_result_rows')), toString(getSetting('max_result_bytes'))";
+        "toString(getSetting('max_result_rows')), toString(getSetting('max_result_bytes')), "
+        "toString(getSetting('max_bytes_to_read'))";
     clickhouse::Query query(sql, std::string());
     clickhouse::QuerySettingsField label;
     label.value = "chdash:probe";
     query.SetSetting("log_comment", label);
     query.OnData([&profile](const clickhouse::Block& block) {
-      if (block.GetRowCount() == 0 || block.GetColumnCount() < 6) return;
+      if (block.GetRowCount() == 0 || block.GetColumnCount() < 7) return;
       const auto text = [&block](size_t column) -> std::string {
         const auto values = block[column]->As<clickhouse::ColumnString>();
         return values ? std::string(values->At(0)) : std::string();
@@ -275,6 +279,7 @@ class Runner {
       profile.max_rows_to_read = parse_u64(text(3));
       profile.max_result_rows = parse_u64(text(4));
       profile.max_result_bytes = parse_u64(text(5));
+      profile.max_bytes_to_read = parse_u64(text(6));
       profile.known = true;
     });
     // A server that refuses the label also drops the connection. The next statement then fails with "closed".
@@ -365,6 +370,40 @@ void ch_check_canceled() {
   if (scope->canceled_) throw ChQueryCanceled();
 }
 
+namespace {
+
+// The backstop of the ceilings for one statement that ChDash builds (ChQueryLimits::ceilings). The progress packets give the rows and bytes
+// read, the blocks give the rows of the result, and each callback looks at the clock. Past a ceiling it throws ChCeilingExceeded. The
+// code does not read a setting, so a SETTINGS clause in the SQL and a profile with readonly = 1 never loosen a ceiling. A statement
+// without a ceiling in its scope pays nothing.
+class StatementCeilings {
+ public:
+  StatementCeilings() {
+    const ChQueryLimits* limits = ChQueryScope::current();
+    if (limits && limits->ceilings.any()) meter_.emplace(limits->ceilings, std::chrono::steady_clock::now());
+  }
+  void on_progress(const clickhouse::Progress& progress) {
+    if (!meter_) return;
+    check(meter_->on_progress(progress.rows, progress.bytes));
+    check(meter_->on_clock(std::chrono::steady_clock::now()));
+  }
+  void on_block(const clickhouse::Block& block) {
+    if (!meter_) return;
+    check(meter_->on_result(block.GetRowCount(), 0));
+    check(meter_->on_clock(std::chrono::steady_clock::now()));
+  }
+
+ private:
+  static void check(const std::optional<CeilingBreach>& breach) {
+    if (!breach) return;
+    const int code = breach->ceiling == "max_duration" ? 159 : (breach->ceiling == "max_read_size" || breach->ceiling == "max_result_size" ? 307 : 158);
+    throw ChCeilingExceeded(code, ceiling_breach_text(*breach));
+  }
+  std::optional<CeilingMeter> meter_;
+};
+
+}  // namespace
+
 void ch_select(clickhouse::Client& client, const std::string& sql,
                const std::function<void(const clickhouse::Block&)>& on_block) {
   ch_select(client, sql, ChParams{}, on_block);
@@ -374,11 +413,16 @@ void ch_select(clickhouse::Client& client, const std::string& sql, const ChParam
                const std::function<void(const clickhouse::Block&)>& on_block) {
   clickhouse::Query query(sql, ch_statement_query_id());
   for (const auto& [name, value] : params) query.SetParam(name, value);
-  query.OnData([&on_block](const clickhouse::Block& block) {
+  auto ceilings = std::make_shared<StatementCeilings>();
+  query.OnData([&on_block, ceilings](const clickhouse::Block& block) {
     ch_check_canceled();
+    ceilings->on_block(block);
     on_block(block);
   });
-  query.OnProgress([](const clickhouse::Progress&) { ch_check_canceled(); });
+  query.OnProgress([ceilings](const clickhouse::Progress& progress) {
+    ch_check_canceled();
+    ceilings->on_progress(progress);
+  });
   Runner(client).run(query);
 }
 
@@ -386,15 +430,19 @@ void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
                           const std::function<bool(const clickhouse::Block&)>& on_block) {
   bool stopped = false;
   clickhouse::Query query(sql, ch_statement_query_id());
-  query.OnDataCancelable([&on_block, &stopped](const clickhouse::Block& block) {
+  auto ceilings = std::make_shared<StatementCeilings>();
+  query.OnDataCancelable([&on_block, &stopped, ceilings](const clickhouse::Block& block) {
     // The callback returns false once. clickhouse-cpp sends one Cancel packet and reads the stream to its end.
     if (stopped) return true;
     ch_check_canceled();
+    ceilings->on_block(block);
     if (!on_block(block)) stopped = true;
     return !stopped;
   });
-  query.OnProgress([&stopped](const clickhouse::Progress&) {
-    if (!stopped) ch_check_canceled();
+  query.OnProgress([&stopped, ceilings](const clickhouse::Progress& progress) {
+    if (stopped) return;
+    ch_check_canceled();
+    ceilings->on_progress(progress);
   });
   try {
     Runner(client).run(query);
@@ -408,7 +456,11 @@ void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
 
 void ch_execute(clickhouse::Client& client, const std::string& sql) {
   clickhouse::Query query(sql, ch_statement_query_id());
-  query.OnProgress([](const clickhouse::Progress&) { ch_check_canceled(); });
+  auto ceilings = std::make_shared<StatementCeilings>();
+  query.OnProgress([ceilings](const clickhouse::Progress& progress) {
+    ch_check_canceled();
+    ceilings->on_progress(progress);
+  });
   Runner(client).run(query);
 }
 
@@ -487,6 +539,15 @@ std::vector<std::pair<std::string, std::string>> ch_query_settings(
     if (!limits.read_overflow_mode.empty()) out.emplace_back("read_overflow_mode", limits.read_overflow_mode);
   }
 
+  const uint64_t bytes_read = tighter(limits.max_bytes_to_read, profile.max_bytes_to_read);
+  if (limits.max_bytes_to_read > 0 && bytes_read != profile.max_bytes_to_read) {
+    out.emplace_back("max_bytes_to_read", std::to_string(bytes_read));
+    // One mode for the rows and the bytes read: add it one time.
+    if (!limits.read_overflow_mode.empty() && std::none_of(out.begin(), out.end(), [](const auto& item) { return item.first == "read_overflow_mode"; })) {
+      out.emplace_back("read_overflow_mode", limits.read_overflow_mode);
+    }
+  }
+
   bool result_cap = false;
   const uint64_t result_rows = tighter(limits.max_result_rows, profile.max_result_rows);
   if (limits.max_result_rows > 0 && result_rows != profile.max_result_rows) {
@@ -500,6 +561,37 @@ std::vector<std::pair<std::string, std::string>> ch_query_settings(
   }
   if (result_cap && !limits.result_overflow_mode.empty()) out.emplace_back("result_overflow_mode", limits.result_overflow_mode);
   return out;
+}
+
+void apply_ceilings(const AccessCeilings& ceilings, ChQueryLimits& limits) {
+  // The scope keeps the ceilings: the statements that ChDash builds count against them (StatementCeilings).
+  limits.ceilings = access_ceilings_lowest(limits.ceilings, ceilings);
+  // The lower of two bounds. 0 means that a side has no bound.
+  const auto tighter = [](uint64_t current, uint64_t ceiling) -> uint64_t { return current == 0 ? ceiling : std::min(current, ceiling); };
+  if (ceilings.max_rows_read != 0) {
+    limits.max_rows_to_read = tighter(limits.max_rows_to_read, ceilings.max_rows_read);
+    if (limits.read_overflow_mode.empty()) limits.read_overflow_mode = "throw";
+  }
+  if (ceilings.max_read_size != 0) {
+    limits.max_bytes_to_read = tighter(limits.max_bytes_to_read, ceilings.max_read_size);
+    if (limits.read_overflow_mode.empty()) limits.read_overflow_mode = "throw";
+  }
+  if (ceilings.max_rows != 0) {
+    limits.max_result_rows = tighter(limits.max_result_rows, ceilings.max_rows);
+    if (limits.result_overflow_mode.empty()) limits.result_overflow_mode = "throw";
+  }
+  if (ceilings.max_result_size != 0) {
+    limits.max_result_bytes = tighter(limits.max_result_bytes, ceilings.max_result_size);
+    if (limits.result_overflow_mode.empty()) limits.result_overflow_mode = "throw";
+  }
+  if (ceilings.max_duration != 0) {
+    // The seconds of a bound are a signed value: a ceiling above the largest one has no more effect than the largest one.
+    const uint64_t seconds = std::min<uint64_t>(ceilings.max_duration, static_cast<uint64_t>(INT64_MAX));
+    limits.max_execution_time_s =
+        static_cast<int64_t>(tighter(limits.max_execution_time_s > 0 ? static_cast<uint64_t>(limits.max_execution_time_s) : 0, seconds));
+    if (limits.timeout_overflow_mode.empty()) limits.timeout_overflow_mode = "throw";
+  }
+  if (ceilings.max_memory != 0) limits.max_memory_usage = tighter(limits.max_memory_usage, ceilings.max_memory);
 }
 
 ChSettingsProfile ch_connection_profile(clickhouse::Client& client) { return Runner(client).profile(); }

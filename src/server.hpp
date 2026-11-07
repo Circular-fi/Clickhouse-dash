@@ -238,6 +238,8 @@ struct GeneratedQuerySettings {
   // A statement that would read more fails with <page>_scan_limit.
   // The preview of a table and the catalog of the metrics stop at this limit instead. They say so.
   uint64_t max_rows_to_read = uint64_t{20} * 1000 * 1000 * 1000;
+  // The bytes that one statement of a page may read. The value 0 uses the settings profile.
+  uint64_t max_bytes_to_read = 0;
 };
 
 struct AppConfig {
@@ -445,7 +447,10 @@ private:
   std::vector<std::string> access_host_ids() const;
   // Return the decisions of the subject of this request for `questions`.
   // This makes one call to the PDP for the questions that its cache does not answer.
-  std::vector<AccessDecision> access_decide(const std::vector<AccessQuestion>& questions);
+  // `operation` is true (the default) for a question that guards an operation: a true answer with a ceiling that ChDash cannot apply is then
+  // false (ProcurAuth 7.5). It is false for a question that only shows or hides a page, a host or a database. A question with the match
+  // "subtree" never turns false because of a ceiling.
+  std::vector<AccessDecision> access_decide(const std::vector<AccessQuestion>& questions, bool operation = true);
   // The batch of the hosts (access_navigation_questions): `questions` receives the questions, the result holds their decisions.
   std::vector<AccessDecision> access_host_decisions(std::vector<AccessQuestion>* questions, const std::string& database);
   // The hosts that the subject of this request can see: the hosts with one action at least, on the host or below it (one batch with
@@ -486,6 +491,23 @@ private:
   // This is the case when the subject has query.run.read and not query.run.write on the host (or the database) of the request.
   // It is also the case for an export (query.export and query.run.read) without query.run.write.
   bool access_read_only() const;
+  // The ceilings of the grant that apply to the SQL of this request (access_ceilings.hpp, docs/access.md, "Limits of a grant"). They come from
+  // the decisions of the rule of the route. Call access_classify_sql first on a route that runs the SQL of the person. Empty in the open mode
+  // and for a call of MCP.
+  AccessCeilings access_ceilings() const;
+  // Set the class of the SQL of this request (user_sql_policy.hpp): a person with query.run.read and query.run.write then gets the ceilings
+  // of the action that fits. Return the class. Without this call the class is Unsure and the lower value of each ceiling applies.
+  SqlStatementClass access_classify_sql(const std::vector<std::string>& texts);
+  // The class that access_classify_sql set for this request (Unsure before the call). The action of a use follows it.
+  SqlStatementClass access_sql_class() const;
+  // The one function that applies the ceilings of this request to the bounds of a statement (apply_ceilings in access_ceilings.hpp).
+  void apply_ceilings(ChQueryLimits& limits) const;
+  // The highest bound of the configuration for each ceiling: the declared max of the action document. 0 stands for the schema max.
+  AccessCeilings access_ceiling_bounds() const;
+  // The stream of an export (docs/access.md, "Limits of a grant"). The body of the stream holds only the token, so the question goes to
+  // the host of the job. Ask query.export, query.run.read and query.run.write on that host. Return false after the function writes the
+  // refusal (403, 429 or 503). `stored` is what the run decided: the stream applies the lower ceilings and keeps readonly = 1.
+  bool access_check_export_stream(httplib::Response& res, const std::string& host_id, const ExportJobAccess& stored);
   // Return the access part of /api/version, as a JSON object.
   // The object has the mode, the subject, each action that the subject may use somewhere, and the decisions on each visible host.
   // The server makes one batch for each page. *failed (when not null) receives true when a decision of the batch failed: the route then

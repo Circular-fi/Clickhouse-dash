@@ -26,6 +26,8 @@ public:
   bool ok() const { return ok_; }
   const std::string& error() const { return error_; }
   uint64_t rows_written() const { return rows_written_; }
+  // The bytes of the result that the serializer wrote (the text of the CSV or of the JSON rows). The ceiling max_result_size counts them.
+  uint64_t bytes_written() const { return bytes_written_; }
 
 private:
   bool append(std::string_view value);
@@ -54,6 +56,7 @@ private:
   bool ok_ = true;
   bool header_written_ = false;
   uint64_t rows_written_ = 0;
+  uint64_t bytes_written_ = 0;
   std::string error_;
 };
 

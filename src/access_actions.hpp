@@ -3,6 +3,8 @@
 // The actions of ChDash for the access of humans (docs/access.md, contract 11.4) and the action that each route needs.
 // Pure code: no HTTP server, no PDP. server_http.cpp applies the rule of a route before the route runs.
 
+#include "access_ceilings.hpp"
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,8 +63,12 @@ struct AccessHostEntry {
 // "database" when it takes them. The document lists the published actions only. "resources" has one node for each host, with the path
 // "host:<encoded id>" and the label cut to 60 characters, and no "actions" member. It is absent when `hosts` is empty. The databases are
 // not in it: the route /.well-known/procurauth/resources lists them.
+//
+// The members "limits" declare the six ceilings (access_ceilings.hpp, ProcurAuth 6.1): the top-level array has one item for each
+// ceiling (name, label, description, unit, kind "ceiling", min 1, max), and each action lists the names of its ceilings. `bounds` has the
+// highest bound of the configuration for each ceiling: it gives the declared max, and the value 0 stands for the schema max.
 std::string access_actions_json(std::string_view server, const AccessFeatures& features = AccessFeatures{},
-                                const std::vector<AccessHostEntry>& hosts = {});
+                                const std::vector<AccessHostEntry>& hosts = {}, const AccessCeilings& bounds = AccessCeilings{});
 
 // What a route needs.
 enum class AccessRuleKind {

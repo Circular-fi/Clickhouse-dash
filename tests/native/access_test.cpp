@@ -10,6 +10,8 @@
 #include "native_check.hpp"
 
 #include "access_actions.hpp"
+#include "access_ceilings.hpp"
+#include "access_enforce.hpp"
 #include "access_pages.hpp"
 #include "access_identity.hpp"
 #include "access_options.hpp"
@@ -25,6 +27,7 @@ extern "C" {
 }
 
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <chrono>
 #include <cstring>
@@ -647,7 +650,7 @@ void test_route_rules() {
       {"POST", "/api/query/run", "run@host body"}, {"POST", "/api/query", "run@host body"}, {"GET", "/api/query/stream", "identity"},
       {"POST", "/api/query/cancel", "identity"}, {"POST", "/api/query/analysis", "run@host body"}, {"POST", "/api/query/deep-analysis", "run@host body"},
       {"GET", "/api/query/deep-analysis", "run@host"}, {"POST", "/api/query/deep-analysis/cancel", "identity"}, {"GET", "/api/query/execution", "run@host"},
-      {"POST", "/api/export/run", "export@host body"}, {"POST", "/api/export/stream", "export@host body"}, {"GET", "/api/export/stream", "export@host"},
+      {"POST", "/api/export/run", "export@host body"}, {"POST", "/api/export/stream", "identity"}, {"GET", "/api/export/stream", "export@host"},
       {"GET", "/api/traces/search", "observability.read@host"}, {"GET", "/api/traces/logs", "observability.read@host"}, {"GET", "/api/logs/meta", "observability.read@host"},
       {"GET", "/api/metrics/series", "observability.read@host"}, {"POST", "/api/logs/search", "unknown"},
       {"GET", "/api/query-library", "library.read"}, {"GET", "/api/query-library/search", "library.read"}, {"GET", "/api/query-library/export", "library.read"},
@@ -1019,7 +1022,7 @@ void test_access_outcome() {
   // A decision with no PDP (the default) is a denial, not a failure; the server marks a failure itself.
   CHECK(access_outcome(AccessDecision{}) == AccessOutcome::Denied);
 
-  // ProcurAuth 7.5: each ceiling must be declared. ChDash declares none yet.
+  // ProcurAuth 7.5: each ceiling must be declared (ceilings_enforceable takes the set that the action declares).
   std::string refused;
   CHECK(ceilings_enforceable({}, {}));
   CHECK(!ceilings_enforceable({{"max_rows", 10}}, {}, &refused) && refused == "max_rows");
@@ -1456,6 +1459,324 @@ void test_document_limits() {
   CHECK(access_actions().size() <= 64);
 }
 
+// ---- the ceilings of a grant (docs/access.md, "Limits of a grant") ------------------------------------------------------------
+
+// The checks of access-lint (crates/procurauth-core/src/action_document.rs) and of action-document.schema.json that need no Rust: the names,
+// the kind, min and max, no unknown member, no duplicate, each name of an action declared, the sizes of 5.3c.
+bool is_limit_name(const std::string& name) {
+  if (name.empty() || name.size() > 32 || name[0] < 'a' || name[0] > 'z') return false;
+  for (const char c : name) {
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+  }
+  return true;
+}
+
+void check_document_limits(const rapidjson::Document& doc) {
+  CHECK(doc.IsObject() && doc.HasMember("limits") && doc["limits"].IsArray());
+  std::set<std::string> declared;
+  for (const auto& item : doc["limits"].GetArray()) {
+    CHECK(item.IsObject());
+    // An unknown member of a limit declaration makes the document bad (ProcurAuth 5.3).
+    const std::set<std::string> allowed = {"name", "label", "description", "unit", "kind", "min", "max"};
+    for (const auto& member : item.GetObject()) CHECK(allowed.count(member.name.GetString()) == 1);
+    for (const char* key : {"name", "label", "description", "unit", "kind"}) CHECK(item.HasMember(key) && item[key].IsString());
+    const std::string name = item["name"].GetString();
+    CHECK(is_limit_name(name));
+    CHECK(declared.insert(name).second);  // a name is unique in the document (6.1)
+    CHECK(name.rfind("max_", 0) == 0);    // the name of a ceiling is max_ and a noun (7.1)
+    CHECK(std::string(item["kind"].GetString()) == "ceiling");
+    CHECK(item.HasMember("min") && item["min"].IsUint64() && item.HasMember("max") && item["max"].IsUint64());
+    CHECK(item["min"].GetUint64() <= item["max"].GetUint64());
+    CHECK(item["min"].GetUint64() == 1);
+    // A reader must accept 60 characters of label, 300 of description and 20 of unit (5.3c).
+    CHECK(code_points(item["label"].GetString()) >= 1 && code_points(item["label"].GetString()) <= 60);
+    CHECK(code_points(item["description"].GetString()) >= 1 && code_points(item["description"].GetString()) <= 300);
+    CHECK(code_points(item["unit"].GetString()) >= 1 && code_points(item["unit"].GetString()) <= 20);
+  }
+  CHECK(declared.size() <= 16);
+  for (const auto& action : doc["actions"].GetArray()) {
+    if (!action.HasMember("limits")) continue;
+    CHECK(action["limits"].IsArray());
+    std::set<std::string> listed;
+    for (const auto& name : action["limits"].GetArray()) {
+      CHECK(name.IsString());
+      CHECK(declared.count(name.GetString()) == 1);  // a name that the document does not declare makes it bad (5.2)
+      CHECK(listed.insert(name.GetString()).second);  // a name two times makes it bad (5.2)
+    }
+    CHECK(!listed.empty());
+  }
+}
+
+void test_ceilings_in_the_document() {
+  rapidjson::Document doc = parse_json(access_actions_json("db"));
+  check_document_limits(doc);
+  // The six ceilings, in the order of the table, with the unit of each.
+  std::vector<std::string> names;
+  std::map<std::string, std::string> units;
+  for (const auto& item : doc["limits"].GetArray()) {
+    names.push_back(item["name"].GetString());
+    units[item["name"].GetString()] = item["unit"].GetString();
+  }
+  CHECK((names == std::vector<std::string>{"max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"}));
+  CHECK_EQ(units["max_rows_read"], std::string("rows"));
+  CHECK_EQ(units["max_read_size"], std::string("bytes"));
+  CHECK_EQ(units["max_rows"], std::string("rows"));
+  CHECK_EQ(units["max_result_size"], std::string("bytes"));
+  CHECK_EQ(units["max_duration"], std::string("seconds"));
+  CHECK_EQ(units["max_memory"], std::string("bytes"));
+  // Which action lists which ceiling (the decisions of the owner).
+  std::map<std::string, std::vector<std::string>> listed;
+  for (const auto& action : doc["actions"].GetArray()) {
+    std::vector<std::string> list;
+    if (action.HasMember("limits")) {
+      for (const auto& name : action["limits"].GetArray()) list.push_back(name.GetString());
+    }
+    listed[action["name"].GetString()] = list;
+  }
+  const std::vector<std::string> all = {"max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"};
+  for (const char* name : {"query.run.read", "query.run.write", "query.export"}) CHECK(listed[name] == all);
+  CHECK((listed["explorer.read"] == std::vector<std::string>{"max_rows", "max_rows_read", "max_duration", "max_memory"}));
+  CHECK((listed["system.read"] == std::vector<std::string>{"max_rows_read", "max_rows", "max_duration"}));
+  CHECK((listed["observability.read"] == std::vector<std::string>{"max_rows_read", "max_rows", "max_duration"}));
+  for (const char* name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}) CHECK(listed[name].empty());
+  // The table of the code and the document agree, and no budget is declared.
+  for (const AccessCeilingInfo& info : access_ceiling_table()) {
+    CHECK(code_points(info.label) <= 60 && code_points(info.description) <= 300 && code_points(info.unit) <= 20);
+    CHECK(info.schema_max >= 1 && info.schema_max <= (uint64_t(1) << 53));
+  }
+  // The max follows the bounds of the configuration; the value 0 stands for the schema max.
+  AccessCeilings bounds;
+  bounds.max_rows_read = 500;
+  bounds.max_duration = 90;
+  doc = parse_json(access_actions_json("db", AccessFeatures{}, {}, bounds));
+  check_document_limits(doc);
+  std::map<std::string, uint64_t> max_of;
+  for (const auto& item : doc["limits"].GetArray()) max_of[item["name"].GetString()] = item["max"].GetUint64();
+  CHECK_EQ(max_of["max_rows_read"], uint64_t(500));
+  CHECK_EQ(max_of["max_duration"], uint64_t(90));
+  CHECK_EQ(max_of["max_rows"], uint64_t(1'000'000'000'000'000ULL));
+  CHECK_EQ(max_of["max_memory"], uint64_t(1'099'511'627'776ULL));
+  CHECK_EQ(max_of["max_read_size"], uint64_t(1'000'000'000'000'000ULL));
+  CHECK_EQ(access_declared_max({}, 77), uint64_t(77));
+  CHECK_EQ(access_declared_max({0}, 77), uint64_t(77));
+  CHECK_EQ(access_declared_max({5, 9}, 77), uint64_t(9));
+  CHECK_EQ(access_declared_max({5, 0}, 77), uint64_t(77));
+  // The sizes stay inside the minimum of a reader (5.3c) with the six ceilings and 256 hosts.
+  std::vector<AccessHostEntry> hosts;
+  for (int i = 0; i < 256; ++i) hosts.push_back({"clickhouse-prod-" + std::to_string(1000 + i), "Host " + std::to_string(i)});
+  CHECK(access_actions_json("db", AccessFeatures{}, hosts).size() <= 64 * 1024);
+}
+
+void test_declared_ceilings_and_enforceable() {
+  AccessFeatures all;
+  // Each published action declares the names that it lists, and no other name.
+  CHECK((access_declared_ceilings("query.run.read", all) ==
+         std::set<std::string>{"max_rows_read", "max_read_size", "max_rows", "max_result_size", "max_duration", "max_memory"}));
+  CHECK((access_declared_ceilings("explorer.read", all) == std::set<std::string>{"max_rows", "max_rows_read", "max_duration", "max_memory"}));
+  CHECK((access_declared_ceilings("system.read", all) == std::set<std::string>{"max_rows_read", "max_rows", "max_duration"}));
+  for (const char* name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "unknown", "access"}) {
+    CHECK(access_declared_ceilings(name, all).empty());
+  }
+  // A ceiling is listed on an action only when the action is published.
+  AccessFeatures no_explorer;
+  no_explorer.explorer = false;
+  CHECK(access_declared_ceilings("explorer.read", no_explorer).empty());
+  AccessFeatures no_system;
+  no_system.system = false;
+  CHECK(access_declared_ceilings("system.read", no_system).empty());
+  CHECK(!access_declared_ceilings("query.run.read", no_system).empty());
+  // ProcurAuth 7.5: a declared name and a value from min (1) is enforceable. A value above max is not a fault.
+  std::string refused;
+  CHECK(access_ceilings_enforceable({}, "library.read", all));
+  CHECK(access_ceilings_enforceable({{"max_rows", 10}, {"max_duration", 30}}, "system.read", all));
+  CHECK(access_ceilings_enforceable({{"max_rows", uint64_t(1) << 60}}, "system.read", all));
+  CHECK(access_ceilings_enforceable({{"max_rows", 1}}, "system.read", all));
+  // An undeclared name, a name of another action, an unknown name, and an action without ceilings.
+  CHECK(!access_ceilings_enforceable({{"max_memory", 10}}, "system.read", all, &refused) && refused == "max_memory");
+  CHECK(!access_ceilings_enforceable({{"max_secret", 10}}, "query.run.read", all, &refused) && refused == "max_secret");
+  CHECK(!access_ceilings_enforceable({{"max_rows", 10}}, "library.read", all, &refused) && refused == "max_rows");
+  CHECK(!access_ceilings_enforceable({{"max_rows", 10}}, "explorer.read", no_explorer, &refused) && refused == "max_rows");
+  // A value below the declared min is outside the declaration.
+  CHECK(!access_ceilings_enforceable({{"max_rows", 0}}, "query.run.read", all, &refused) && refused == "max_rows");
+}
+
+// The decisions of the PDP go through access_enforce_ceilings: an operation (the match "node") is refused when it has a ceiling that ChDash
+// cannot apply (7.5); a question of the navigation (the match "subtree") never turns false because of a ceiling.
+void test_enforce_ceilings_on_operations_and_navigation() {
+  AccessFeatures all;
+  const AccessResource host = access_host_resource("db", "prod");
+  const auto allowed_with = [](PdpLimits limits) {
+    AccessDecision decision;
+    decision.allowed = true;
+    decision.source = "pdp";
+    decision.limits = std::move(limits);
+    decision.usage_units = 0;
+    return decision;
+  };
+  std::vector<AccessQuestion> questions = {
+      AccessQuestion{"system.read", host},                        // 0: an operation, a declared ceiling
+      AccessQuestion{"system.read", host},                        // 1: an operation, a ceiling that the action does not list
+      AccessQuestion{"system.read", host, AccessMatch::Subtree},  // 2: the navigation, the same undeclared ceiling
+      AccessQuestion{"library.read", access_service_resource("db")},  // 3: an operation of an action without ceilings
+      AccessQuestion{"query.run.read", host},                     // 4: an operation without ceiling
+  };
+  std::vector<AccessDecision> decisions = {allowed_with({{"max_rows", 10}}), allowed_with({{"max_memory", 10}}),
+                                           allowed_with({{"max_memory", 10}}), allowed_with({{"max_rows", 10}}), allowed_with({})};
+  access_enforce_ceilings("req-1", questions, &decisions, all, true);
+  CHECK(decisions[0].allowed && decisions[0].limits.size() == 1);
+  CHECK(!decisions[1].allowed && decisions[1].limits.empty() && decisions[1].reason == PdpReason::None && !decisions[1].usage_units);
+  CHECK(!decisions[1].failed);  // a denial, not a failure
+  CHECK(decisions[2].allowed && decisions[2].limits.size() == 1);  // the navigation keeps the answer
+  CHECK(!decisions[3].allowed);
+  CHECK(decisions[4].allowed);
+  // A path that applies no ceiling (the MCP keys of the page) refuses each ceiling of an operation, and still keeps the navigation.
+  decisions = {allowed_with({{"max_rows", 10}}), allowed_with({{"max_rows", 10}}), allowed_with({})};
+  questions = {AccessQuestion{"system.read", host}, AccessQuestion{"system.read", host, AccessMatch::Subtree}, AccessQuestion{"system.read", host}};
+  access_enforce_ceilings("req-2", questions, &decisions, all, false);
+  CHECK(!decisions[0].allowed && decisions[1].allowed && decisions[2].allowed);
+  // A false decision stays false, and the limits of a false decision are ignored (7.6).
+  decisions = {AccessDecision{}};
+  questions = {AccessQuestion{"system.read", host}};
+  access_enforce_ceilings("req-3", questions, &decisions, all, true);
+  CHECK(!decisions[0].allowed);
+}
+
+void test_ceilings_of_a_decision_and_the_lowest_value() {
+  const AccessCeilings c = access_ceilings_of({{"max_rows", 10}, {"max_duration", 30}, {"max_memory", 4096}, {"max_unknown", 7}});
+  CHECK_EQ(c.max_rows, uint64_t(10));
+  CHECK_EQ(c.max_duration, uint64_t(30));
+  CHECK_EQ(c.max_memory, uint64_t(4096));
+  CHECK_EQ(c.max_rows_read, uint64_t(0));
+  CHECK(c.any() && !AccessCeilings{}.any());
+  CHECK(c.get("max_rows") == 10 && c.get("max_unknown") == 0);
+  AccessCeilings d;
+  CHECK(d.set("max_rows", 5) && d.set("max_rows_read", 9) && !d.set("max_unknown", 1));
+  // The lowest value of each ceiling wins; a ceiling that one side only sets stays as it is (ProcurAuth 8.1, 8.2).
+  const AccessCeilings low = access_ceilings_lowest(c, d);
+  CHECK_EQ(low.max_rows, uint64_t(5));
+  CHECK_EQ(low.max_rows_read, uint64_t(9));
+  CHECK_EQ(low.max_duration, uint64_t(30));
+  CHECK_EQ(low.max_read_size, uint64_t(0));
+  CHECK(access_ceilings_lowest(c, AccessCeilings{}) == c && access_ceilings_lowest(AccessCeilings{}, c) == c);
+
+  // A request that holds query.run.read and query.run.write: the class of the SQL decides.
+  AccessRunCeilings run;
+  run.has_read = run.has_write = true;
+  run.read = access_ceilings_of({{"max_rows", 10}, {"max_duration", 60}});
+  run.write = access_ceilings_of({{"max_rows", 1000}, {"max_memory", 8192}});
+  CHECK(run.resolve(SqlStatementClass::Read) == run.read);
+  CHECK(run.resolve(SqlStatementClass::Write) == run.write);
+  // Unsure: the lower value of each ceiling.
+  const AccessCeilings unsure = run.resolve(SqlStatementClass::Unsure);
+  CHECK(unsure.max_rows == 10 && unsure.max_duration == 60 && unsure.max_memory == 8192);
+  // One action only: its ceilings, whatever the class.
+  AccessRunCeilings read_only;
+  read_only.has_read = true;
+  read_only.read = run.read;
+  read_only.write = run.write;  // never used: the person has not the action
+  CHECK(read_only.resolve(SqlStatementClass::Write) == run.read && read_only.resolve(SqlStatementClass::Unsure) == run.read);
+  AccessRunCeilings write_only;
+  write_only.has_write = true;
+  write_only.write = run.write;
+  CHECK(write_only.resolve(SqlStatementClass::Read) == run.write);
+  // The ceilings of query.export and of the action of the route always apply, with the lowest value.
+  AccessRunCeilings exported = run;
+  exported.base = access_ceilings_of({{"max_rows", 3}, {"max_result_size", 100}});
+  const AccessCeilings with_export = exported.resolve(SqlStatementClass::Write);
+  CHECK(with_export.max_rows == 3 && with_export.max_result_size == 100 && with_export.max_memory == 8192);
+  CHECK(!AccessRunCeilings{}.resolve(SqlStatementClass::Unsure).any());
+}
+
+// The backstops of the client: the counters of CeilingMeter follow what ClickHouse reports and what the client receives. They do not read
+// a setting, so a SETTINGS clause cannot raise a ceiling.
+void test_ceiling_meter() {
+  const auto start = std::chrono::steady_clock::now();
+  AccessCeilings c;
+  c.max_rows_read = 1000;
+  c.max_read_size = 4096;
+  c.max_rows = 5;
+  c.max_result_size = 200;
+  c.max_duration = 10;
+  CeilingMeter meter(c, start);
+  // The progress packets give what is new: 400 + 400 rows are below 1000, the third packet passes it.
+  CHECK(!meter.on_progress(400, 100));
+  CHECK(!meter.on_progress(400, 100));
+  CHECK_EQ(meter.rows_read(), uint64_t(800));
+  const auto read = meter.on_progress(201, 100);
+  CHECK(read && read->ceiling == "max_rows_read" && read->code == "query_scan_limit");
+  CHECK(read->message.find("1000") != std::string::npos);
+  // The first breach stays: the run is past the ceiling for good.
+  CHECK(meter.on_result(1, 1) && meter.on_result(1, 1)->ceiling == "max_rows_read");
+  CHECK(meter.breach() && meter.breach()->ceiling == "max_rows_read");
+  CHECK(meter.on_clock(start) && meter.on_clock(start)->code == "query_scan_limit");
+  // The bytes read.
+  CeilingMeter bytes(c, start);
+  const auto big = bytes.on_progress(1, 4097);
+  CHECK(big && big->ceiling == "max_read_size" && big->code == "query_scan_limit");
+  // The exact value is allowed: the ceiling is the most that a run can take.
+  CeilingMeter exact(c, start);
+  CHECK(!exact.on_progress(1000, 4096) && !exact.on_result(5, 200));
+  CHECK(exact.on_result(1, 0) && exact.breach()->ceiling == "max_rows");
+  // The result: rows, then bytes.
+  CeilingMeter result(c, start);
+  CHECK(!result.on_result(3, 100) && !result.on_result(2, 100));
+  const auto rows = result.on_result(1, 0);
+  CHECK(rows && rows->ceiling == "max_rows" && rows->code == "query_result_limit");
+  CeilingMeter size(c, start);
+  const auto text = size.on_result(1, 201);
+  CHECK(text && text->ceiling == "max_result_size" && text->code == "query_result_limit");
+  // The duration: more than max_duration seconds since the start.
+  CeilingMeter clock(c, start);
+  CHECK(!clock.on_clock(start + std::chrono::seconds(10)));
+  const auto late = clock.on_clock(start + std::chrono::seconds(11));
+  CHECK(late && late->ceiling == "max_duration" && late->code == "query_timeout");
+  CHECK(clock.duration_breach().code == "query_timeout");
+  // A meter without ceilings never stops a run, and a counter that would overflow stays at the largest value.
+  CeilingMeter none(AccessCeilings{}, start);
+  CHECK(!none.on_progress(UINT64_MAX, UINT64_MAX) && !none.on_progress(5, 5) && !none.on_result(UINT64_MAX, 1) && !none.on_clock(start + std::chrono::hours(48)));
+  CHECK_EQ(none.rows_read(), UINT64_MAX);
+  // The text of an error carries its code (query_session.cpp reads it).
+  CHECK_EQ(ceiling_breach_code(ceiling_breach_text(*read)), std::string("query_scan_limit"));
+  CHECK_EQ(ceiling_breach_code(ceiling_breach_text(*rows)), std::string("query_result_limit"));
+  CHECK_EQ(ceiling_breach_code(ceiling_breach_text(*late)), std::string("query_timeout"));
+  CHECK(ceiling_breach_code("canceled").empty() && ceiling_breach_code("query_timeout is a word").empty() && ceiling_breach_code("").empty());
+}
+
+void test_ceiling_deadline() {
+  std::atomic<int> fired{0};
+  {
+    // The object ends first: the callback never runs.
+    CeilingDeadline quick(100, [&] { ++fired; });
+    CHECK(!quick.expired());
+  }
+  CHECK_EQ(fired.load(), 0);
+  {
+    CeilingDeadline none(0, [&] { ++fired; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(!none.expired());
+  }
+  CHECK_EQ(fired.load(), 0);
+  {
+    // After the time, the callback runs one time on the thread of the object.
+    CeilingDeadline one(1, [&] { ++fired; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    CHECK(one.expired());
+  }
+  CHECK_EQ(fired.load(), 1);
+}
+
+// The routes that guard an operation (match node) and the questions of the navigation (match subtree): the actions that ChDash asks.
+void test_ceilings_follow_the_published_actions() {
+  AccessFeatures off;
+  off.query_library = off.query_library_writable = off.explorer = off.system = off.observability = off.mcp = off.mcp_keys_write = false;
+  rapidjson::Document doc = parse_json(access_actions_json("db", off));
+  check_document_limits(doc);
+  std::set<std::string> published;
+  for (const auto& action : doc["actions"].GetArray()) published.insert(action["name"].GetString());
+  CHECK((published == std::set<std::string>{"query.run.read", "query.run.write", "query.export"}));
+  for (const auto& action : doc["actions"].GetArray()) CHECK(action["limits"].Size() == 6);
+}
+
 void test_options_parser() {
   const auto parse = [](const std::string& query) { return access_options_parse(query); };
   // The first level: hosts.
@@ -1641,6 +1962,13 @@ int main() {
   RUN(test_navigation_pages);
   RUN(test_resources_member_of_the_document);
   RUN(test_document_limits);
+  RUN(test_ceilings_in_the_document);
+  RUN(test_declared_ceilings_and_enforceable);
+  RUN(test_enforce_ceilings_on_operations_and_navigation);
+  RUN(test_ceilings_of_a_decision_and_the_lowest_value);
+  RUN(test_ceiling_meter);
+  RUN(test_ceiling_deadline);
+  RUN(test_ceilings_follow_the_published_actions);
   RUN(test_options_parser);
   RUN(test_options_page);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;

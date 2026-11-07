@@ -323,6 +323,50 @@ void test_kill_policy() {
 
 // ---- sql_scan.hpp ----
 
+// ---- the class of the SQL of a run, for the ceilings of a grant ----
+
+void test_statement_class() {
+  using C = SqlStatementClass;
+  // A statement that only reads.
+  for (const char* sql : {"SELECT 1", "  select * from t", "SELECT 1;", "SELECT 1; SELECT 2", "(SELECT 1) UNION ALL (SELECT 2)", "WITH x AS (SELECT 1) SELECT * FROM x",
+                          "with x as (select 1 as a) select a from x", "SHOW TABLES", "DESCRIBE t", "desc t", "EXISTS TABLE t", "EXPLAIN SELECT 1", "CHECK TABLE t",
+                          "/* c */ SELECT 1", "-- c\nSELECT 1", "SELECT 1 FROM t SETTINGS max_rows_to_read = 0", "SELECT 'INSERT INTO t'",
+                          "SELECT 1 /* ; DROP TABLE t */", "SELECT 1;;SELECT 2;", "\xe2\x80\x8b" "SELECT 1"}) {
+    if (sql_statement_class(sql) != C::Read) std::cerr << "not a read: " << sql << std::endl;
+    CHECK(sql_statement_class(sql) == C::Read);
+  }
+  // A statement that changes data, the schema, the access or the settings.
+  for (const char* sql : {"INSERT INTO t VALUES (1)", "insert into t select 1", "CREATE TABLE t (a Int8) ENGINE = Memory", "DROP TABLE t", "ALTER TABLE t DELETE WHERE 1",
+                          "TRUNCATE TABLE t", "RENAME TABLE a TO b", "OPTIMIZE TABLE t", "SYSTEM FLUSH LOGS", "KILL QUERY WHERE 1", "GRANT SELECT ON t TO u",
+                          "REVOKE SELECT ON t FROM u", "ATTACH TABLE t", "DETACH TABLE t", "SET max_threads = 1", "USE db", "BACKUP TABLE t TO Disk('b', 'x')",
+                          "EXCHANGE TABLES a AND b", "UNDROP TABLE t", "WITH 1 AS x INSERT INTO t SELECT x", "(SELECT 1); DROP TABLE t", "SELECT 1; SET a = 1",
+                          "-- c\nDROP TABLE t", "/* c */ /* d */ INSERT INTO t VALUES (1)", "DELETE FROM t WHERE 1", "REPLACE TABLE t (a Int8) ENGINE = Memory"}) {
+    if (sql_statement_class(sql) != C::Write) std::cerr << "not a write: " << sql << std::endl;
+    CHECK(sql_statement_class(sql) == C::Write);
+  }
+  // A text that the code does not know, or that has no statement, is unsure.
+  for (const char* sql : {"", "   ", "-- only a comment", "/* only a comment */", ";", ";;", "FROBNICATE t", "WATCH view", "SELECT 1; FROBNICATE t", "WITH x AS (SELECT 1)",
+                          "123", "'text'", "( )"}) {
+    if (sql_statement_class(sql) != C::Unsure) std::cerr << "not unsure: " << sql << std::endl;
+    CHECK(sql_statement_class(sql) == C::Unsure);
+  }
+  // A write wins over everything, also after an unsure statement. Unsure wins over read.
+  CHECK(sql_statement_class("FROBNICATE t; DROP TABLE t") == C::Write);
+  CHECK(sql_statement_class("SELECT 1; FROBNICATE t") == C::Unsure);
+  // The words are found by the lexer: a Unicode space between statements and a keyword in a name or a text change nothing.
+  CHECK(sql_statement_class("SELECT `DROP`") == C::Read);
+  CHECK(sql_statement_class("SELECT 1;\xc2\xa0" "DROP TABLE t") == C::Write);
+  // Several texts (an export): a write wins, then unsure, then read. No text is unsure.
+  CHECK(sql_statements_class({"SELECT 1", "SELECT 2"}) == C::Read);
+  CHECK(sql_statements_class({"SELECT 1", "INSERT INTO t VALUES (1)"}) == C::Write);
+  CHECK(sql_statements_class({"SELECT 1", "FROBNICATE"}) == C::Unsure);
+  CHECK(sql_statements_class({"FROBNICATE", "DROP TABLE t"}) == C::Write);
+  CHECK(sql_statements_class({}) == C::Unsure);
+  // The random texts of the lexer test never make the function crash.
+  uint64_t seed = 7;
+  for (int round = 0; round < 3000; ++round) (void)sql_statement_class(random_sql(seed, 1 + round % 30));
+}
+
 void test_mask() {
   const auto masked = mask_sql_surface("SELECT 'A--b' /* C */, \"D\", `E`, $$F$$ -- G\nFROM t");
   CHECK_EQ(masked.code_lower.size(), std::string("SELECT 'A--b' /* C */, \"D\", `E`, $$F$$ -- G\nFROM t").size());
@@ -939,6 +983,7 @@ int main() {
   test_lexer_rules();
   test_scan_follows_the_lexer();
   test_kill_policy();
+  test_statement_class();
   test_mask();
   test_mcp_scan();
   test_structure();
