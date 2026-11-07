@@ -262,6 +262,9 @@ query_library {
 # runner or the system user). See docs/mcp.md.
 mcp {
   enabled        = false
+  # How POST /mcp knows the caller (docs/mcp.md): "keys" (the keys of ChDash, below) or "identity" (the identity
+  # token of the access gateway, with access.mode = "authzen"; the key blocks and the keys of the page are then refused).
+  # auth_mode    = "keys"
   # Keys made on the MCP page. The directory must exist; the file is created
   # (mode 0600) on the first write and holds the hashes of the tokens of the keys.
   # storage_file = "/var/lib/chdash/mcp_keys.json"
@@ -316,15 +319,17 @@ mcp {
   # ["*"] gives every tool but the restricted one, mcp_analysis_all_usage: a key must name it.
 }
 
-# The access of humans (docs/access.md, MCP server contract section 11). The block is required:
+# The access of humans (docs/access.md, ProcurAuth and OpenID AuthZEN 1.0). The block is required:
 # a file without it stops the start, so nobody gets the open mode by mistake.
 #   authzen: an access gateway authenticates the human and sends a signed identity token in a
 #            header. ChDash verifies it on each request of the pages and of the API (401
 #            without a valid token), and asks the PDP (OpenID AuthZEN) for each action (403
-#            when the answer is false). Without query.run.write, a run has readonly = 1.
+#            when the answer is false, 503 when the PDP gives no valid answer). Without
+#            query.run.write, a run has readonly = 1. The document of the actions is at
+#            GET /.well-known/procurauth/actions.
 #   open:    no check at all. ChDash writes a warning at each start. Use it only for a server
 #            alone on a closed network. It takes no identity block and no pdp block.
-# The MCP endpoint (POST /mcp) is not concerned: it keeps its keys (mcp block below).
+# The MCP endpoint (POST /mcp) keeps its keys, unless mcp.auth_mode = "identity" (mcp block above).
 access {
   mode = "authzen"
   identity {
@@ -338,12 +343,16 @@ access {
     # clock_skew     = "60s"                # tolerance on exp, iat and nbf (0s to 5m). 0s: none
   }
   pdp {
-    # http only: ChDash has no TLS client. Keep the network private to ChDash and the PDP.
+    # https, or http on a private network only (a http URL that is not a loopback address writes a
+    # warning at start). The start reads <origin>/.well-known/authzen-configuration.
     url        = "http://pdp.example.internal:4182"   # or: url_env, url_file
+    # ca_file  = "/etc/chdash/pdp-ca.pem"   # https only: the CA of the PDP; default: the store of the system
+    # verify   = true                       # https only: false checks no certificate (a warning at start)
     # The token of this server at the PDP is a secret: token_file or token_env only.
     token_file = "/run/secrets/db_pdp_token"
-    # timeout  = "500ms"                    # no answer in this time: the decision is false
+    # timeout  = "500ms"                    # no answer in this time: the request gets 503
     # cache_ttl = "30s"                     # 0s: no cache. A failure is never kept.
+    # search   = false                      # true: the AuthZEN Resource Search lists the databases, if the PDP announces it
   }
 }
 
