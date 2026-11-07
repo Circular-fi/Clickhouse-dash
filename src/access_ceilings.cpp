@@ -102,9 +102,9 @@ std::vector<std::string> access_action_ceilings(std::string_view action) {
 const std::vector<AccessBudgetInfo>& access_budget_table() {
   static const std::vector<AccessBudgetInfo> table = {
       {"queries", "Queries run",
-       "The number of queries that a person runs. One unit for each run of the Query page and each run_query call of MCP. A key of the MCP "
-       "mode keys takes one unit of its creator for each call of a tool of query.run.read. The pages take none for the formatter, the names "
-       "of the editor and the Explorer.",
+       "The number of queries that a person runs. One unit for each run of the Query page, and for each MCP call of a tool of "
+       "query.run.read: run_query, explain_query, format_sql, explorer_names, query_execution. A key of the mode keys takes the unit of "
+       "its creator.",
        "query"},
       {"exports", "Exports downloaded",
        "The number of exports that a person downloads. One unit is taken when the download starts. The preparation of an export takes no "

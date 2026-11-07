@@ -41,14 +41,6 @@ std::string database_of(const McpToolInfo& tool, const rapidjson::Value& argumen
   return std::string_view(tool.group) == "data" ? text_member(arguments, "database") : std::string();
 }
 
-// The calls that are one use (binding 3.4): the tool that runs the SQL of the person, and the tools whose action is mcp.session (they
-// read no data of a host). explain_query and the API tools of the Query page (the formatter, the names of the editor, the plan of a run)
-// run no query and take no unit.
-bool takes_unit(const McpToolInfo& tool) {
-  if (!tool.api && std::string_view(tool.name) == "run_query") return true;
-  return std::string_view(mcp_tool_identity_action(tool)) == "mcp.session";
-}
-
 } // namespace
 
 McpKey mcp_identity_key(const std::string& subject) {
@@ -170,9 +162,12 @@ std::optional<std::vector<std::string>> McpSubjectAccess::visible_hosts(const st
 McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* info) {
   const std::optional<AccessQuestion> question = call_question(tool, arguments);
   if (!question) return McpAccess::Denied;
-  // The call is one use (binding 3.4) when the tool runs SQL, the question names a node (a call with no host runs nothing) and the
-  // document lists a budget on the action. Then the question has context.usage and no question without it comes first (protocol 10.1).
-  const bool use = decide_use_ && takes_unit(tool) && question->match == AccessMatch::Node && access_action_has_budget(question->action, features_);
+  // The call is one use (binding 3.4) when the document lists a budget on the action of the tool and the question names a node (a call with
+  // no host runs nothing). The tools of query.run.read (run_query, explain_query, format_sql, explorer_names, query_execution) take one unit
+  // of `queries` for each call, as in the mode keys (owner decision of 2026-11-07); the tools of mcp.session take one unit of `requests`.
+  // Then the question has context.usage and no question without it comes first (protocol 10.1). An API tool calls its route in the process,
+  // and the route asks the PDP nothing: a call takes one unit at most.
+  const bool use = decide_use_ && question->match == AccessMatch::Node && access_action_has_budget(question->action, features_);
   AccessDecision decision;
   if (use) {
     decision = decide_use_(subject, *question);

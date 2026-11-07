@@ -482,7 +482,7 @@ The identity mode adds no field to a message of MCP.
 | --- | --- | --- | --- |
 | `initialize`, `ping`, `server/discover`, a notification, any other method | `mcp.session`, with `context.usage` ([Budgets](#budgets)) | The service | HTTP 403 and `-32001` (a notification has no body) |
 | `tools/list` | One question for each action of the tools, with the match `subtree` | The service | The tools of a `false` action are not listed |
-| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)). `run_query` and the tools of `mcp.session` ask with `context.usage` ([Budgets](#budgets)). | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
+| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)). The tools of `query.run.read` and of `mcp.session` ask with `context.usage` ([Budgets](#budgets)). | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
 
 - `tools/list` sends one batch with one item for each action, not for each tool. Tools with the same action share one item. The order of the tools does not change. A tool whose action the configuration does not publish is not listed.
 - `tools/call` asks the PDP for the resource of the call. The argument `host` names the host. The argument `database` (or `params.database` and `body.database` of an API tool) names the database of the host. A `host` that ChDash does not know goes to the service, so the PDP never gets a host name that the client chose.
@@ -530,9 +530,9 @@ The action document declares the budget `requests` on `mcp.session`, and the bud
 | --- | --- |
 | `initialize`, `ping`, `server/discover`, a notification, any other method with no tool | One use of `mcp.session`: one unit of `requests`. |
 | `tools/call` of `list_hosts`, `mcp_analysis_my_limits` or `mcp_analysis_my_usage` | One use of `mcp.session`: one unit of `requests`. |
-| `tools/call` of `run_query` with a host | One use of `query.run.read` on the host: one unit of `queries`. |
-| `tools/call` of another tool | No use. The question has no `context.usage`. This includes `explain_query`, which runs no query, and the API tools. |
-| `tools/call` of `run_query` without `host` | No use. The tool gives `host_required` and runs nothing. |
+| `tools/call` of a tool of `query.run.read` with a host: `run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution` | One use of `query.run.read` on the host (or on the database that `explorer_names` names): one unit of `queries` (decision of 2026-11-07). The API tool calls its route in the process, and the route asks the PDP nothing, so a call takes one unit at most. |
+| `tools/call` of another tool | No use. The question has no `context.usage`. |
+| `tools/call` of a tool of `query.run.read` without `host` | No use. The tool gives `host_required` and runs nothing. |
 | `tools/list` | No use. Its questions have the match `subtree`. |
 
 A use sends no question without `context.usage` before it. The question is one Access Evaluation request, and it never goes again after a timeout or a lost answer (protocol 10.6). The answers:
@@ -622,7 +622,7 @@ ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from
 | 4.1 to 4.3 | Done. One batch, one item for each action, match `subtree`. |
 | 5.1, 5.5, 5.6 | Done. The messages are fixed. |
 | 5.3, 5.4 (`budget_exceeded`) | Done. A tool error on `tools/call`, HTTP 429 with `-31429` on another request ([Budgets](#budgets)). |
-| 3.4, 3.6a (`context.usage`) | Done for `run_query`, the tools of `mcp.session` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
+| 3.4, 3.6a (`context.usage`) | Done for the tools of `query.run.read`, the tools of `mcp.session` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
 | 3.5, 3.5a | Not applicable. ChDash has no call that asks the client for input, and no tool that waits for an approval. |
 | 7.3 | Done. The mode ignores the standalone keys. |
 | 7.4 | Done in both modes. The 401 and the 429 have an empty body. |

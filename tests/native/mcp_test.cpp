@@ -6494,13 +6494,36 @@ void test_identity_budgets() {
   use.answer.failed = true;
   CHECK(access.call("alice", *mcp_find_tool("run_query"), prod, &info) == McpAccess::Failed);
 
-  // The other tools ask without usage: a tool of the Explorer, explain_query, system, and a call of run_query without a host (nothing runs).
+  // The other tools of query.run.read are uses too (owner decision of 2026-11-07): explain_query and the API tools of the Query page take
+  // one unit of `queries` for each call, with one question with usage and none without it. An API tool with `database` asks on the database.
+  use.asked.clear();
+  use.answer = granted(1);
+  const size_t plain_now = pdp.asked.size();
+  CHECK(access.call("alice", *mcp_find_tool("explain_query"), prod, &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("format_sql"), args_of(R"({"host":"prod","body":{"sql":"select 1"}})"), &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("explorer_names"), args_of(R"({"host":"prod","params":{"database":"sales"}})"), &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("query_execution"), args_of(R"({"host":"stage","params":{"query_id":"q"}})"), &info) == McpAccess::Allowed);
+  CHECK_EQ(use.asked.size(), size_t(4));
+  CHECK_EQ(question_text(use.asked[0].second), std::string("query.run.read@service:db/host:prod"));
+  CHECK_EQ(question_text(use.asked[1].second), std::string("query.run.read@service:db/host:prod"));
+  CHECK_EQ(question_text(use.asked[2].second), std::string("query.run.read@service:db/host:prod/database:sales"));
+  CHECK_EQ(question_text(use.asked[3].second), std::string("query.run.read@service:db/host:stage"));
+  CHECK_EQ(pdp.asked.size(), plain_now);
+  // A spent budget and a failure give the same answers as for run_query.
+  use.answer = spent(9);
+  McpCallInfo explain_spent;
+  CHECK(access.call("alice", *mcp_find_tool("explain_query"), prod, &explain_spent) == McpAccess::BudgetExceeded && explain_spent.retry_after == uint64_t(9));
+  use.answer = AccessDecision{};
+  use.answer.failed = true;
+  CHECK(access.call("alice", *mcp_find_tool("format_sql"), args_of(R"({"host":"prod","body":{"sql":"select 1"}})"), &info) == McpAccess::Failed);
+
+  // The tools of the other actions ask without usage: a tool of the Explorer, system, and a call of run_query without a host (nothing runs).
   use.asked.clear();
   use.answer = granted(1);
   CHECK(access.call("alice", *mcp_find_tool("list_databases"), args_of(R"({"host":"prod"})"), &info) == McpAccess::Allowed);
-  CHECK(access.call("alice", *mcp_find_tool("explain_query"), prod, &info) == McpAccess::Allowed);
   CHECK(access.call("alice", *mcp_find_tool("system_overview"), args_of(R"({"host":"prod"})"), &info) == McpAccess::Allowed);
   CHECK(access.call("alice", *mcp_find_tool("run_query"), none, &info) == McpAccess::Allowed);
+  CHECK(access.call("alice", *mcp_find_tool("explain_query"), none, &info) == McpAccess::Allowed);
   CHECK(use.asked.empty());
   // The tools of the action mcp.session are uses of its budget.
   CHECK(access.call("alice", *mcp_find_tool("list_hosts"), none, &info) == McpAccess::Allowed);

@@ -286,15 +286,25 @@ def test_u18_the_tool_that_runs_sql_is_one_use_and_the_other_tools_are_not():
     runs = [e for e in evaluations() if e["action"]["name"] == "query.run.read"]
     assert len(runs) == 1 and runs[0]["context"] == {"usage": {"units": 1}}, runs
     assert runs[0]["resource"]["type"] == "host" and runs[0]["resource"]["id"] == "local"
-    # tools/list, a tool of the Explorer, explain_query and a call without a host are no use: no question with usage.
+    # tools/list, a tool of the Explorer and a call without a host are no use: no question with usage.
     pdp("/control/reset", {})
     time.sleep(CACHE_TTL + 0.2)
     answer(default=True)
     assert rpc("tools/list").status_code == 200
     assert call_tool("list_databases", {"host": "local"}).status_code == 200
-    assert call_tool("explain_query", {"host": "local", "sql": "SELECT 1"}).status_code == 200
     assert call_tool("run_query", {"sql": "SELECT 1"}).status_code == 200  # host_required: nothing runs
     assert usage_questions() == [], usage_questions()
+    # The other tools of query.run.read are uses too (owner decision of 2026-11-07): explain_query and the API tools of the Query page
+    # take one unit for each call, with one question with usage on the host of the call.
+    for tool, arguments in (("explain_query", {"host": "local", "sql": "SELECT 1"}), ("format_sql", {"host": "local", "body": {"sql": "select 1"}}),
+                            ("explorer_names", {"host": "local", "params": {}})):
+        pdp("/control/reset", {})
+        time.sleep(CACHE_TTL + 0.2)
+        answer(default=True)
+        assert call_tool(tool, arguments).status_code == 200, tool
+        uses = usage_questions()
+        assert len(uses) == 1 and uses[0]["action"]["name"] == "query.run.read", (tool, uses)
+        assert uses[0]["resource"]["type"] == "host" and uses[0]["resource"]["id"] == "local", (tool, uses)
 
 
 @needs_identity
