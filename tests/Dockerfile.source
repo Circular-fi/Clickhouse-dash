@@ -5,7 +5,7 @@ ARG SOURCE_CMAKE_BUILD_TYPE=Release
 # Every warning of our sources stops the build (src/BuildFlags.cmake). Set OFF to build with warnings only.
 ARG SOURCE_WERROR=ON
 
-FROM alpine:3.20 AS toolchain
+FROM alpine:3.24 AS toolchain
 WORKDIR /work
 
 RUN apk add --no-cache \
@@ -87,7 +87,7 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
 
 # The page stylesheets are build outputs (tools/build_page_css.py): generate
 # them from src/static/css/ and ship src/static without the sources.
-FROM alpine:3.20 AS static
+FROM alpine:3.24 AS static
 RUN apk add --no-cache python3
 WORKDIR /work
 COPY tools/build_page_css.py tools/css_tree.py tools/icons.py tools/module_graph.py tools/page_shells.py /work/tools/
@@ -99,7 +99,7 @@ RUN rm -f /work/src/static/style.*.css \
 
 # The WebAssembly kernels (docs/wasm.md) are committed in src/static/wasm. This stage rebuilds them from src/wasm with the
 # pinned toolchain (alpine:3.20, clang 18, lld) and fails the image when the rebuild differs from the committed files.
-FROM alpine:3.20 AS wasm
+FROM alpine:3.24 AS wasm
 RUN apk add --no-cache python3 clang18 lld
 WORKDIR /work
 COPY tools/build_wasm.py /work/tools/
@@ -108,7 +108,7 @@ COPY src/static/wasm /work/src/static/wasm
 RUN python3 /work/tools/build_wasm.py --check
 
 # The embedded build as an image: the binary alone, no ./static, so a page that is not embedded is a 404.
-FROM alpine:3.20 AS runtime-embedded
+FROM alpine:3.24 AS runtime-embedded
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
 COPY --from=builder-embedded /work/chdash /app/chdash
@@ -119,7 +119,7 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/us
 ENTRYPOINT ["/usr/local/bin/chdash-source-entrypoint"]
 
 # The default target (the last stage): the build that reads ./static from the disk.
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
 COPY --from=builder /work/chdash /app/chdash
