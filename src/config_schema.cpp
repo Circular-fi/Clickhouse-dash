@@ -336,6 +336,8 @@ std::vector<EffectiveValue> effective_config(const AppConfig& cfg) {
         else if (name == "access.pdp.cache_ttl") out.add(name, duration_text(cfg.access.pdp_cache_ttl_ms));
         else if (name == "access.pdp.batch_timeout") out.add(name, duration_text(cfg.access.pdp_batch_timeout_ms));
         else if (name == "access.pdp.usage_max_seconds") out.add(name, std::to_string(cfg.access.pdp_usage_max_seconds));
+        else if (name == "access.approval.wait") out.add(name, duration_text(cfg.access.approval_wait_ms));
+        else if (name == "access.approval.max_command_bytes") out.add(name, std::to_string(cfg.access.approval_max_command_bytes));
         break;
     }
   }
@@ -352,6 +354,10 @@ std::vector<EffectiveValue> effective_config(const AppConfig& cfg) {
     if (!host.mcp_uri.empty()) {
       out.add_from_file(p + "mcp_uri", uri_text(host.mcp_uri));
       out.add_secret(p + "mcp_password");
+    }
+    if (!host.mcp_write_uri.empty()) {
+      out.add_from_file(p + "mcp_write_uri", uri_text(host.mcp_write_uri));
+      out.add_secret(p + "mcp_write_password");
     }
     const OtelHostOverride& o = host.otel_override;
     const auto flag = [&](const char* name, const std::optional<bool>& v) { if (v) out.add_from_file(p + name, *v ? "true" : "false"); };

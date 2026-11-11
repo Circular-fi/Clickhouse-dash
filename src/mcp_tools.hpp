@@ -32,6 +32,9 @@ struct McpDbLimits {
   std::string agent_caller;
   // Run with the system user of the host, not with the MCP user. The OpenTelemetry tools read their tables as the pages do.
   bool as_system = false;
+  // Run with the write account of the host (mcp_write_uri), without readonly = 1. Only the tool run_write_query sets it, with a statement that
+  // the PDP approved (docs/mcp.md, "The write tool").
+  bool write = false;
 };
 
 struct McpDbColumn {

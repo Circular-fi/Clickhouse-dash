@@ -303,8 +303,10 @@ public:
     // Every other query uses the MCP user.
     if (!spec || spec->mcp_uri.empty()) throw McpDbError("unavailable", "the host " + host + " has no MCP identity");
     if (!pool_) throw McpDbError("unavailable", "no ClickHouse client pool");
-    const std::string& uri = limits.as_system && !spec->system_uri.empty() ? spec->system_uri : spec->mcp_uri;
-    const char* who = uri == spec->mcp_uri ? "the MCP user" : "the system user";
+    // A statement that the PDP approved runs with the write account of the host. A host without it never writes: no fallback to another user.
+    if (limits.write && spec->mcp_write_uri.empty()) throw McpDbError("unavailable", "the host " + host + " has no write account");
+    const std::string& uri = limits.write ? spec->mcp_write_uri : limits.as_system && !spec->system_uri.empty() ? spec->system_uri : spec->mcp_uri;
+    const char* who = limits.write ? "the write user" : uri == spec->mcp_uri ? "the MCP user" : "the system user";
 
     std::string connect_error;
     auto client = pool_->acquire(uri, std::chrono::milliseconds(5000),
@@ -324,6 +326,7 @@ public:
     guard.max_rows_to_read = limits.max_rows_to_read;
     guard.max_bytes_to_read = limits.max_bytes_to_read;
     guard.sql_bytes = static_cast<int64_t>(sql.size());
+    guard.allow_write = limits.write;
     // agent.caller of the call links the cost of the statement to the agent. See docs/mcp.md, "Guard rails of each query".
     guard.log_comment = "chdash-mcp key=" + limits.key_id + (limits.agent_caller.empty() ? std::string() : " caller=" + mcp_comment_caller(limits.agent_caller));
     ChMcpSettings plan;
@@ -471,63 +474,6 @@ const char* metric_method(const std::string& method) {
   if (method.rfind("notifications/", 0) == 0) return "notification";
   return "other";
 }
-
-// The tools of a key of the page in the authzen mode (docs/mcp.md, "Keys and the access of humans"): tools/list keeps the tools of the
-// state of the key (one batch of the PDP for each period), and tools/call asks the PDP for the actions of the called tool only.
-class CreatorGatedTools final : public McpToolBackend {
-public:
-  CreatorGatedTools(McpToolBackend& inner, McpCreatorAccess& gate, McpCreatorState state)
-      : inner_(inner), gate_(gate), state_(std::move(state)) {}
-
-  McpToolAvailability availability() const override { return inner_.availability(); }
-  McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now) override {
-    return inner_.call_tool(key, tool, arguments, now);
-  }
-  McpToolOutcome call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
-                               const McpCallInfo& info) override {
-    return inner_.call_tool_for(key, tool, arguments, now, info);
-  }
-  std::optional<std::vector<std::string>> permitted_tools(const McpKey& key, std::vector<std::string> tools) override {
-    // The batch of the state got no valid answer: tools/list answers 503, never a short list (binding 5.5, ProcurAuth 10.3).
-    if (state_.status == McpCreatorStatus::Unknown) return std::nullopt;
-    const auto kept = inner_.permitted_tools(key, std::move(tools));
-    if (!kept) return std::nullopt;
-    tools = *kept;
-    tools.erase(std::remove_if(tools.begin(), tools.end(),
-                               [&](const std::string& name) {
-                                 return std::find(state_.tools.begin(), state_.tools.end(), name) == state_.tools.end();
-                               }),
-                tools.end());
-    return tools;
-  }
-  // A failure of the PDP for any question of the call gives Failed: HTTP 503 with -32603, as on the routes and in the identity mode
-  // (owner decision of 2026-11-07). A call of a tool whose action lists a budget is one use of the creator (McpCreatorAccess::call): a spent
-  // budget gives the tool error budget_exceeded.
-  McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
-    if (inner_.tool_permitted(key, tool, arguments, call) != McpAccess::Allowed) return McpAccess::Denied;
-    const McpCreatorCall decided = gate_.call(key, tool, arguments);
-    if (decided.access == McpAccess::Allowed) return McpAccess::Allowed;
-    if (decided.access == McpAccess::BudgetExceeded && call) call->retry_after = decided.retry_after.value_or(1);
-    // A key cannot apply a ceiling (ProcurAuth 7.5): the grant of the creator makes the tool unusable for the key. The answer says so.
-    if (decided.access == McpAccess::Denied && !decided.ceiling.empty() && call) call->ceiling_refused = decided.ceiling;
-    const char* outcome = decided.access == McpAccess::BudgetExceeded ? "budget_exceeded" : decided.access == McpAccess::Failed ? "failed" : "denied";
-    log_event(LogLevel::Warn, "mcp.tool_refused",
-              {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", decided.action}, {"ceiling", decided.ceiling.substr(0, 128)},
-               {"outcome", outcome}, {"usage", decided.use}});
-    return decided.access;
-  }
-  // A request with no tool (initialize, ping, a notification): the batch of the state of the key is its question. No valid answer gives
-  // HTTP 503 with -32603 (a notification gets 503 with no body).
-  McpAccess session_permitted(const McpKey& key, uint64_t* retry_after) override {
-    if (state_.status == McpCreatorStatus::Unknown) return McpAccess::Failed;
-    return inner_.session_permitted(key, retry_after);
-  }
-
-private:
-  McpToolBackend& inner_;
-  McpCreatorAccess& gate_;
-  McpCreatorState state_;
-};
 
 } // namespace
 
@@ -934,7 +880,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   // 5. Check the message.
   McpServerInfo info;
   info.version = cfg_.version_semver;
-  std::optional<CreatorGatedTools> gated;
+  std::optional<McpCreatorTools> gated;
   if (creator_state) gated.emplace(*mcp_tools_, *mcp_creator_, *creator_state);
   // The identity mode asks the PDP for the subject of the request, for each method (binding 3.6a, 4.1, 3.2).
   std::optional<McpSubjectTools> by_subject;
@@ -957,6 +903,9 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   record.tool = result.tool;
   record.host = result.outcome.host;
   record.rows = result.outcome.rows;
+  record.effect = result.outcome.effect;
+  record.executed_sql = result.outcome.executed_sql;
+  record.approval = result.outcome.approval;
   if (!result.protocol_version.empty()) record.protocol_version = result.protocol_version;
   record.trace = result.trace;
   record.request_id = result.request_id;

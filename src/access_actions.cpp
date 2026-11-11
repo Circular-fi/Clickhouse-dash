@@ -98,8 +98,10 @@ bool access_action_published(const AccessAction& action, const AccessFeatures& f
   if (name == "explorer.read") return features.explorer;
   if (starts_with(name, "system.")) return features.system;
   if (name == "observability.read") return features.observability;
-  if (name == "mcp.keys.read") return features.mcp;
-  if (name == "mcp.keys.write") return features.mcp && features.mcp_keys_write;
+  // The identity mode has no key of ChDash: the keys live in the portal, and the routes of the keys answer 403 manage_disabled. Nothing is left to
+  // read or to write, so these two actions are not published there (docs/access.md, "Approval of an action").
+  if (name == "mcp.keys.read") return features.mcp && !features.mcp_session;
+  if (name == "mcp.keys.write") return features.mcp && features.mcp_keys_write && !features.mcp_session;
   if (name == "mcp.usage.read") return features.mcp;
   if (name == "mcp.session") return features.mcp && features.mcp_session;
   return true;

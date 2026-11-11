@@ -506,6 +506,15 @@ void test_secrets() {
   CHECK(contains(failure(host_with("mcp_password_file = \"" + dir + "/pw-mcp\"")), "mcp_password_file needs mcp_uri"));
   CHECK_EQ(failure(host_with("mcp_uri = \"clickhouse://m@h:9000\"\n password_file = \"" + dir + "/pw-shared\"\n mcp_password_env = \"CHDASH_TEST_RUNNER_PW\"")), std::string(""));
   CHECK_EQ(first(load(host_with("mcp_uri = \"clickhouse://m@h:9000\"\n password_file = \"" + dir + "/pw-runner\""), false)).mcp_uri, std::string("clickhouse://m@h:9000"));  // the shared password never applies to MCP
+  // The write account of the tool run_write_query: it needs mcp_uri, it has its own password forms, and its user is another user.
+  CHECK(contains(failure(host_with("mcp_write_password_file = \"" + dir + "/pw-mcp\"")), "mcp_write_password_file needs mcp_write_uri"));
+  CHECK(contains(failure(host_with("mcp_write_uri = \"clickhouse://w@h:9000\"")), "mcp_write_uri needs mcp_uri"));
+  CHECK(contains(failure(host_with("mcp_uri = \"clickhouse://m@h:9000\"\n mcp_write_uri = \"clickhouse://m@h:9000\"")), "mcp_write_uri and mcp_uri have the same user \"m\""));
+  CHECK(contains(failure(host_with("mcp_uri = \"clickhouse://m@h:9000\"\n mcp_write_uri = \"clickhouse://w:pw@h:9000\"")), "mcp_write_uri holds a password in clear text"));
+  CHECK(contains(failure(host_with("mcp_uri = \"clickhouse://m@h:9000\"\n mcp_write_uri = \"clickhouse://w@h:9000\"\n mcp_write_password = \"x\"")),
+                 "mcp_write_password: a secret is never written in the file"));
+  CHECK(contains(failure(host_with("mcp_uri = \"clickhouse://m@h:9000\"\n mcp_write_uri = \"clickhouse://w@h:9000\"\n mcp_write_password_env = \"A\"\n mcp_write_password_file = \"B\"")),
+                 "give exactly one of mcp_write_password_env and mcp_write_password_file"));
   // A source that cannot give the secret stops the start. The error names the attribute and the variable or the path.
   CHECK(contains(failure(host_with("password_env = \"CHDASH_TEST_UNSET_PW\"")), "clickhouse.host p.password_env: the environment variable CHDASH_TEST_UNSET_PW is not set"));
   CHECK(contains(failure(host_with("password_env = \"CHDASH_TEST_EMPTY_PW\"")), "the environment variable CHDASH_TEST_EMPTY_PW is empty"));
@@ -706,6 +715,30 @@ void test_access_block() {
     CHECK_EQ(source(searching, "access.pdp.search"), std::string("file|true"));
     CHECK(contains(error_of(authzen(identity, pdp + "\n search = \"yes\"")), "access.pdp.search must be a boolean"));
     CHECK(contains(error_of(authzen(identity, pdp + "\n search = true\n search = false")), "duplicate attribute 'search'"));
+  }
+  // The approval of a person (docs/access.md, "Approval of an action"): always on, two keys, closed block, no value changed to fit.
+  {
+    const auto with_approval = [&](const std::string& approval) {
+      return "access {\n mode = \"authzen\"\n identity {\n" + identity + "\n }\n pdp {\n" + pdp + "\n }\n approval {\n" + approval + "\n }\n}\n";
+    };
+    CHECK_EQ(defaults.access.approval_wait_ms, int64_t(15000));
+    CHECK_EQ(defaults.access.approval_max_command_bytes, int64_t(16384));
+    CHECK_EQ(source(defaults, "access.approval.wait"), std::string("default|15s"));
+    CHECK_EQ(source(defaults, "access.approval.max_command_bytes"), std::string("default|16384"));
+    const AppConfig tuned = load(with_approval(" wait = \"5s\"\n max_command_bytes = 4096"));
+    CHECK_EQ(tuned.access.approval_wait_ms, int64_t(5000));
+    CHECK_EQ(tuned.access.approval_max_command_bytes, int64_t(4096));
+    CHECK_EQ(source(tuned, "access.approval.wait"), std::string("file|5s"));
+    CHECK_EQ(source(tuned, "access.approval.max_command_bytes"), std::string("file|4096"));
+    CHECK_EQ(load(with_approval(" wait = \"0s\"")).access.approval_wait_ms, int64_t(0));
+    CHECK(contains(error_of(with_approval(" wait = \"31s\"")), "access.approval.wait must be between 0ms and 30s, not \"31s\""));
+    CHECK(contains(error_of(with_approval(" wait = 5")), "access.approval.wait"));
+    CHECK(contains(error_of(with_approval(" max_command_bytes = 100")), "access.approval.max_command_bytes must be between 1024 and 1048576 (bytes), not 100"));
+    CHECK(contains(error_of(with_approval(" max_command_bytes = 2000000")), "access.approval.max_command_bytes must be between 1024 and 1048576 (bytes), not 2000000"));
+    CHECK(contains(error_of(with_approval(" max_command_bytes = \"4096\"")), "access.approval.max_command_bytes must be an integer"));
+    CHECK(contains(error_of(with_approval(" enabled = true")), "enabled"));  // an unknown key: the block is closed
+    CHECK(contains(error_of(with_approval(" wait = \"1s\"\n wait = \"2s\"")), "duplicate attribute 'wait'"));
+    CHECK(contains(error_of("access {\n mode = \"open\"\n approval {\n wait = \"1s\"\n }\n}\n"), "contradict each other"));
   }
   // The keys and the token from the environment.
   ::setenv("CHDASH_TEST_IDENTITY_KEYS", pem.c_str(), 1);

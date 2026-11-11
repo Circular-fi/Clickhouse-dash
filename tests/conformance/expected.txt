@@ -2,4 +2,4 @@
 # tests/conformance/run.sh gives the exit code 1 for a failed case that this list does not name.
 # When a case of this list passes, the script says so: remove its line.
 # The list is empty since 2026-11-07: each MCP request of the cases has the headers Mcp-Method and Mcp-Name (ProcurAuth commit 85b695d),
-# and each case passes or is skipped (99 cases: 94 passed, 0 failed, 5 skipped).
+# and each case passes or is skipped (117 cases: 112 passed, 0 failed, 5 skipped, since 2026-11-11 with the runner of the ProcurAuth commit 48f3d3a).

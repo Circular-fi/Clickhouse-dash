@@ -67,6 +67,7 @@ const LIMITS = { max_rows: { value: 1000, source: 'mcp' }, timeout_seconds: { va
 export const META = {
   enabled: true,
   endpoint_path: '/mcp',
+  auth_mode: 'keys',
   auth_header: 'Authorization',
   storage_configured: true,
   manage_from_ui: true,

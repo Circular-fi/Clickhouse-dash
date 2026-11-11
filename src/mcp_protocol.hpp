@@ -71,6 +71,26 @@ struct McpRequestHeaders {
   std::string baggage;
 };
 
+// What a tool returns. `json` is one JSON object.
+// On success, it holds the payload. On failure, it holds {"error": {"code", "message", "retryable"}} (contract 6.1).
+// The server sends it as the text content. A client that reads it also gets it as structuredContent.
+struct McpToolOutcome {
+  bool is_error = false;
+  std::string json;
+  // For the audit line (never SQL, never data).
+  std::string host;
+  uint64_t rows = 0;
+  std::string error_code;
+  // A second item of content[] (binding 5.7: the text "NOT EXECUTED ..." of an action that waits for an approval). Empty: none.
+  std::string extra_text;
+  // The approval (docs/access.md, "Approval of an action"), for the call log: the effect of the call, the statement that ran (run_write_query
+  // only), and one word of the outcome (awaiting, run, approval_denied, approval_expired, approval_unavailable, approval_rate_limited,
+  // invalid_argument). Empty: the call had no effect.
+  std::string effect;
+  std::string executed_sql;
+  std::string approval;
+};
+
 // What the tools of a call know besides the key. This is the agent that calls (agent.caller of the baggage).
 // The tools use it for the log_comment of the ClickHouse statements. It is never a permission.
 struct McpCallInfo {
@@ -86,24 +106,21 @@ struct McpCallInfo {
   std::string ceiling_refused;
   // McpToolBackend::tool_permitted gives BudgetExceeded with the seconds of retry_after (a whole number from 1).
   std::optional<uint64_t> retry_after;
+  // The approval (mcp_approval.hpp). tool_permitted gives Allowed and sets `answered` when the call is over at the access stage: its result is
+  // the awaiting result, the verdict of get_action_status, or a tool error. The protocol sends it and calls no tool.
+  std::optional<McpToolOutcome> answered;
+  // For a call that runs after a true answer: the effect of the call (the call log), and, for run_write_query, the statement that the PDP
+  // approved. The tool runs this text, never the argument again.
+  std::string approved_effect;
+  std::string approved_sql;
+  // The call had control arguments (approval_ref, lease_s, until, wait_s, supersedes): the protocol gives the tool the arguments without them.
+  bool controls_present = false;
 };
 
 struct McpServerInfo {
   std::string name = "chdash";
   std::string title = "ChDash";
   std::string version = "dev";
-};
-
-// What a tool returns. `json` is one JSON object.
-// On success, it holds the payload. On failure, it holds {"error": {"code", "message", "retryable"}} (contract 6.1).
-// The server sends it as the text content. A client that reads it also gets it as structuredContent.
-struct McpToolOutcome {
-  bool is_error = false;
-  std::string json;
-  // For the audit line (never SQL, never data).
-  std::string host;
-  uint64_t rows = 0;
-  std::string error_code;
 };
 
 // `message` is text that ChDash writes. `untrusted_detail` is text that ChDash did not write (an error of ClickHouse or of a
@@ -150,6 +167,9 @@ public:
     (void)call;
     return McpAccess::Allowed;
   }
+// The names of the tools of the approval flow that the backend offers (run_write_query when a host has a write account, get_action_status).
+// They are not in the catalog. tools/list adds them in the identity mode, and permitted_tools decides each one. The default offers none.
+  virtual std::vector<std::string> approval_tool_names() const { return {}; }
 // A request with no tool (initialize, ping, server/discover, a notification, and any other method): the identity mode asks the action
 // mcp.session on the service (binding 3.6a). Denied gives HTTP 403 with -32001, Failed gives HTTP 503 with -32603, BudgetExceeded gives
 // HTTP 429 with -31429 and *retry_after (binding 5.4). By default, allowed.

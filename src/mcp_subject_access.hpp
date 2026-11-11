@@ -14,6 +14,7 @@
 
 #include "access_actions.hpp"
 #include "access_pdp.hpp"
+#include "mcp_approval.hpp"
 #include "mcp_protocol.hpp"
 
 #include <functional>
@@ -43,6 +44,12 @@ public:
   // mcp_uri): a host that is not in this list is never sent to the PDP as a host. `features` give the published actions.
   McpSubjectAccess(std::string service_id, std::vector<std::string> hosts, AccessFeatures features, Decide decide, DecideUse decide_use = {});
 
+  // The approval of an action by a person (mcp_approval.hpp). With a gate, each call of a tool that names a node follows protocol 17.7, and
+  // get_action_status and run_write_query exist. Without one (the tests), the questions have no effect.
+  void set_approval(McpApprovalGate* approval) { approval_ = approval; }
+  bool has_approval() const { return approval_ != nullptr; }
+  const McpApprovalGate* approval() const { return approval_; }
+
   // mcp.session on the service. One question: with context.usage when the document lists a budget on mcp.session. For BudgetExceeded,
   // *retry_after (when it is not null) receives the seconds.
   McpAccess session(const std::string& subject, uint64_t* retry_after = nullptr);
@@ -69,6 +76,7 @@ private:
   AccessFeatures features_;
   Decide decide_;
   DecideUse decide_use_;
+  McpApprovalGate* approval_ = nullptr;
 };
 
 // The backend of one request in the identity mode: the checks of McpSubjectAccess for the subject of the request, and the tools of `inner`.
@@ -76,7 +84,14 @@ class McpSubjectTools final : public McpToolBackend {
 public:
   McpSubjectTools(McpToolBackend& inner, McpSubjectAccess& access) : inner_(inner), access_(access) {}
 
-  McpToolAvailability availability() const override { return inner_.availability(); }
+  McpToolAvailability availability() const override {
+    McpToolAvailability out = inner_.availability();
+    out.approval = access_.has_approval();
+    return out;
+  }
+  std::vector<std::string> approval_tool_names() const override {
+    return access_.approval() ? access_.approval()->tool_names() : std::vector<std::string>();
+  }
   McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now) override {
     return inner_.call_tool(key, tool, arguments, now);
   }

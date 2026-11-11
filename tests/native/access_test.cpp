@@ -545,7 +545,8 @@ void test_actions_document() {
     CHECK(std::strlen(action["description"].GetString()) > 0);
   }
   const std::vector<std::string> expected = {"query.run.read", "query.run.write", "query.export", "library.read", "library.write", "explorer.read",
-                                             "system.read", "observability.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "mcp.session"};
+                                             "system.read", "observability.read", "mcp.usage.read", "mcp.session"};
+  // The identity mode has no key of ChDash: mcp.keys.read and mcp.keys.write are not published (the keys mode publishes them, below).
   CHECK_EQ(types.size(), expected.size());
   for (const auto& name : expected) CHECK(types.count(name) == 1);
   CHECK(types.count("access") == 0 && types.count("system.kill_query") == 0);
@@ -559,7 +560,7 @@ void test_actions_document() {
   const std::vector<std::string> service = {"service"};
   for (const auto& name : {"query.run.read", "query.run.write", "explorer.read"}) CHECK(types[name] == three);
   for (const auto& name : {"query.export", "system.read", "observability.read"}) CHECK(types[name] == host);
-  for (const auto& name : {"library.read", "library.write", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "mcp.session"}) CHECK(types[name] == service);
+  for (const auto& name : {"library.read", "library.write", "mcp.usage.read", "mcp.session"}) CHECK(types[name] == service);
   // The table of the code agrees with the document.
   for (const AccessAction& action : access_actions()) CHECK(!action.database || action.host);
   CHECK(access_action("explorer.read") != nullptr && access_action("access") == nullptr);
@@ -577,8 +578,9 @@ std::set<std::string> published_names(const AccessFeatures& features) {
 
 void test_actions_of_the_features_that_are_on() {
   const std::set<std::string> always = {"query.run.read", "query.run.write", "query.export"};
-  // Every feature on: the 12 actions.
-  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(12));
+  // Every feature on: the 10 actions of the identity mode. The 12 actions need the keys mode: mcp.session and the actions of the keys exclude each other.
+  CHECK_EQ(published_names(AccessFeatures{}).size(), size_t(10));
+  CHECK(published_names(AccessFeatures{}).count("mcp.keys.read") == 0 && published_names(AccessFeatures{}).count("mcp.keys.write") == 0);
   // Every feature off: the query, the run and the export only.
   AccessFeatures off;
   off.query_library = off.query_library_writable = off.explorer = off.system = off.observability = off.mcp = off.mcp_keys_write = off.mcp_session = false;
@@ -601,6 +603,7 @@ void test_actions_of_the_features_that_are_on() {
   CHECK(published_names(session_without_mcp).count("mcp.session") == 0);
   // MCP on with the keys in static mode: the keys and their usage can be read, and the page makes no key.
   AccessFeatures mcp_static;
+  mcp_static.mcp_session = false;
   mcp_static.mcp_keys_write = false;
   const auto keys_read_only = published_names(mcp_static);
   CHECK(keys_read_only.count("mcp.keys.read") == 1 && keys_read_only.count("mcp.keys.write") == 0 && keys_read_only.count("mcp.usage.read") == 1);
@@ -633,7 +636,7 @@ void test_actions_of_the_features_that_are_on() {
   for (const auto& q : access_navigation_questions("db", hosts, "analytics", explorer_off)) CHECK(std::string(q.action) != "explorer.read");
   // The summary of GET /api/version lists the published actions.
   CHECK_EQ(access_action_summary({}, {}, mcp_off).size(), size_t(8));
-  CHECK_EQ(access_action_summary({}, {}).size(), size_t(12));
+  CHECK_EQ(access_action_summary({}, {}).size(), size_t(10));  // the identity mode: no action of the keys
 }
 
 std::string rule_text(const char* method, const char* path) {
@@ -1275,7 +1278,7 @@ void test_host_hierarchy() {
   // A grant on the service covers every host and every database.
   std::tie(questions, decisions) = batch("admin", "");
   CHECK(access_visible_hosts(questions, decisions) == (std::set<std::string>{"local", "other"}));
-  CHECK(access_navigation_pages(questions, decisions) == (std::set<std::string>{"query", "explorer", "mcp-keys"}));
+  CHECK(access_navigation_pages(questions, decisions) == (std::set<std::string>{"query", "explorer"}));  // the identity mode has no page of the keys
   CHECK(allowed("admin", "explorer.read", access_database_resource("db", "other", "anything")));
 
   // The one-level grant of 1.0.8 (database under the service) names a chain that the tree does not have: it covers nothing now. A
@@ -1316,8 +1319,8 @@ void test_navigation_pages() {
   const std::vector<std::string> hosts = {"local", "other"};
   size_t service_actions = 0;
   size_t host_actions = 0;
-  for (const auto& action : access_actions()) (action.host ? host_actions : service_actions) += 1;
-  CHECK_EQ(service_actions, size_t(6));
+  for (const auto& action : access_published_actions()) (action.host ? host_actions : service_actions) += 1;
+  CHECK_EQ(service_actions, size_t(4));
   CHECK_EQ(host_actions, size_t(6));
   const auto questions = access_navigation_questions("db", hosts, "chdash_ui");
   CHECK_EQ(questions.size(), service_actions + 2 * host_actions + 2);

@@ -38,10 +38,10 @@ These items are startup errors:
 - A number outside the range of its key, or a text that is not one of the choices of its key. ChDash does not change a value to make it fit. The value in the file is the value that applies. Otherwise, the process does not start. The error names the key, the range and the value.
 - Two keys that contradict each other (for example `server.max_worker_threads` below `server.worker_threads`).
 - A ClickHouse URI that is not valid: a parameter that is not known (`verfy=0`), or a compression that does not exist. The error names the host and the field.
-- A secret in clear text. These are a password in `runner_uri`, `system_uri` or `mcp_uri`, and the parameter `password_file` in one of them. These are also the attributes `password`, `runner_password`, `system_password` and `mcp_password`, and the attribute `secret` of an MCP key. The error never repeats the secret.
+- A secret in clear text. These are a password in `runner_uri`, `system_uri`, `mcp_uri` or `mcp_write_uri`, and the parameter `password_file` in one of them. These are also the attributes `password`, `runner_password`, `system_password`, `mcp_password` and `mcp_write_password`, and the attribute `secret` of an MCP key. The error never repeats the secret.
 - A secret with two sources. These are `<name>_env` and `<name>_file` together, or two attributes that give the same password (for example `password_file` and `runner_password_file`). Nothing takes precedence silently.
 - A secret that ChDash cannot read. This is an environment variable that is not set or is empty, or a file that cannot be read or is empty. The error gives the attribute and the variable or the path.
-- Two keys that contradict each other. These are `server.max_host_streams` above half of `server.max_worker_threads`, and an `explorer.operations` block with a `system` block. `explorer.operations.enabled = false` with `keeper = true` is also a contradiction. So is `access.mode = "open"` with an `access.identity` or `access.pdp` block.
+- Two keys that contradict each other. These are `server.max_host_streams` above half of `server.max_worker_threads`, and an `explorer.operations` block with a `system` block. `explorer.operations.enabled = false` with `keeper = true` is also a contradiction. So is `access.mode = "open"` with an `access.identity`, `access.pdp` or `access.approval` block. So is a `mcp_write_uri` without `mcp_uri`, with the same user as `mcp_uri`, `runner_uri` or `system_uri`, or with `mcp.auth_mode` other than `identity`.
 - A file without the `access` block ([access.md](access.md)).
 
 ## Core blocks
@@ -690,7 +690,7 @@ The integration stack under `tests/` provisions the distinct users `chdash_runne
 
 ## Secrets
 
-A secret is never written in the configuration file. It is a password of a ClickHouse account, the secret of an MCP key, or the token of ChDash at the PDP (`access.pdp`). Each secret has two forms. Exactly one of them applies:
+A secret is never written in the configuration file. It is a password of a ClickHouse account (also the write account `mcp_write_password_env` and `mcp_write_password_file`), the secret of an MCP key, or the token of ChDash at the PDP (`access.pdp`). Each secret has two forms. Exactly one of them applies:
 
 - `<name>_env = "VAR"`: the value is in the environment variable `VAR`.
 - `<name>_file = "/path"`: the value is the content of the file, without its last line end. The line end is one `\n` or `\r\n`. ChDash keeps every other byte.

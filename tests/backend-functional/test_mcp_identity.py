@@ -255,7 +255,7 @@ def test_the_declared_ceilings_of_the_action_of_a_tool_bound_the_call():
     response = call_tool("run_query", {"host": "local", "sql": "SELECT number FROM numbers(10)"})
     assert response.status_code == 200, response.text
     result = response.json()["result"]
-    assert result["isError"] is False, result
+    assert not result.get("isError"), result  # the identity mode has no isError member in a success (binding 5.7)
     assert result["structuredContent"]["row_count"] == 2 and result["structuredContent"]["truncated"] is True, result
     # max_read_size is max_bytes_to_read of the statement: a read of more bytes fails.
     answer(default=True, limits={"query.run.read": {"max_read_size": 1}})
@@ -281,7 +281,7 @@ def usage_questions(action: str | None = None) -> list[dict]:
 def test_u18_the_tool_that_runs_sql_is_one_use_and_the_other_tools_are_not():
     answer(default=True)
     response = call_tool("run_query", {"host": "local", "sql": "SELECT 1"})
-    assert response.status_code == 200 and response.json()["result"]["isError"] is False, response.text
+    assert response.status_code == 200 and not response.json()["result"].get("isError"), response.text
     # One question with usage 1 for the action of the tool, on the host of the call, and no question without usage before it.
     runs = [e for e in evaluations() if e["action"]["name"] == "query.run.read"]
     assert len(runs) == 1 and runs[0]["context"] == {"usage": {"units": 1}}, runs

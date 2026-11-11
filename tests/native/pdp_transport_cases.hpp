@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <rapidjson/document.h>
@@ -892,7 +893,7 @@ inline void test_pdp_transport() {
     CHECK(r.error == "the answer is too large");
   }
   // Responses that are not valid.
-  for (const std::string raw : {std::string("garbage\r\n\r\n"), std::string("HTTP/2 200 OK\r\n\r\n"), std::string("HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n"),
+  for (const std::string& raw : {std::string("garbage\r\n\r\n"), std::string("HTTP/2 200 OK\r\n\r\n"), std::string("HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n"),
                                  std::string("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nab"),
                                  std::string("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"),
                                  std::string("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n"), std::string("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc")}) {

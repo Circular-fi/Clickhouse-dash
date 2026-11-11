@@ -30,6 +30,14 @@
 //   - writes one log line access.decision for each decision (subject, action, the path of the resource, match, decision, source,
 //     reason, failed). It never writes the token.
 //
+// The approval of a person for an effect (ProcurAuth section 17, docs/access.md, "Approval of a write"):
+//   - a question with an effect (AccessQuestion::approval_effect) carries "context": {"approval": {"effect": ...}} and, for a use, the usage.
+//     The client never keeps the answer to such a question, and never keeps an answer with a reason of 17.1 (10.1). It reads the
+//     evaluation_id of a false answer and gives it back, without a read, to approval_submit;
+//   - approval_submit and approval_verdict are the narrow API of 17.4 (POST /approval/v1/requests and GET /approval/v1/requests/<id>). They
+//     use the token of the PDP. The client learns the id, the code and the verdict of a request, and nothing more: it reads no other member
+//     of an answer and writes no text of an agent or of a person in a log.
+//
 // The routes map a decision with access_outcome and access_refusal (ProcurAuth 10.3): Allowed, Denied (403), BudgetExceeded (429 with
 // Retry-After) or Failed (503, retryable). A true decision with a ceiling that the server cannot apply is false (7.5): the server
 // checks it with ceilings_enforceable.
@@ -71,6 +79,9 @@ struct AccessQuestion {
   std::string action;
   AccessResource resource;
   AccessMatch match = AccessMatch::Node;
+  // ProcurAuth 17.1: the effect of the operation, "sha256:" and 64 hexadecimal digits. Only PdpClient::decide_approval sends it. Empty: the
+  // question has no context.approval.
+  std::string approval_effect;
 };
 
 // "node" or "subtree".
@@ -87,8 +98,16 @@ enum class PdpReason {
   InvalidResource,
   InvalidRequest,
   BudgetExceeded,
+  // The reasons of ProcurAuth 17.1: the action needs the approval of a person.
+  ApprovalRequired,
+  ApprovalPending,
+  ApprovalDenied,
+  ApprovalExpired,
   Other,
 };
+
+// True for the four reasons of the approval (ProcurAuth 17.1).
+bool pdp_reason_is_approval(PdpReason reason);
 
 // "" for None, else the name of ProcurAuth 11.1 ("other" for Other). For the logs only: a client never gets it (10.3).
 const char* pdp_reason_name(PdpReason reason);
@@ -102,6 +121,9 @@ struct PdpAnswer {
   PdpReason reason = PdpReason::None;
   // The seconds of retry_after of a false decision with budget_exceeded: a whole number from 1. Empty for another answer.
   std::optional<uint64_t> retry_after;
+  // context.evaluation_id of a false decision with the reason approval_required or approval_pending (ProcurAuth 17.1): a text that only the PDP
+  // reads. The client gives it back in the submission and never reads it. At most 1024 bytes.
+  std::string evaluation_id;
   // context.limits of a true decision. Always empty for a false decision: ChDash ignores the limits of a false answer (7.6).
   PdpLimits limits;
   // context.usage.units of a true decision (0 or 1), when the answer has it (6.12).
@@ -125,6 +147,7 @@ struct AccessDecision {
   // The reason, retry_after, the ceilings and the units of the answer (PdpAnswer). Empty for a failed decision.
   PdpReason reason = PdpReason::None;
   std::optional<uint64_t> retry_after;
+  std::string evaluation_id;
   PdpLimits limits;
   std::optional<uint64_t> usage_units;
   // True when the PDP answered true to a question with context.usage but gave no context.usage.units. ProcurAuth 6.12 treats this answer
@@ -156,7 +179,7 @@ AccessDecision access_refusal_of(const std::vector<AccessDecision>& decisions);
 // The answer of an HTTP route to a refused decision (ProcurAuth 10.3). It never holds the reason of the PDP.
 struct AccessRefusal {
   int status = 403;                       // 403, 429 or 503
-  std::string error_code;                 // "forbidden", "too_many_requests" or "pdp_unavailable"
+  std::string error_code;                 // "forbidden", "too_many_requests", "pdp_unavailable" or "approval_cannot_wait" (ProcurAuth 17.7a)
   std::string message;
   bool retryable = false;                 // true for 429 and 503
   std::optional<uint64_t> retry_after;    // the value of the header Retry-After (429 only)
@@ -181,6 +204,7 @@ struct PdpCallContext {
 
 // One call to the PDP, for the CLIENT span (docs/server-telemetry.md).
 struct PdpCall {
+  std::string method = "POST";
   std::string path;  // "/access/v1/evaluation" or "/access/v1/evaluations"
   std::string trace_id;
   std::string span_id;
@@ -341,6 +365,38 @@ struct PdpSearchResult {
   std::string error;
 };
 
+// The verdict of a request (ProcurAuth 17.6): the only state that a PEP learns. A text that is not one of the four is Void (17.7).
+enum class PdpVerdict { Pending, Approved, Denied, Void };
+const char* pdp_verdict_name(PdpVerdict verdict);
+// pending, approved, denied or void; any other text gives Void and *known false (when it is not null).
+PdpVerdict pdp_verdict_of(std::string_view text, bool* known = nullptr);
+
+// The body of a submission (ProcurAuth 17.4). `op_json` and `view_json` are JSON texts that the caller built (valid, compact).
+struct PdpApprovalRequest {
+  std::string evaluation_id;
+  std::string effect;
+  std::string op_json;
+  std::string view_json;
+  // Exactly one of the three controls of the agent (17.5, binding 5.7), as the agent gave it.
+  enum class Control { ApprovalRef, LeaseSeconds, Until } control = Control::LeaseSeconds;
+  std::string control_text;       // approval_ref or until
+  uint64_t lease_seconds = 0;     // lease_s
+  std::string supersedes;         // empty: none
+};
+
+// The answer of the approval API, mapped as the binding says (5.7a). `status` Ok: the request exists (request_id and code for a submission,
+// verdict for a read). NoDevice: 409 no_device. RateLimited: 429 with retry_after. InvalidArgument: 413, 422 invalid_argument, invalid_lease
+// or lease_required, and 404 for a read (an unknown request, or the request of another subject). Unavailable: any other answer, no answer, an
+// answer that is not valid (fail closed).
+struct PdpApprovalReply {
+  enum class Status { Ok, NoDevice, RateLimited, InvalidArgument, Unavailable } status = Status::Unavailable;
+  std::string request_id;
+  std::string code;
+  PdpVerdict verdict = PdpVerdict::Void;
+  uint64_t retry_after = 1;
+  int http_status = 0;
+};
+
 class PdpClient {
 public:
   PdpClient(PdpOptions options, std::unique_ptr<PdpTransport> transport, std::function<void(const PdpCall&)> on_call = {});
@@ -362,6 +418,31 @@ public:
   //   - allowed false, reason BudgetExceeded and retry_after: the route answers 429 (10.3);
   //   - failed: no valid answer: the route answers 503.
   AccessDecision decide_use(const std::string& subject, const AccessQuestion& question, const PdpCallContext& context);
+
+  // The question of an action with the member `approval` (ProcurAuth 17.1, 17.2): ONE Access Evaluation with context.approval.effect =
+  // question.approval_effect (it must not be empty), and with context.usage = {"units": 1} when `usage` is true. The cache never answers it
+  // and never keeps its answer. Without usage the request can go again after a lost connection. With usage it never goes again (10.6): no
+  // answer gives a failed decision. A true answer to a question with usage must carry context.usage.units (6.12). The false answers with the
+  // reasons of 17.1 keep the reason and the evaluation_id. `question.match` must be Node.
+  // `units_optional`: a true answer to a question with usage may have no context.usage.units (the action lists no budget, so the PDP may leave
+  // the member out: the use then counts 0). The call of an action that lists a budget never sets it.
+  AccessDecision decide_approval(const std::string& subject, const AccessQuestion& question, bool usage, bool units_optional,
+                                 const PdpCallContext& context);
+  // The body of that request. For the tests.
+  static std::string approval_request_body(const std::string& subject, const AccessQuestion& question, bool usage);
+
+  // The approval API (ProcurAuth 17.4). The first one sends POST <base path>/approval/v1/requests with the token of the PDP. The second sends
+  // GET <base path>/approval/v1/requests/<request_id>?subject=<subject>[&wait=<seconds>][&renew=true]. `wait_seconds` 0 sends no wait. A read
+  // renews the lease only with `renew` (a call of the agent, never a timer: 17.7).
+  PdpApprovalReply approval_submit(const PdpApprovalRequest& request, const PdpCallContext& context);
+  PdpApprovalReply approval_verdict(const std::string& request_id, const std::string& subject, uint64_t wait_seconds, bool renew,
+                                    const PdpCallContext& context);
+  // The body of a submission, and the path of a read. For the tests.
+  static std::string approval_submit_body(const PdpApprovalRequest& request);
+  static std::string approval_verdict_path(const std::string& base_path, const std::string& request_id, const std::string& subject,
+                                           uint64_t wait_seconds, bool renew);
+  // The reading of an answer of the approval API for a status and a body. For the tests.
+  static PdpApprovalReply parse_approval_reply(int status, const std::string& body, std::optional<uint64_t> retry_after_header, bool submission);
 
   // One attempt to read the metadata of the PDP (AuthZEN 1.0, l.1327-1334). Loaded and Absent set the endpoints of the client; the other
   // states keep them. The server calls it at the start: Invalid stops the start, Unreachable is a warning. With PdpOptions::discovery,

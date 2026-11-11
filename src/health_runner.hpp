@@ -23,6 +23,9 @@ struct HostSpec {
   std::string system_uri; // clickhouse://...
   // The MCP identity (docs/mcp.md). An empty value makes the host invisible to MCP. It never falls back to runner or system credentials.
   std::string mcp_uri;
+  // The account of the MCP tool run_write_query (docs/mcp.md, "The write tool"). It is another user than mcp_uri. An empty value means that
+  // the tool does not run on this host. The configuration allows it only with access.approval.enabled.
+  std::string mcp_write_uri;
   // The OpenTelemetry pages, as they apply to this host. These are the settings of the `observability` block with the override of
   // the host applied (config.cpp). Read these settings, not the defaults of the configuration, to serve a request of the host.
   OtelHostOverride otel_override;

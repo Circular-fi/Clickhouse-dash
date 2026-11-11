@@ -421,12 +421,14 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     const auto runner_own = find_secret_ref(host, "runner_password", where);
     const auto system_own = find_secret_ref(host, "system_password", where);
     const auto mcp_own = find_secret_ref(host, "mcp_password", where);
+    const auto mcp_write_own = find_secret_ref(host, "mcp_write_password", where);
 
     validate_object_of_table(host, "clickhouse.host", "clickhouse.host", {"observability"});
     const auto label = string_attr(host, "label", "clickhouse.host");
     auto runner_uri = string_attr(host, "runner_uri", "clickhouse.host");
     auto system_uri = string_attr(host, "system_uri", "clickhouse.host");
     auto mcp_uri = string_attr(host, "mcp_uri", "clickhouse.host");
+    auto mcp_write_uri = string_attr(host, "mcp_write_uri", "clickhouse.host");
     if (!runner_uri || runner_uri->empty()) throw std::runtime_error("clickhouse.host.runner_uri is required");
     if (!system_uri || system_uri->empty()) throw std::runtime_error("clickhouse.host.system_uri is required");
     if (!ids.insert(*name).second) throw std::runtime_error("duplicate clickhouse.host.name: " + *name);
@@ -443,9 +445,17 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
       throw std::runtime_error(where + ": " + mcp_own->attribute + " needs mcp_uri, and the host has none");
     }
 
+    if (mcp_write_own && (!mcp_write_uri || mcp_write_uri->empty())) {
+      throw std::runtime_error(where + ": " + mcp_write_own->attribute + " needs mcp_write_uri, and the host has none");
+    }
+    if (mcp_write_uri && !mcp_write_uri->empty() && (!mcp_uri || mcp_uri->empty())) {
+      throw std::runtime_error(where + ": mcp_write_uri needs mcp_uri: the host is not visible to MCP without it");
+    }
+
     refuse_secret_in_uri(*runner_uri, where, "runner_uri", "runner_password_env, runner_password_file, password_env or password_file");
     refuse_secret_in_uri(*system_uri, where, "system_uri", "system_password_env, system_password_file, password_env or password_file");
     if (mcp_uri && !mcp_uri->empty()) refuse_secret_in_uri(*mcp_uri, where, "mcp_uri", "mcp_password_env or mcp_password_file");
+    if (mcp_write_uri && !mcp_write_uri->empty()) refuse_secret_in_uri(*mcp_write_uri, where, "mcp_write_uri", "mcp_write_password_env or mcp_write_password_file");
 
     // The code reads each secret here, one time. The connections of the process never read a file or the environment.
     const auto apply = [&](const std::optional<SecretRef>& ref, std::string& uri, const char* role, const std::string& shared_value,
@@ -469,6 +479,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     apply(runner_own, *runner_uri, "runner", shared_value, shared_source);
     apply(system_own, *system_uri, "system", shared_value, shared_source);
     if (mcp_uri && !mcp_uri->empty()) apply(mcp_own, *mcp_uri, "mcp", std::string(), std::string());
+    if (mcp_write_uri && !mcp_write_uri->empty()) apply(mcp_write_own, *mcp_write_uri, "mcp_write", std::string(), std::string());
 
     // The code checks every URI here (the address and the parameters). A mistake stops the start and names the host and the field.
     // It does not wait for the first request to find the mistake.
@@ -485,6 +496,24 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     check_uri(*runner_uri, "runner_uri");
     check_uri(*system_uri, "system_uri");
     if (mcp_uri && !mcp_uri->empty()) check_uri(*mcp_uri, "mcp_uri");
+    if (mcp_write_uri && !mcp_write_uri->empty()) {
+      check_uri(*mcp_write_uri, "mcp_write_uri");
+      // The write account is another user than each other account of the host: a statement that changes data never runs as the user that
+      // reads. The user of a URI is the part before the password.
+      const auto write_parsed = parse_clickhouse_uri(*mcp_write_uri, nullptr);
+      if (write_parsed) {
+        const auto same_user = [&](const std::string& other_uri, const char* field) {
+          const auto other = parse_clickhouse_uri(other_uri, nullptr);
+          if (other && other->user == write_parsed->user) {
+            throw std::runtime_error(where + ": mcp_write_uri and " + field + " have the same user \"" + write_parsed->user +
+                                     "\": the user of mcp_write_uri must be another user, so that a statement that changes data never runs as a user that reads");
+          }
+        };
+        same_user(*mcp_uri, "mcp_uri");
+        same_user(*runner_uri, "runner_uri");
+        same_user(*system_uri, "system_uri");
+      }
+    }
 
     HostSpec spec;
     spec.id = *name;
@@ -493,6 +522,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     spec.runner_uri = std::move(*runner_uri);
     spec.system_uri = std::move(*system_uri);
     if (mcp_uri) spec.mcp_uri = std::move(*mcp_uri);
+    if (mcp_write_uri) spec.mcp_write_uri = std::move(*mcp_write_uri);
     spec.otel_override = load_host_override(host);
     cfg.hosts.push_back(std::move(spec));
   }
@@ -982,7 +1012,7 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
         "the access block is missing: write access { mode = \"authzen\" ... } (the identity token and the PDP), or access { mode = \"open\" } "
         "for a server on a closed network (docs/access.md)");
   }
-  validate_object(*block, "access", {"mode"}, {"identity", "pdp"});
+  validate_object(*block, "access", {"mode"}, {"identity", "pdp", "approval"});
   AccessSettings& out = cfg.access;
   const auto mode = string_attr(*block, "mode", "access");
   if (!mode) throw std::runtime_error("access.mode is required: \"authzen\" or \"open\"");
@@ -993,10 +1023,16 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
 
   const HclObject* identity = optional_block(*block, "identity", "access");
   const HclObject* pdp = optional_block(*block, "pdp", "access");
+  const HclObject* approval = optional_block(*block, "approval", "access");
   if (out.mode == AccessMode::Open) {
-    if (identity || pdp) {
-      throw std::runtime_error(std::string("access.mode = \"open\" and the access.") + (identity ? "identity" : "pdp") +
+    if (identity || pdp || approval) {
+      throw std::runtime_error(std::string("access.mode = \"open\" and the access.") + (identity ? "identity" : pdp ? "pdp" : "approval") +
                                " block contradict each other: the open mode checks no identity and asks no PDP. Remove the block, or use mode = \"authzen\"");
+    }
+    for (const auto& host : cfg.hosts) {
+      if (host.mcp_write_uri.empty()) continue;
+      throw std::runtime_error("clickhouse.host " + host.id + ": mcp_write_uri and access.mode = \"open\" contradict each other: the tool run_write_query "
+                               "exists only with the PDP, and the open mode asks none. Remove mcp_write_uri, or use mode = \"authzen\"");
     }
     cfg.warnings.push_back("access.mode = \"open\": ChDash checks no identity and no permission. Use it only for a server alone on a closed network (docs/access.md)");
     return;
@@ -1157,6 +1193,28 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
     }
     out.pdp_usage_max_seconds = *seconds;
     cfg.value_sources["access.pdp.usage_max_seconds"] = "file";
+  }
+
+  // approval { }: the approval of a person for any action (docs/access.md, "Approval of an action"). The block is closed. The capability is
+  // always on: the PDP decides which grant needs an approval. The keys only tune the wait and the size of a request.
+  if (approval) {
+    validate_object(*approval, "access.approval", {"wait", "max_command_bytes"}, {});
+    duration(*approval, "access.approval", "wait", 0, 30 * 1000, &out.approval_wait_ms);
+    if (const auto bytes = int_attr(*approval, "max_command_bytes", "access.approval")) {
+      if (*bytes < 1024 || *bytes > 1048576) {
+        throw std::runtime_error("access.approval.max_command_bytes must be between 1024 and 1048576 (bytes), not " + std::to_string(*bytes));
+      }
+      out.approval_max_command_bytes = *bytes;
+      cfg.value_sources["access.approval.max_command_bytes"] = "file";
+    }
+  }
+  // A write account serves the tool run_write_query of the identity mode of MCP only.
+  for (const auto& host : cfg.hosts) {
+    if (host.mcp_write_uri.empty()) continue;
+    if (!cfg.mcp.enabled || !cfg.mcp.identity_auth()) {
+      throw std::runtime_error("clickhouse.host " + host.id + ": mcp_write_uri and mcp.auth_mode contradict each other: the tool run_write_query exists only in the "
+                               "identity mode of MCP. Set mcp.enabled = true and mcp.auth_mode = \"identity\", or remove mcp_write_uri");
+    }
   }
 
   // The service must be reachable only through the edge (docs/access.md, "Network"): all the interfaces is a warning, not an error.

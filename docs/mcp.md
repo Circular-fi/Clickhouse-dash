@@ -191,6 +191,7 @@ clickhouse {
 - `mcp_uri` is the ClickHouse identity of MCP. It has the same form as `runner_uri`. It never holds a password. A password in the URI stops the start.
 - The password of the MCP user is in `mcp_password_env` (an environment variable) or in `mcp_password_file` (a file). Give only one of them. Both attributes need `mcp_uri`. ChDash reads them one time, at start.
 - The shared `password_env` and `password_file` do not apply to MCP. The MCP password has no fallback to the credentials of the runner or the system user.
+- `mcp_write_uri` is the account of the tool `run_write_query` ([The write tool](#the-write-tool)). It has the same form as `mcp_uri`, and it never holds a password: use `mcp_write_password_env` or `mcp_write_password_file` (give only one, and both need `mcp_write_uri`). It needs `mcp_uri` and `mcp.auth_mode = "identity"`. Its user must be another user than the users of `mcp_uri`, `runner_uri` and `system_uri`: ChDash stops at start when two of them have the same user. A host without `mcp_write_uri` has no write tool.
 
 ### Startup errors
 
@@ -373,6 +374,18 @@ In the `authzen` mode ([access.md](access.md)), a key of the page never has more
 - When the PDP gives no valid answer to a question of the request, the request gets HTTP `503` with `-32603`, as the routes and the mode `identity` (decision of 2026-11-07). This applies to each question of `tools/call`, and to the batch of the state of the key: then `tools/list`, `initialize`, `ping` and the other requests with no tool get `503` too (a notification gets `503` with no body). A failure never makes the key an orphan.
 - A call of a tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`) is one use of the creator. It takes one unit of the budget `queries` of the creator (refer to [Budgets of the keys](#budgets-of-the-keys)).
 - A key of the configuration is not checked: the operator writes it in the configuration.
+- The PDP can ask for the approval of the creator for a use of the key ([The approval of a key of the page](#the-approval-of-a-key-of-the-page)). Then the standing questions above accept the reason `approval_required`: the creator holds the action, and the call follows the flow of the approval.
+
+### The approval of a key of the page
+
+A key of the page has a creator, and the creator is the subject of the PDP. So a `tools/call` of the key has the flow of [the identity mode](#the-approval-of-a-person), with the creator as the subject. The flow, the `op` and the `view`, the errors and the logs are in [access.md](access.md#the-keys-of-the-page). A short summary:
+
+- Each tool of the key accepts the optional control arguments `approval_ref`, `lease_s`, `until`, `wait_s` and `supersedes`. `tools/list` shows them. A call needs exactly one of the first three only when the PDP asks for an approval. The controls never reach the tool.
+- A call that needs no approval costs the question that it cost before. The PDP answers `approval_required` to the question of the call: then the tool does not run, and the result is `{"action": {"id", "status": "awaiting_approval", "code", "executed": false}}`, with `NOT EXECUTED` in the second item of `content`. The result has no `isError` member. The creator approves on the phone. The agent calls the tool again with the same arguments, and the tool runs one time.
+- `tools/list` gives `get_action_status` to each key that has a creator. The tool gives the verdict of a request of the creator and renews it for the agent.
+- The errors are `approval_denied`, `approval_expired`, `approval_unavailable`, `approval_rate_limited` and `invalid_argument`. A failure of the approval API gives HTTP `503`.
+- A key of the configuration has no creator and no PDP question. It needs no approval, and it has neither `get_action_status` nor the control arguments.
+- The tools `run_write_query` and `export_query` are in the identity mode only. A tool that uses no action asks no question in the mode `keys`, so it needs no approval.
 
 ### Budgets of the keys
 
@@ -499,12 +512,26 @@ The identity mode adds no field to a message of MCP.
 | `list_databases`, `list_tables`, `describe_table`, `query_table` | `explorer.read` (host, or database) |
 | `list_services`, `search_traces`, `get_trace`, `search_logs`, `list_metrics`, `query_metric` | `observability.read` (host) |
 | `run_query`, `explain_query` | `query.run.read` (host) |
+| `run_write_query` ([The write tool](#the-write-tool)) | `query.run.write` (host) |
+| `export_query` ([The export tool](#the-export-tool)) | `query.export` (host), and `query.run.read` (host) as the other permission |
+| `get_action_status` | None. It asks the PDP no question. |
 | `mcp_analysis_all_usage` | `mcp.usage.read` (service) |
 | An API tool | The action of its route, as in the table of the pages ([access.md](access.md#actions)) |
 
 The tools `list_hosts`, `mcp_analysis_my_limits` and `mcp_analysis_my_usage` use no action of the pages. They show only the service and the subject itself, so they use `mcp.session`. The PDP can grant `mcp.session` to each person who may use MCP.
 
 The action `mcp.session` is in the document of the actions when MCP is on and `mcp.auth_mode` is `identity`. In the mode `keys`, the document does not list it.
+
+### The approval of a person
+
+Each `tools/call` of this mode can need the approval of the owner of the key. The PDP decides, for each grant (the property `confirm`). ChDash handles the answer for every tool, with one code. The flow, the control arguments, the `op` and the `view` of each tool, the errors and the logs are in [access.md](access.md#approval-of-an-action). A short summary:
+
+- Each tool accepts the optional control arguments `approval_ref`, `lease_s`, `until`, `wait_s` and `supersedes`. `tools/list` shows them in the schema of each tool except `get_action_status`. A call must give exactly one of `approval_ref`, `lease_s` and `until` when the PDP asks for an approval. The control arguments never reach the tool and never enter the effect.
+- When the PDP says `approval_required` and then `approval_required` or `approval_pending` to the question with the effect, the tool does not run. The result is not an error. Its `structuredContent` is `{"action": {"id", "status": "awaiting_approval", "code", "executed": false}}`, and the second item of `content` starts with `NOT EXECUTED`. The agent calls the tool again after the approval, with the same arguments.
+- The tool errors are `approval_denied`, `approval_expired`, `approval_unavailable` (retryable), `approval_rate_limited` (retryable, with `retry_after`) and `invalid_argument`. Their messages are fixed.
+- The tool `get_action_status` (argument `request_id`) gives `{"status": "pending" | "approved" | "denied" | "void"}` and renews the lease of the request for the agent. It has the annotation `readOnlyHint: true`.
+
+A call that needs no approval costs one question, as before. Only the answer `approval_required` starts the flow: ChDash then asks with the effect (without usage, then with usage after a `true` answer). A route of the pages or of the API cannot wait: it answers `403` with `{"error": "approval_cannot_wait"}` ([access.md](access.md#the-page-and-the-api)).
 
 ### Refusals
 
@@ -624,17 +651,19 @@ ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from
 | 5.1, 5.5, 5.6 | Done. The messages are fixed. |
 | 5.3, 5.4 (`budget_exceeded`) | Done. A tool error on `tools/call`, HTTP 429 with `-31429` on another request ([Budgets](#budgets)). |
 | 3.4, 3.6a (`context.usage`) | Done for the tools of `query.run.read`, the tools of `mcp.session` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
-| 3.5, 3.5a | Not applicable. ChDash has no call that asks the client for input, and no tool that waits for an approval. |
+| 3.5 | Not applicable. ChDash has no call that asks the client for input. |
+| 3.5a, 5.7, 5.7a, 5.7b | Done, for every tool ([The approval of a person](#the-approval-of-a-person)). The tool `get_action_status` exists in this mode. |
+| 3.5a, 5.7, 5.7a, 5.7b (the mode `keys`) | Done for each key of the page, with its creator as the subject ([The approval of a key of the page](#the-approval-of-a-key-of-the-page)). A key of the configuration has no subject: it stays outside the approval. |
 | 7.3 | Done. The mode ignores the standalone keys. |
 | 7.4 | Done in both modes. The 401 and the 429 have an empty body. |
 
 ## Tools
 
-Each tool has a JSON Schema in `tools/list`. It also has the annotations `readOnlyHint: true`, `idempotentHint: true` and `openWorldHint: false` (contract 4.3). A tool reads and changes nothing. It reads only the database of ChDash and the database of its host. `destructiveHint` is absent. It has a meaning only when `readOnlyHint` is false.
+Each tool has a JSON Schema in `tools/list`. It also has the annotations `readOnlyHint: true`, `idempotentHint: true` and `openWorldHint: false` (contract 4.3). A tool reads and changes nothing. The only exception is `run_write_query` of the identity mode ([The write tool](#the-write-tool)), which has its own annotations. It reads only the database of ChDash and the database of its host. `destructiveHint` is absent. It has a meaning only when `readOnlyHint` is false.
 
 A result without an error has `structuredContent`, a JSON object. The same object is also in `content[0].text` as compact JSON text (contract 5.1). A result of the protocol `2026-07-28` also has `resultType: "complete"`. The data of the database and of the telemetry is in an `untrusted` object. Refer to [Untrusted text](#untrusted-text).
 
-A tool failure returns a result with `isError: true` (contract 6.1). The text content holds this object. `structuredContent` also holds it, for a client that reads it:
+In the identity mode, a result without an error has no `isError` member (binding 5.7: the member is optional, and its default is false). A tool failure returns a result with `isError: true` (contract 6.1). The text content holds this object. `structuredContent` also holds it, for a client that reads it:
 
 ```json
 {"error": {"code": "not_found", "message": "the table otel.nope does not exist or is not visible", "retryable": false}}
@@ -883,6 +912,24 @@ The values follow the contract of the Query results ("Result values" in `docs/te
 ### `explain_query`
 
 Arguments: `host`, `sql` (one `SELECT` or `WITH` statement), `type` (`plan` by default, or `pipeline`, `ast`, `syntax` or `estimate`), `indexes` and `actions` (booleans, for `plan`). Result: `data_notice`, `host`, `type`, `untrusted.lines` (the text of the explain), `row_count`, `truncated`, `elapsed_ms`. The `estimate` type has `columns` and `untrusted.rows`.
+
+### The write tool
+
+`run_write_query` exists only in the identity mode, and only for a host that has `mcp_write_uri` ([The host settings](#the-host-settings)). Arguments: `host` (required), `sql` (one statement), and the control arguments of [The approval of a person](#the-approval-of-a-person). It has the annotations `readOnlyHint: false`, `destructiveHint: true` and `openWorldHint: true`. The key of ChDash (the mode `keys`) never has it, and the page of the keys does not list it.
+
+- The statement must change data or the schema. The statements and the refusals are in [access.md](access.md#the-write-tool).
+- The PDP is asked for `query.run.write` on the host of the call. With a grant that has `confirm`, the tool needs an approval. Without it, a `true` answer lets the tool run at once.
+- The statement runs with the write account, without `readonly = 1`, with the time limit, the memory limit and the ceilings of the answer of the PDP. It runs one time. The approval gives no right in ClickHouse: the grants of the account decide what the statement can change.
+- Result: `host`, `executed` (`true`) and `elapsed_ms`. A ClickHouse error is a tool error with the same codes as `run_query` (`permission_denied`, `syntax_error`, `timeout` and others).
+- The call log has the fields `approval.effect`, `approval.outcome` and `approval.executed_sql` ([Call log](#call-log)).
+
+The tools of the catalog stay read-only: `run_query` and `explain_query` run with `readonly = 1`, and a write statement there gives `statement_not_allowed`.
+
+### The export tool
+
+`export_query` exists only in the identity mode, for each host that has `mcp_uri`. Arguments: `host` (required), `sql` (one read statement, as for `run_query`), `format` (`csv`, the default, or `json`) and the control arguments of [The approval of a person](#the-approval-of-a-person). It runs the statement with `readonly = 1` and the caps of the call, and it gives the rows as the text of an export in `untrusted.content`: `csv` has a header line, and `json` is an array of objects. The result also has `host`, `format`, `columns`, `row_count`, `truncated` and `elapsed_ms`. `truncated` is `true` when a row cap or a byte cap cut the rows. The tool does not download a file: the stream of a file stays on the page.
+
+The tool is the use of the action `query.export` (one unit of the budget `exports`). It needs a second permission, `query.run.read` on the host (ProcurAuth 5.5a). ChDash asks it first, without usage and without effect. A `false` answer gives the answer of a tool that does not exist. The `op` of an approval has `tool`, `host`, `sql`, `ch_user` and `options` (the text of `{"format": ...}`).
 
 ### The analysis tools
 
@@ -1151,7 +1198,7 @@ ChDash also stops reading when it has `max_rows` rows or `max_result_bytes` byte
 
 ### Call log
 
-ChDash writes one record `mcp.call` to its log for each request that reaches `POST /mcp` (contract 7.5). This includes a request without a valid key, and a request that the `Origin` check refuses. The record is one JSON line of the log ([operations.md](operations.md#logs)). It never holds an argument of a tool, SQL, data or a token. When the `telemetry` block is enabled and `telemetry.call_log` is `true`, ChDash also sends the record as an OTLP log record (refer to [server-telemetry.md](server-telemetry.md#the-log-record)).
+ChDash writes one record `mcp.call` to its log for each request that reaches `POST /mcp` (contract 7.5). This includes a request without a valid key, and a request that the `Origin` check refuses. The record is one JSON line of the log ([operations.md](operations.md#logs)). It never holds an argument of a tool, data or a token. It holds SQL only in the three fields of an approval (below). When the `telemetry` block is enabled and `telemetry.call_log` is `true`, ChDash also sends the record as an OTLP log record (refer to [server-telemetry.md](server-telemetry.md#the-log-record)).
 
 ```
 {"ts":"2026-10-16T12:00:00.123Z","level":"info","event":"mcp.call","server":"chdash","instance":"chdash-0","key":"ci-bot","key_source":"config","subject":"alice","client.name":"claude-code","client.version":"2.1.0","client.address":"10.0.0.7","mcp.protocol.version":"2026-07-28","mcp.method.name":"tools/call","gen_ai.tool.name":"query_table","status":"ok","duration_ms":12,"rows":20,"bytes":2310,"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"51a3b3db0a4fbe5b","gen_ai.conversation.id":"0192f0c1-run","agent.caller":"triage-bot","agent.on_behalf_of":"alice","host":"prod"}
@@ -1173,6 +1220,8 @@ ChDash writes one record `mcp.call` to its log for each request that reaches `PO
 | `trace_id`, `span_id` | The identifiers of the SERVER span of the request (contract 7.4). The trace is the one of the context of the call (refer to [Trace context](#trace-context)). If the call has no context, ChDash makes a new trace. The span id has 8 random bytes. When the `telemetry` block is enabled, ChDash sends this span with OTLP (refer to [server-telemetry.md](server-telemetry.md)). Otherwise, these identifiers only connect the record to the trace of the agent. |
 | `gen_ai.conversation.id`, `agent.caller`, `agent.on_behalf_of` | `agent.run_id`, `agent.caller` and `agent.on_behalf_of` of the baggage. Empty when they are absent. |
 | `host` | The host of the call (a field of ChDash), or `-`. |
+
+A call that had an effect in the identity mode ([The approval of a person](#the-approval-of-a-person)) has three more fields: `approval.effect` (the hash of the call), `approval.outcome` (a fixed word) and, for a statement of `run_write_query` that ChDash sent to ClickHouse, `approval.executed_sql`. These are the only places where the log holds SQL. They let the owner of the portal compare the statement that ran with the history of the phone.
 
 The usage of a key (refer to [Usage of a key](#usage-of-a-key)) is not the call log. It is not part of the contract (7.7). It keeps its own names of results (`429_rate_limited`, `rpc_error_32601`).
 
@@ -1542,6 +1591,8 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
   - the answer `-32602` of a tool that the key lacks;
   - the untrusted text (`data_notice`, U+FFFD), the trace context (`traceparent`, `baggage`), and the histogram of the operations;
   - the tools with a fake database and a fake analysis, and the startup errors with the real configuration loader.
+
+  `tests/native/approval_test.cpp` (CMake option `CHDASH_BUILD_APPROVAL_TESTS`, target `chdash_approval_test`) tests the approval of a person: the effect against the vectors of ProcurAuth, the client of the PDP and the approval API on a fake transport, each branch of the gate with a scripted PDP, the protocol of the identity mode, and the keys of the page with their creator. `tests/backend-functional/test_approval.py` runs the flows of the identity mode against a server and a fake portal. `tests/backend-functional/test_approval_keys.py` runs the flows of the keys of the page against a server in the mode `keys` (`tests/config/approval.keys.hcl`).
 
   `tests/native/config_test.cpp` has the `mcp_key` block, the modes of the keys, the older forms and their warnings.
 - `tests/harness/test_native_unit_tests.py` runs the native binary when `MCP_TEST_BINARY` names it. The structural rules that concern MCP (it is unreachable from the other routes and never uses the runner identity) are in `tests/harness/test_backend_code_rules.py`.

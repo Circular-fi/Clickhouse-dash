@@ -24,6 +24,10 @@ std::string tool_describe_table(Ctx& ctx, const rapidjson::Value& args);
 std::string tool_query_table(Ctx& ctx, const rapidjson::Value& args);
 std::string tool_run_query(Ctx& ctx, const rapidjson::Value& args);
 std::string tool_explain_query(Ctx& ctx, const rapidjson::Value& args);
+// export_query (mcp_approval.hpp): one read statement, its rows as CSV or JSON text (the action query.export).
+std::string tool_export_query(Ctx& ctx, const rapidjson::Value& args);
+// run_write_query (mcp_approval.hpp): runs `approved_sql`, the statement that the PDP approved, with the write account of the host.
+std::string tool_run_write_query(Ctx& ctx, const rapidjson::Value& args, const std::string& approved_sql);
 // observability
 std::string tool_list_services(Ctx& ctx, const rapidjson::Value& args);
 std::string tool_search_traces(Ctx& ctx, const rapidjson::Value& args);

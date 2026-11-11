@@ -26,21 +26,6 @@ std::string text_member(const rapidjson::Value& object, const char* name) {
   return std::string(it->value.GetString(), it->value.GetStringLength());
 }
 
-// The database that a call names, or empty. A data tool has the argument `database`. An API tool has the parameter `database` of its
-// route (in `params` of a GET, in `body` of a POST), when the rule of the route reads it (database_param).
-std::string database_of(const McpToolInfo& tool, const rapidjson::Value& arguments) {
-  if (tool.api) {
-    const AccessRule rule = access_rule(tool.api->method, tool.api->path);
-    if (!rule.database_param) return {};
-    const char* holder = std::string(tool.api->method) == "POST" ? "body" : "params";
-    if (!arguments.IsObject()) return {};
-    const auto it = arguments.FindMember(holder);
-    if (it == arguments.MemberEnd()) return {};
-    return text_member(it->value, "database");
-  }
-  return std::string_view(tool.group) == "data" ? text_member(arguments, "database") : std::string();
-}
-
 } // namespace
 
 McpKey mcp_identity_key(const std::string& subject) {
@@ -101,8 +86,15 @@ std::optional<std::vector<std::string>> McpSubjectAccess::list(const std::string
   // One item for each action, not for each tool (binding 4.1). A tool whose action is not published is not listed.
   std::vector<std::string> actions;
   std::vector<std::string> action_of(tools.size());
+  std::vector<bool> always(tools.size(), false);
   for (size_t i = 0; i < tools.size(); ++i) {
+    // get_action_status has no action: tools/list names it with the tools that can need an approval, that is with each tool (binding 4.1).
+    if (approval_ && tools[i] == kMcpStatusTool) {
+      always[i] = true;
+      continue;
+    }
     const McpToolInfo* info = mcp_find_tool(tools[i]);
+    if (!info && approval_) info = mcp_find_approval_tool(tools[i]);
     if (!info) continue;
     const std::string name = mcp_tool_identity_action(*info);
     const AccessAction* action = access_action(name);
@@ -111,18 +103,19 @@ std::optional<std::vector<std::string>> McpSubjectAccess::list(const std::string
     if (!contains(actions, name)) actions.push_back(name);
   }
   std::vector<std::string> out;
-  if (actions.empty()) return out;
-  std::vector<AccessQuestion> questions;
-  for (const auto& name : actions) questions.push_back(AccessQuestion{name, access_service_resource(service_id_), AccessMatch::Subtree});
-  std::vector<AccessDecision> decisions = decide_(subject, questions);
-  decisions.resize(questions.size());
   std::set<std::string> allowed;
-  for (size_t i = 0; i < questions.size(); ++i) {
-    if (decisions[i].failed) return std::nullopt;
-    if (decisions[i].allowed) allowed.insert(questions[i].action);
+  if (!actions.empty()) {
+    std::vector<AccessQuestion> questions;
+    for (const auto& name : actions) questions.push_back(AccessQuestion{name, access_service_resource(service_id_), AccessMatch::Subtree});
+    std::vector<AccessDecision> decisions = decide_(subject, questions);
+    decisions.resize(questions.size());
+    for (size_t i = 0; i < questions.size(); ++i) {
+      if (decisions[i].failed) return std::nullopt;
+      if (decisions[i].allowed) allowed.insert(questions[i].action);
+    }
   }
   for (size_t i = 0; i < tools.size(); ++i) {
-    if (!action_of[i].empty() && allowed.count(action_of[i])) out.push_back(tools[i]);
+    if (always[i] || (!action_of[i].empty() && allowed.count(action_of[i]))) out.push_back(tools[i]);
   }
   return out;
 }
@@ -139,7 +132,7 @@ std::optional<AccessQuestion> McpSubjectAccess::call_question(const McpToolInfo&
   // A host that MCP does not reach: the question goes to the service. A host that the person cannot see and a host that does not
   // exist get the same answer, and the PDP never receives an id that the client chose for a host.
   if (!contains(hosts_, host)) return AccessQuestion{name, access_service_resource(service_id_)};
-  const std::string database = action->database ? database_of(tool, arguments) : std::string();
+  const std::string database = action->database ? mcp_call_database(tool, arguments) : std::string();
   if (database.empty() || !access_valid_id(database)) return AccessQuestion{name, access_host_resource(service_id_, host)};
   return AccessQuestion{name, access_database_resource(service_id_, host, database)};
 }
@@ -160,6 +153,8 @@ std::optional<std::vector<std::string>> McpSubjectAccess::visible_hosts(const st
 }
 
 McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* info) {
+  // The tool of the verdict asks the PDP no question (binding 5.7b).
+  if (approval_ && std::string_view(tool.name) == kMcpStatusTool) return approval_->status(subject, arguments, info);
   const std::optional<AccessQuestion> question = call_question(tool, arguments);
   if (!question) return McpAccess::Denied;
   // The call is one use (binding 3.4) when the document lists a budget on the action of the tool and the question names a node (a call with
@@ -168,8 +163,28 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
   // Then the question has context.usage and no question without it comes first (protocol 10.1). An API tool calls its route in the process,
   // and the route asks the PDP nothing: a call takes one unit at most.
   const bool use = decide_use_ && question->match == AccessMatch::Node && access_action_has_budget(question->action, features_);
+  // export_query needs two permissions (ProcurAuth 5.5a, 10.1a): the export and the run of the statement. The other permission is asked first,
+  // without usage and without effect. A `false` answer, also with a reason of 17.1, refuses the call before the use takes a unit (17.7).
+  if (std::string_view(tool.name) == kMcpExportTool && question->match == AccessMatch::Node) {
+    std::vector<AccessDecision> other = decide_(subject, {AccessQuestion{"query.run.read", question->resource}});
+    other.resize(1);
+    if (other.front().failed) return McpAccess::Failed;
+    if (!other.front().allowed) return McpAccess::Denied;
+  }
   AccessDecision decision;
-  if (use) {
+  if (approval_ && question->match == AccessMatch::Node) {
+    // The approval of a person for any action (ProcurAuth 17.7). The question of 10.1 comes first, with no effect: the PDP decides which grant
+    // needs an approval. Only a reason of 17.1 starts the flow of the gate.
+    const auto first = [&]() {
+      if (use) return decide_use_(subject, *question);
+      std::vector<AccessDecision> decisions = decide_(subject, {*question});
+      decisions.resize(1);
+      return decisions.front();
+    };
+    const McpGateResult gated = approval_->call(subject, tool, *question, use, arguments, info, first);
+    if (!gated.run && !gated.pass) return gated.access;
+    decision = gated.decision;
+  } else if (use) {
     decision = decide_use_(subject, *question);
   } else {
     std::vector<AccessDecision> decisions = decide_(subject, {*question});

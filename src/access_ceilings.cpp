@@ -221,6 +221,13 @@ AccessRunUse access_run_use(SqlStatementClass sql_class, const std::function<Acc
   } else {
     // A plain false: no budget_exceeded, no failure, no true answer that was turned false or that had no units. Nothing was counted, so
     // the PEP chooses the other action for the use, in its order of preference (10.1). It never does so after an answer that took a unit.
+    // A reason of ProcurAuth 17.1: the grant of this action needs the approval of a person, and a route cannot wait for it (17.7a). The run is
+    // refused with the 403 approval_cannot_wait (access_refusal). The PEP never takes the other action instead: a statement that changes data
+    // would run with readonly = 1 and fail in ClickHouse, and the use of the other action would take a unit for nothing.
+    if (pdp_reason_is_approval(first_decision.reason)) {
+      out.refusal = first_decision;
+      return out;
+    }
     const bool plain_false = !first_decision.failed && !first_decision.usage_invalid && !first_true && first_decision.reason != PdpReason::BudgetExceeded;
     if (!plain_false) {
       out.refusal = first_decision;

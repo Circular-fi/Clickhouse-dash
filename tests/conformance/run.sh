@@ -15,6 +15,7 @@
 #   CONFORMANCE_RUNNER   a built access-conformance binary: the script then does not build one.
 #   CONFORMANCE_EXPECTED the list of expected failures (default: tests/conformance/expected.txt).
 #   CONFORMANCE_KEEP     1 to keep the containers and the work directory after the run (for a look at the logs).
+#   CHDASH_APP_IMAGE     the image that runs the chdash binary (default: CHDASH_TEST_IMAGE, debian:trixie-slim).
 set -euo pipefail
 
 [[ $# -ge 1 && $# -le 2 ]] || { echo "usage: $0 /path/to/chdash [CLICKHOUSE_IMAGE]" >&2; exit 2; }
@@ -24,6 +25,8 @@ bin="$(realpath "$1")"
 [[ -x "$bin" ]] || { echo "$bin is not an executable file" >&2; exit 2; }
 ch_image="${2:-${CLICKHOUSE_IMAGE:-clickhouse:26.7.5.10@sha256:d0e74e9970998f92c0490c23345259a539550eff24f551dbe385d3cd29481f74}}"
 image="${CHDASH_TEST_IMAGE:-debian:trixie-slim}"
+# The image that runs the chdash binary. The default is the image of the runner. A binary that the Alpine test image builds needs an Alpine image.
+app_image="${CHDASH_APP_IMAGE:-$image}"
 pa_dir="$(realpath "${PROCURAUTH_DIR:-$repo/../procurauth}" 2>/dev/null || true)"
 expected_file="${CONFORMANCE_EXPECTED:-$here/expected.txt}"
 for tool in docker openssl curl python3; do
@@ -84,9 +87,14 @@ print(json.dumps({"keys": keys}, indent=2))
 PY
 cmp -s "$work/identity-keys.json" "$here/identity-keys.json" ||
   die "tests/conformance/identity-keys.json is not the public set of the test keys of ProcurAuth: copy $work/identity-keys.json (CONFORMANCE_KEEP=1)"
+# The effect vectors of protocol 17.3 are a copy. A difference is a warning: the native test uses the copy.
+if [[ -f "$pa_dir/conformance/vectors/effect.json" ]] && ! cmp -s "$pa_dir/conformance/vectors/effect.json" "$here/effect-vectors.json"; then
+  echo "WARNING: tests/conformance/effect-vectors.json differs from conformance/vectors/effect.json of the ProcurAuth repository" >&2
+fi
 cp "$here/profile.json" "$work/profile.json"
 tr -d '\n' < "$repo/tests/config/secrets/access-pdp-token" > "$work/pdp-token"
 printf 'conformance-test-password' > "$work/ch-password"
+printf 'conformance-write-password' > "$work/ch-write-password"
 cp "$repo/tests/config/access.conformance.hcl" "$work/config.hcl"
 chmod 0644 "$work"/*
 chmod 0755 "$work" "$work/access-conformance"
@@ -102,9 +110,13 @@ for _ in $(seq 1 90); do
   sleep 1
 done
 [[ "$ready" == 1 ]] || { docker logs "$ch_name" 2>&1 | tail -20 >&2; die "ClickHouse did not start"; }
+# The write account of the tool run_write_query: another user than the user of the other accounts (tests/config/access.conformance.hcl).
+docker exec "$ch_name" clickhouse-client --user chdash --password conformance-test-password --multiquery -q \
+  "CREATE USER chdash_write IDENTIFIED WITH plaintext_password BY 'conformance-write-password'; GRANT CREATE TABLE, SELECT ON default.* TO chdash_write" \
+  >/dev/null || die "the write account of ClickHouse could not be made"
 
 docker run -d --name "$app_name" --network "$network" --network-alias chdash-conformance -p 127.0.0.1::8080 \
-  -v "$bin:/chdash:ro" -v "$work:/conformance:ro" "$image" /chdash --config /conformance/config.hcl >/dev/null
+  -v "$bin:/chdash:ro" -v "$work:/conformance:ro" "$app_image" /chdash --config /conformance/config.hcl >/dev/null
 port=""
 for _ in $(seq 1 30); do
   port="$(docker port "$app_name" 8080/tcp 2>/dev/null | head -n1 | sed 's/.*://')"

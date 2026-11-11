@@ -752,7 +752,7 @@ ChMcpSettings ch_mcp_settings(const ChMcpLimits& limits, const ChSettingsProfile
   // The profile is never contradicted. A request never raises the guard rail.
   const auto lowers = [&profile](uint64_t ours, uint64_t theirs) { return !profile.known || theirs == 0 || ours < theirs; };
 
-  if (!profile.known || profile.readonly == 0) add("readonly", "1");
+  if (!limits.allow_write && (!profile.known || profile.readonly == 0)) add("readonly", "1");
   if (limits.timeout_seconds > 0 && (!profile.known || profile.max_execution_time <= 0 || static_cast<double>(limits.timeout_seconds) < profile.max_execution_time)) {
     add("max_execution_time", std::to_string(limits.timeout_seconds));
   }

@@ -1,3 +1,13 @@
+-- The write account of the MCP tool run_write_query (docs/mcp.md, "The write tool"): another user than chdash_mcp. It can create, change and
+-- drop tables of the database `default` only (the tests of test_approval.py make and drop Memory tables there), and read what it wrote.
+-- The approval of a person gives no right in ClickHouse: these grants decide. No database is made for it: the fixtures that list the databases
+-- of the server keep their list.
+CREATE USER IF NOT EXISTS chdash_mcp_write IDENTIFIED WITH plaintext_password BY 'mcp_write_test';
+ALTER USER chdash_mcp_write IDENTIFIED WITH plaintext_password BY 'mcp_write_test';
+REVOKE ALL ON *.* FROM chdash_mcp_write;
+GRANT CREATE TABLE, DROP TABLE, INSERT, SELECT, ALTER, TRUNCATE ON default.* TO chdash_mcp_write;
+GRANT SELECT ON system.one TO chdash_mcp_write;
+
 CREATE USER IF NOT EXISTS chdash_runner IDENTIFIED WITH plaintext_password BY 'runner_test';
 CREATE USER IF NOT EXISTS chdash_system IDENTIFIED WITH plaintext_password BY 'system_test';
 

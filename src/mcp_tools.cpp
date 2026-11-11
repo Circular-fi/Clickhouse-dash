@@ -74,6 +74,8 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
     else if (tool == "query_metric") json = tool_query_metric(ctx, arguments);
     else if (tool == "run_query") json = tool_run_query(ctx, arguments);
     else if (tool == "explain_query") json = tool_explain_query(ctx, arguments);
+    else if (tool == "export_query") json = tool_export_query(ctx, arguments);
+    else if (tool == "run_write_query") json = tool_run_write_query(ctx, arguments, info.approved_sql);
     else if (tool == "mcp_analysis_my_limits") json = tool_analysis_my_limits(ctx, arguments);
     else if (tool == "mcp_analysis_my_usage") json = tool_analysis_my_usage(ctx, arguments);
     else if (tool == "mcp_analysis_all_usage") json = tool_analysis_all_usage(ctx, arguments);
@@ -84,6 +86,11 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
   }
   outcome.host = ctx.host;
   outcome.rows = ctx.rows_out;
+  // The effect that the PDP approved or accepted for this call, and the statement that ran: the call log keeps them (docs/access.md).
+  outcome.effect = info.approved_effect;
+  if (!info.approved_effect.empty()) outcome.approval = outcome.is_error ? "run_failed" : "run";
+  // The statement is logged when it was sent to ClickHouse, also when ClickHouse refused it.
+  outcome.executed_sql = info.approved_sql;
   return outcome;
 }
 

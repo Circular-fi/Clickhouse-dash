@@ -21,7 +21,7 @@ BLOCK_ORDER = [
     "system", "analysis", "export", "query_library", "observability", "observability.traces", "observability.logs",
     "observability.metrics", "clickhouse.host", "clickhouse.host.observability.traces", "clickhouse.host.observability.logs",
     "clickhouse.host.observability.metrics", "mcp", "mcp.usage", "mcp.keys", "mcp.mcp_key", "mcp.mcp_key.scope", "mcp.mcp_key.limits",
-    "mcp.key", "telemetry", "access", "access.identity", "access.pdp",
+    "mcp.key", "telemetry", "access", "access.identity", "access.pdp", "access.approval",
 ]
 
 

@@ -1,5 +1,7 @@
 #include "mcp_protocol.hpp"
 
+#include "mcp_approval.hpp"
+
 #include "log.hpp"
 #include "json_parse.hpp"
 
@@ -166,12 +168,23 @@ std::optional<std::string> tools_list_result(const McpKey& key, McpToolBackend& 
   // This lists the tools that the key holds and that the configuration offers.
   // The tools of the analysis of the usage are omitted while the usage is off.
   // The access of humans can take more tools from a key of the page (McpToolBackend::permitted_tools).
-  const auto permitted = backend.permitted_tools(key, mcp_effective_tools(key.tools, key.databases, backend.availability()));
+  std::vector<std::string> names = mcp_effective_tools(key.tools, key.databases, backend.availability());
+  // The tools of the approval flow (mcp_approval.hpp): the backend offers them (the identity mode, and the keys of the page that have a creator).
+  const bool approval = backend.availability().approval;
+  if (approval) {
+    for (auto& name : backend.approval_tool_names()) names.push_back(std::move(name));
+  }
+  const auto permitted = backend.permitted_tools(key, std::move(names));
   if (!permitted) return std::nullopt;
   for (const auto& name : *permitted) {
     const McpToolInfo* info = mcp_find_tool(name);
+    const bool approval_tool = !info && approval && (info = mcp_find_approval_tool(name)) != nullptr;
     if (!info) continue;
-    const std::string schema_text = identity ? identity_schema(mcp_tool_input_schema(name)) : std::string(mcp_tool_input_schema(name));
+    std::string schema_text = approval_tool ? std::string(mcp_approval_tool_schema(name))
+                              : identity    ? identity_schema(mcp_tool_input_schema(name))
+                                            : std::string(mcp_tool_input_schema(name));
+    // Each tool of the identity mode can need an approval (the PDP decides): it accepts the control arguments.
+    if (approval && std::string_view(name) != kMcpStatusTool) schema_text = mcp_with_approval_properties(schema_text);
     const char* schema = schema_text.c_str();
     w.StartObject();
     w.Key("name"); put(w, info->name);
@@ -183,12 +196,17 @@ std::optional<std::string> tools_list_result(const McpKey& key, McpToolBackend& 
     // It reads only the database of ChDash and of the host.
     // destructiveHint is absent. It has a meaning only when readOnlyHint is false.
     w.Key("annotations");
-    w.StartObject();
-    w.Key("title"); put(w, info->title);
-    w.Key("readOnlyHint"); w.Bool(true);
-    w.Key("idempotentHint"); w.Bool(true);
-    w.Key("openWorldHint"); w.Bool(false);
-    w.EndObject();
+    if (approval_tool) {
+      const std::string annotations = mcp_approval_tool_annotations(*info);
+      w.RawValue(annotations.data(), annotations.size(), rapidjson::kObjectType);
+    } else {
+      w.StartObject();
+      w.Key("title"); put(w, info->title);
+      w.Key("readOnlyHint"); w.Bool(true);
+      w.Key("idempotentHint"); w.Bool(true);
+      w.Key("openWorldHint"); w.Bool(false);
+      w.EndObject();
+    }
     w.EndObject();
   }
   w.EndArray();
@@ -282,7 +300,7 @@ std::string header_name_value(const std::string& value, bool* ok) {
 // `text` carries the JSON of the result as text, for every client.
 // The specification asks a tool that returns structured content to return it as text too. Most clients show the model the text, not structuredContent.
 // `structuredContent` is the same JSON, for the clients that read it. It is only used for a protocol that has it.
-std::string tool_call_body(const rapidjson::Value& id, const McpToolOutcome& outcome, bool structured, bool modern) {
+std::string tool_call_body(const rapidjson::Value& id, const McpToolOutcome& outcome, bool structured, bool modern, bool gated = false) {
   StringStream out;
   // The text copy escapes its quotes. It is about 15 % larger than the JSON.
   // The room is reserved once, as untouched memory that the writes fill.
@@ -303,12 +321,22 @@ std::string tool_call_body(const rapidjson::Value& id, const McpToolOutcome& out
   w.Key("type"); w.String("text");
   w.Key("text"); write_json_text(w, outcome.json);
   w.EndObject();
+  if (!outcome.extra_text.empty()) {
+    w.StartObject();
+    w.Key("type"); w.String("text");
+    w.Key("text"); write_json_text(w, outcome.extra_text);
+    w.EndObject();
+  }
   w.EndArray();
   if (structured) {
     w.Key("structuredContent");
     w.RawValue(outcome.json.data(), outcome.json.size(), rapidjson::kObjectType);
   }
-  w.Key("isError"); w.Bool(outcome.is_error);
+  // A result of the identity mode that offers the approvals (docs/access.md, "Approval of an action") has isError only when it is an error:
+  // the results of binding 5.7 and 5.7b have no such member. The member is optional in MCP and its default is false.
+  if (outcome.is_error || !gated) {
+    w.Key("isError"); w.Bool(outcome.is_error);
+  }
   w.EndObject();
   w.EndObject();
   return out.take();
@@ -327,7 +355,8 @@ const std::vector<std::string>& mcp_legacy_protocol_versions() {
 }
 
 bool mcp_error_retryable(const std::string& code) {
-  return code == "timeout" || code == "unavailable" || code == "api_unavailable" || code == "budget_exceeded";
+  return code == "timeout" || code == "unavailable" || code == "api_unavailable" || code == "budget_exceeded" || code == "approval_unavailable" ||
+         code == "approval_rate_limited";
 }
 
 std::string mcp_error_message(const std::string& code) {
@@ -813,6 +842,13 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     if (tool == params->MemberEnd() || !tool->value.IsString()) return finish_fail(kRpcInvalidParams, "tools/call needs params.name");
     const std::string tool_name(tool->value.GetString(), tool->value.GetStringLength());
     const McpToolInfo* tool_info = mcp_find_tool(tool_name);
+    // The tools of the approval flow exist only when the backend offers them. A key of the page has get_action_status only: the write tool and the
+    // export tool exist in the identity mode.
+    bool approval_tool = false;
+    if (!tool_info && backend.availability().approval && (identity || tool_name == kMcpStatusTool)) {
+      tool_info = mcp_find_approval_tool(tool_name);
+      approval_tool = tool_info != nullptr;
+    }
     // A tool that the key does not have gets the answer for a tool that does not exist (contract 3.6).
     // The answer is -32602, with the same message.
     if (tool_info) result.tool = tool_name;
@@ -829,7 +865,9 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     McpCallInfo call;
     call.agent_caller = trace.caller;
     McpAccess access = McpAccess::Denied;
-    if (tool_info && mcp_scope_tool_allowed(key.tools, key.databases, tool_name)) access = backend.tool_permitted(key, *tool_info, *arguments, &call);
+    if (tool_info && (approval_tool || mcp_scope_tool_allowed(key.tools, key.databases, tool_name))) {
+      access = backend.tool_permitted(key, *tool_info, *arguments, &call);
+    }
     if (access == McpAccess::Failed) {
       McpRpcResult refused = finish_fail(kRpcInternalError, kMcpUnavailableMessage, 503);
       refused.tool = result.tool;
@@ -866,13 +904,28 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     }
     if (bad_arguments) return finish_fail(kRpcInvalidParams, "arguments must be an object");
     result.tool_called = true;
+    if (call.answered) {
+      // The call is over at the access stage (an action that waits for an approval, the verdict of a request, a refused approval).
+      result.outcome = std::move(*call.answered);
+      mcp_frame_untrusted(result.outcome.json);
+      const bool structured_answer = modern || protocol_has_structured_content(request_version);
+      result.body = tool_call_body(*id, result.outcome, structured_answer, modern, true);
+      return result;
+    }
     // The configuration must offer the tool.
     // While the usage is off, a tool that the usage needs is `not_enabled` for the key that holds it.
     if (const std::string off = mcp_tool_unavailable_reason(*tool_info, backend.availability()); !off.empty()) {
       result.outcome = mcp_tool_error("not_enabled", off);
     } else {
       try {
-        result.outcome = backend.call_tool_for(key, tool_name, *arguments, now, call);
+        // A call with control arguments (approval_ref, lease_s, until, wait_s, supersedes) runs without them: the tools take no such argument.
+        rapidjson::Document without_controls;
+        const rapidjson::Value* run_arguments = arguments;
+        if (call.controls_present) {
+          without_controls.Parse(mcp_arguments_without_controls(*arguments).c_str());
+          if (without_controls.IsObject()) run_arguments = &without_controls;
+        }
+        result.outcome = backend.call_tool_for(key, tool_name, *run_arguments, now, call);
       } catch (const std::exception& error) {
         // The client gets a sentence.
         // The log gets the tool, the key, and the exception that was thrown.
@@ -885,7 +938,7 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     // data_notice comes first when the result has an untrusted object (contract 5.2).
     mcp_frame_untrusted(result.outcome.json);
     const bool structured = modern || protocol_has_structured_content(request_version);
-    result.body = tool_call_body(*id, result.outcome, structured, modern);
+    result.body = tool_call_body(*id, result.outcome, structured, modern, approval_tool || (identity && backend.availability().approval));
     return result;
   }
   return finish_fail(kRpcMethodNotFound, identity ? std::string(kMcpUnknownMethodMessage) : "method not found: " + name);

@@ -233,6 +233,83 @@ std::string tool_run_query(Ctx& ctx, const rapidjson::Value& args) {
   return finish(sb);
 }
 
+std::string tool_export_query(Ctx& ctx, const rapidjson::Value& args) {
+  reject_unknown(args, {"host", "sql", "format"});
+  resolve_host(ctx, args);
+  const std::string sql = req_string(args, "sql", 4 * 1024 * 1024);
+  std::string format = opt_string(args, "format", 8).value_or("csv");
+  if (format != "csv" && format != "json") fail("invalid_argument", "format must be csv or json");
+  // The same statements as run_query, with readonly = 1 and the caps of the call. The result is the text of the export, in `untrusted.content`.
+  const McpSqlScan scan = scan_or_fail(ctx, sql, {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXISTS", "EXPLAIN"});
+  const McpDbResult res = run(ctx, scan.statement, ctx.user_limits);
+  std::string content;
+  if (format == "csv") {
+    const auto field = [](const std::string& text) {
+      if (text.find_first_of(",\"\n\r") == std::string::npos) return text;
+      std::string out = "\"";
+      for (const char c : text) {
+        if (c == '"') out += '"';
+        out += c;
+      }
+      return out + "\"";
+    };
+    for (size_t i = 0; i < res.columns.size(); ++i) content += (i ? "," : "") + field(res.columns[i].name);
+    content += "\n";
+    for (const auto& row : res.rows) {
+      for (size_t i = 0; i < row.size(); ++i) content += (i ? "," : "") + field(cell_text(row[i]));
+      content += "\n";
+    }
+  } else {
+    rapidjson::StringBuffer rows;
+    Writer rw(rows);
+    rw.StartArray();
+    for (const auto& row : res.rows) {
+      rw.StartObject();
+      for (size_t i = 0; i < row.size() && i < res.columns.size(); ++i) {
+        rw.Key(res.columns[i].name.data(), static_cast<rapidjson::SizeType>(res.columns[i].name.size()));
+        put_cell(rw, row[i]);
+      }
+      rw.EndObject();
+    }
+    rw.EndArray();
+    content.assign(rows.GetString(), rows.GetSize());
+  }
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("host"); put(w, ctx.host);
+  w.Key("format"); put(w, format);
+  write_columns(w, res);
+  w.Key("untrusted");
+  w.StartObject();
+  w.Key("content"); put(w, content);
+  w.EndObject();
+  w.Key("row_count"); w.Uint64(res.rows.size());
+  w.Key("truncated"); w.Bool(res.truncated);
+  w.Key("elapsed_ms"); w.Int64(res.elapsed_ms);
+  w.EndObject();
+  ctx.rows_out = res.rows.size();
+  return finish(sb);
+}
+
+std::string tool_run_write_query(Ctx& ctx, const rapidjson::Value& args, const std::string& approved_sql) {
+  reject_unknown(args, {"host", "sql"});
+  resolve_host(ctx, args);
+  // The tool never runs a text that the access stage did not approve: the statement comes from the PDP flow, not from the argument again.
+  if (approved_sql.empty()) fail("not_enabled", "run_write_query runs only a statement that the access check approved");
+  McpDbLimits limits = ctx.user_limits;
+  limits.write = true;
+  const McpDbResult res = run(ctx, approved_sql, limits);
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("host"); put(w, ctx.host);
+  w.Key("executed"); w.Bool(true);
+  w.Key("elapsed_ms"); w.Int64(res.elapsed_ms);
+  w.EndObject();
+  return finish(sb);
+}
+
 std::string tool_explain_query(Ctx& ctx, const rapidjson::Value& args) {
   reject_unknown(args, {"host", "sql", "type", "indexes", "actions"});
   resolve_host(ctx, args);

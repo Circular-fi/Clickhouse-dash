@@ -21,7 +21,7 @@ bool canceled_on_purpose(int code) { return code == 394 || code == 735; }
 
 std::vector<LogField> McpCallRecord::log_fields(const std::string& status, int64_t duration_ms, uint64_t bytes) const {
   static const std::string kNoHost = "-";
-  return {{"server", "chdash"},
+  std::vector<LogField> fields = {{"server", "chdash"},
           {"instance", instance},
           {"key", key},
           {"key_source", key_source},
@@ -42,6 +42,10 @@ std::vector<LogField> McpCallRecord::log_fields(const std::string& status, int64
           {"agent.caller", trace.caller},
           {"agent.on_behalf_of", trace.on_behalf_of},
           {"host", host.empty() ? kNoHost : host}};
+  if (!effect.empty()) fields.emplace_back("approval.effect", effect);
+  if (!approval.empty()) fields.emplace_back("approval.outcome", approval);
+  if (!executed_sql.empty()) fields.emplace_back("approval.executed_sql", executed_sql);
+  return fields;
 }
 
 void McpCallRecord::write(const std::string& status, int64_t duration_ms, uint64_t bytes) const {

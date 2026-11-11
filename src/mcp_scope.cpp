@@ -338,6 +338,25 @@ bool mcp_scope_tool_allowed(const std::vector<std::string>& tools, const std::ve
   return std::find(effective.begin(), effective.end(), tool) != effective.end();
 }
 
+std::string mcp_call_database(const McpToolInfo& tool, const rapidjson::Value& arguments) {
+  if (!arguments.IsObject()) return {};
+  const auto text_member = [](const rapidjson::Value& object, const char* name) -> std::string {
+    if (!object.IsObject()) return {};
+    const auto it = object.FindMember(name);
+    if (it == object.MemberEnd() || !it->value.IsString()) return {};
+    return std::string(it->value.GetString(), it->value.GetStringLength());
+  };
+  if (tool.api) {
+    const AccessRule rule = access_rule(tool.api->method, tool.api->path);
+    if (!rule.database_param) return {};
+    const char* holder = std::string(tool.api->method) == "POST" ? "body" : "params";
+    const auto it = arguments.FindMember(holder);
+    if (it == arguments.MemberEnd()) return {};
+    return text_member(it->value, "database");
+  }
+  return std::string_view(tool.group) == "data" ? text_member(arguments, "database") : std::string();
+}
+
 const char* mcp_tool_access_action(const McpToolInfo& tool) {
   if (tool.api) {
     const AccessRule rule = access_rule(tool.api->method, tool.api->path);
@@ -359,6 +378,10 @@ const char* mcp_tool_access_action(const McpToolInfo& tool) {
   const std::string_view name = tool.name;
   const std::string_view group = tool.group;
   if (name == "list_hosts" || name == "mcp_analysis_my_limits" || name == "mcp_analysis_my_usage") return nullptr;
+  // The tools of the approval flow (mcp_approval.hpp). get_action_status asks the PDP nothing: it has no action (binding 5.7b).
+  if (name == "run_write_query") return "query.run.write";
+  if (name == "export_query") return "query.export";
+  if (name == "get_action_status") return nullptr;
   if (name == "mcp_analysis_all_usage") return "mcp.usage.read";
   if (group == "data") return "explorer.read";
   if (group == "observability") return "observability.read";

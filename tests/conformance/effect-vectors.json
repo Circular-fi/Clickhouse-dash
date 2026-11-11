@@ -1,0 +1,309 @@
+{
+  "v": 1,
+  "description": "Test vectors for the effect of protocol 17.3. A vector of the group V01 gives the canonical text and the effect of its input. A vector of the group V02 has an input that a PEP and a PDP refuse with the error invalid_op.",
+  "vectors": [
+    {
+      "id": "member-order-sorted",
+      "group": "V01",
+      "title": "The members of op are in the sorted order.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"a":2,"b":1}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"a\":2,\"b\":1},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:312d70a4c33d9c67e145e81dcfde38599f3f01f95bc763f10916a12f410b7015"
+    },
+    {
+      "id": "member-order-reversed",
+      "group": "V01",
+      "title": "The members of op are in the reverse order. The text and the effect are the same as for member-order-sorted.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"b":1,"a":2}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"a\":2,\"b\":1},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:312d70a4c33d9c67e145e81dcfde38599f3f01f95bc763f10916a12f410b7015"
+    },
+    {
+      "id": "nested-objects",
+      "group": "V01",
+      "title": "Objects nest in objects and arrays. Each level has its own sorted order.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"tool":"run_write_query","target":{"host":"prod","database":"analytics"},"options":{"timeout":30,"dry_run":false,"tags":["x",{"b":1,"a":2}],"note":null}}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"options\":{\"dry_run\":false,\"note\":null,\"tags\":[\"x\",{\"a\":2,\"b\":1}],\"timeout\":30},\"target\":{\"database\":\"analytics\",\"host\":\"prod\"},\"tool\":\"run_write_query\"},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:b748ba680637d44675ca33ecc3c63b9d2528c0b8444f54b4a907b449e8b91428"
+    },
+    {
+      "id": "literals",
+      "group": "V01",
+      "title": "The literals true, false and null keep their lower-case form.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"t":true,"f":false,"n":null}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"f\":false,\"n\":null,\"t\":true},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:bab3e2d0c22236ffa927a9528f31474c74f12808a8aa809cc02628735672937c"
+    },
+    {
+      "id": "array-order-kept",
+      "group": "V01",
+      "title": "An array keeps the order of its items. Empty arrays and objects are items.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"a":[3,1,2,[],{}]}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"a\":[3,1,2,[],{}]},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:028f26de4c19c2bbe5c1070c5c7d0419f8cc78e2a0bab342ccc23ebade9d5d49"
+    },
+    {
+      "id": "utf16-key-order",
+      "group": "V01",
+      "title": "Keys sort by UTF-16 code unit. The key U+10000 and the key U+1F600 come before U+E000, and U+FFFD comes last.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"\ufffd":5,"\ue000":4,"\ud83d\ude00":3,"\ud800\udc00":2,"a":1}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"a\":1,\"𐀀\":2,\"😀\":3,\"\ue000\":4,\"\ufffd\":5},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:c7e3396d787d7739c9407356fabc7340b2609922437317160911eb66dc85c9fc"
+    },
+    {
+      "id": "string-escapes",
+      "group": "V01",
+      "title": "A value has the short escapes, the long escapes in lower case, and characters that stay unescaped. The slash is not escaped.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"s":"q\" b\\ s\/ \b \t \n \f \r \u0000 \u001f \u007f \u0080 \u2028 \u00e9 \u0041 \ud83d\ude00"}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"s\":\"q\\\" b\\\\ s/ \\b \\t \\n \\f \\r \\u0000 \\u001f \u007f \u0080 \u2028 é A 😀\"},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:26eaea96d797ae4038e44c00af8e3c6a31249e69ad01c3fc95b78b0355a1ef2c"
+    },
+    {
+      "id": "name-escapes",
+      "group": "V01",
+      "title": "The escapes apply to member names too. The name U+001F sorts first.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"e\u0000f":3,"c\\d":2,"a\"b":1,"\u001f":4}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"\\u001f\":4,\"a\\\"b\":1,\"c\\\\d\":2,\"e\\u0000f\":3},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:0c47859b64fb1b1cfa3f8f9b1e42374f5b0d4f0b4a86d5ad6e56fb095fc2d0cd"
+    },
+    {
+      "id": "integers-at-limits",
+      "group": "V01",
+      "title": "The integers at the limits +-(2^53-1) are valid. Zero and -1 are valid.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"max":9007199254740991,"min":-9007199254740991,"zero":0,"one":-1}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"max\":9007199254740991,\"min\":-9007199254740991,\"one\":-1,\"zero\":0},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:5ff1a054dbaf3b51e782c470bc867752ef7a4328fcd1ac07d86817fae8750a97"
+    },
+    {
+      "id": "empty-object",
+      "group": "V01",
+      "title": "An empty object is a valid op.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:d3d97c9d1621654d1f6247f1a94ae85b9aa37cdc3ffe07b957ddcaa1fc47b3d8"
+    },
+    {
+      "id": "empty-members",
+      "group": "V01",
+      "title": "A member can be an empty array, an empty object or an empty string.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"a":[],"b":{},"c":""}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"a\":[],\"b\":{},\"c\":\"\"},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:30973f99319e7525a2765086d92b8e30695eaa1eb842e23b0b1904f57f103dda"
+    },
+    {
+      "id": "normalisation-composed",
+      "group": "V01",
+      "title": "The letter e with acute, as one code point U+00E9. The reader does no Unicode normalisation.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"s":"\u00e9"}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"s\":\"é\"},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:f4a528e1b3d1571c40b742dc3a157f207b764cd9ebf70ef9123e8fe97a7fb914"
+    },
+    {
+      "id": "normalisation-decomposed",
+      "group": "V01",
+      "title": "The letter e with acute, as e and U+0301. The effect differs from normalisation-composed.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"s":"e\u0301"}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"s\":\"é\"},\"resource\":\"host:prod/database:analytics\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:ceffb65b2b446f60f6a9820551e9a1b9cf23f95e0438d1725a3c40364c830a76"
+    },
+    {
+      "id": "resource-service",
+      "group": "V01",
+      "title": "The resource is the service itself. Its path is the empty string.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "",
+        "op": {"tool":"list"}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"tool\":\"list\"},\"resource\":\"\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:bdce2fc9571f5acc45b19e64e25acf1754a4551d49395fa55b7dfdb955453465"
+    },
+    {
+      "id": "resource-percent-encoded",
+      "group": "V01",
+      "title": "The resource path keeps its percent-encoding. The reader does not decode it.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:a%2Fb",
+        "op": {"tool":"list"}
+      },
+      "canonical": "{\"action\":\"data.write\",\"op\":{\"tool\":\"list\"},\"resource\":\"host:prod/database:a%2Fb\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:e431b56eb0769ca0b4c9fa58a5a85aa6ba8bfe9d8e5afbd08938a96fc24cdfd8"
+    },
+    {
+      "id": "float-fraction",
+      "group": "V02",
+      "title": "A number with a fraction is a float.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":1.5}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "float-integral-form",
+      "group": "V02",
+      "title": "A number with a fraction part is a float, also when its value is a whole number.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":1.0}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "float-exponent",
+      "group": "V02",
+      "title": "A number with an exponent is a float.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":1e2}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "integer-2-53",
+      "group": "V02",
+      "title": "The integer 2^53 is above the limit.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":9007199254740992}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "integer-minus-2-53",
+      "group": "V02",
+      "title": "The integer -(2^53) is below the limit.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":-9007199254740992}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "integer-above-64-bits",
+      "group": "V02",
+      "title": "An integer of more than 64 bits is above the limit.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":18446744073709551616}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "minus-zero",
+      "group": "V02",
+      "title": "The text -0 is not an integer of the form that 17.3 gives.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"x":-0}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "float-nested",
+      "group": "V02",
+      "title": "A float in a nested array and object makes op invalid.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": {"a":[{"b":0.5}]}
+      },
+      "error": "invalid_op"
+    },
+    {
+      "id": "op-not-object",
+      "group": "V02",
+      "title": "An op that is an array, and not an object, is invalid.",
+      "input": {
+        "service": "datastore",
+        "action": "data.write",
+        "resource": "host:prod/database:analytics",
+        "op": [1,2]
+      },
+      "error": "invalid_op"
+    }
+  ]
+}

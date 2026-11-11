@@ -305,6 +305,8 @@ struct ChMcpLimits {
   int64_t max_bytes_to_read = 0; // 0 = none
   int64_t sql_bytes = 0;         // the size of the statement: max_query_size follows it
   std::string log_comment;
+  // The statement changes data (the write account of the host, mcp_write_uri): the settings carry no readonly = 1.
+  bool allow_write = false;
 };
 
 struct ChMcpSettings {

@@ -120,7 +120,7 @@ INSERT INTO chdash_ui.weather_observations
     (observed_at, id, station_id, city, quality_ok, temperature_c, humidity_pct,
      precipitation_mm, notes, random_token, sensor_packet, tags, metadata)
 SELECT
-    toDateTime64('2026-09-01 00:00:00', 3) + toIntervalSecond(number),
+    toDateTime64(toStartOfMonth(today() - toIntervalDay(5)), 3) + toIntervalDay(0) + toIntervalSecond(number),
     number,
     arrayElement(['WX-PAR-01', 'WX-REK-02', 'WX-LIS-03', 'WX-OSL-04', 'WX-ROM-05'], (number % 5) + 1),
     arrayElement(['Paris', 'Reykjavik', 'Lisbon', 'Oslo', 'Rome'], (number % 5) + 1),
@@ -153,7 +153,7 @@ INSERT INTO chdash_ui.weather_observations
     (observed_at, id, station_id, city, quality_ok, temperature_c, humidity_pct,
      precipitation_mm, notes, random_token, sensor_packet, tags, metadata)
 SELECT
-    toDateTime64('2026-09-02 00:00:00', 3) + toIntervalSecond(number),
+    toDateTime64(toStartOfMonth(today() - toIntervalDay(5)), 3) + toIntervalDay(1) + toIntervalSecond(number),
     number + 40000,
     arrayElement(['WX-PAR-01', 'WX-REK-02', 'WX-LIS-03', 'WX-OSL-04', 'WX-ROM-05'], ((number + 1) % 5) + 1),
     arrayElement(['Paris', 'Reykjavik', 'Lisbon', 'Oslo', 'Rome'], ((number + 2) % 5) + 1),
@@ -186,7 +186,7 @@ INSERT INTO chdash_ui.weather_observations
     (observed_at, id, station_id, city, quality_ok, temperature_c, humidity_pct,
      precipitation_mm, notes, random_token, sensor_packet, tags, metadata)
 SELECT
-    toDateTime64('2026-09-03 00:00:00', 3) + toIntervalSecond(number),
+    toDateTime64(toStartOfMonth(today() - toIntervalDay(5)), 3) + toIntervalDay(2) + toIntervalSecond(number),
     number + 80000,
     arrayElement(['WX-PAR-01', 'WX-REK-02', 'WX-LIS-03', 'WX-OSL-04', 'WX-ROM-05'], ((number + 3) % 5) + 1),
     arrayElement(['Paris', 'Reykjavik', 'Lisbon', 'Oslo', 'Rome'], ((number + 4) % 5) + 1),
@@ -335,7 +335,7 @@ INSERT INTO chdash_ui.weather_buffer
     (observed_at, id, station_id, city, quality_ok, temperature_c, humidity_pct,
      precipitation_mm, notes, random_token, sensor_packet, tags, metadata)
 SELECT
-    toDateTime64('2026-09-04 00:00:00', 3) + toIntervalSecond(number),
+    toDateTime64(toStartOfMonth(today() - toIntervalDay(5)), 3) + toIntervalDay(3) + toIntervalSecond(number),
     number + 120000,
     arrayElement(['WX-PAR-01', 'WX-REK-02', 'WX-LIS-03', 'WX-OSL-04', 'WX-ROM-05'], (number % 5) + 1),
     arrayElement(['Paris', 'Reykjavik', 'Lisbon', 'Oslo', 'Rome'], (number % 5) + 1),

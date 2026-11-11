@@ -11,6 +11,7 @@ import pytest
 
 BINARIES = {
     "ACCESS_TEST_BINARY": "chdash_access_test",
+    "APPROVAL_TEST_BINARY": "chdash_approval_test",
     "MCP_TEST_BINARY": "chdash_mcp_test",
     "QUERY_LIBRARY_TEST_BINARY": "chdash_query_library_test",
     "RESULT_PATH_TEST_BINARY": "chdash_result_path_test",

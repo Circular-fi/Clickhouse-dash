@@ -5,6 +5,8 @@
 
 #include "access_pdp.hpp"
 
+#include <rapidjson/document.h>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -51,8 +53,10 @@ enum McpToolNeeds : unsigned {
 struct McpToolAvailability {
   bool usage = false;
   bool all_keys = false;
-// Every flag is on. A key is entitled to every tool, whatever the configuration enables.
-  static McpToolAvailability everything() { return {true, true}; }
+  // The identity mode offers the tools of the approval flow (mcp_approval.hpp). The catalog has none of them: this flag is for the protocol.
+  bool approval = false;
+// Every flag of the catalog is on. A key is entitled to every tool, whatever the configuration enables.
+  static McpToolAvailability everything() { return {true, true, false}; }
 };
 
 struct McpToolInfo {
@@ -157,6 +161,10 @@ bool mcp_scope_tool_allowed(const std::vector<std::string>& tools, const std::ve
 // mcp_analysis_all_usage mcp.usage.read. list_hosts and the analysis of the key itself use none.
 // A route that the table of the rules does not know gives "unknown": the PDP refuses it (fail closed).
 const char* mcp_tool_access_action(const McpToolInfo& tool);
+
+// The database that a call names: the argument `database` of a data tool, or the parameter `database` of the route of an API tool when the
+// access rule of the route reads it. Empty when the call names none. The two modes of MCP use it to find the resource of a call.
+std::string mcp_call_database(const McpToolInfo& tool, const rapidjson::Value& arguments);
 
 // The questions that the creator of a key must pass for that key (docs/mcp.md, "Keys and the access of humans"). Each tool of the
 // key (mcp_effective_tools, with all the tools that the key is entitled to) gives its action once for each host of the key.

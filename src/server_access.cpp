@@ -10,6 +10,7 @@
 #include "access_enforce.hpp"
 #include "access_pages.hpp"
 #include "api_error.hpp"
+#include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_parse.hpp"
 #include "json_text.hpp"
@@ -65,6 +66,14 @@ void refuse_unauthenticated(httplib::Response& res) {
 // 503 (retryable) when the PDP gave no valid answer. The body never holds the reason of the PDP.
 void refuse_decision(httplib::Response& res, const AccessDecision& decision, const std::string& action) {
   const AccessRefusal refusal = access_refusal(decision, action);
+  if (refusal.error_code == "approval_cannot_wait") {
+    // ProcurAuth 17.7a: a route cannot wait for an approval. HTTP 403 and exactly this body; the action and the reason stay in the log.
+    res.status = 403;
+    res.headers.erase("Cache-Control");
+    res.set_header("Cache-Control", "no-store");
+    res.set_content("{\"error\":\"approval_cannot_wait\"}", "application/json");
+    return;
+  }
   ApiError error;
   error.status = refusal.status;
   error.code = refusal.error_code;
@@ -290,6 +299,39 @@ void Server::init_access() {
         },
         use_for(false), [this](const std::string& action) { return access_action_has_budget(action, access_features()); });
   }
+  // The approval of a person (ProcurAuth section 17) is on for each tool, in both modes of POST /mcp: the PDP decides which grant needs one. The
+  // gate uses the client of the PDP for the questions with an effect and for the approval API, with the token of the PDP. Nothing of an answer is
+  // kept. The subject is the subject of the identity token (the identity mode) or the creator of the key (a key of the page).
+  if (mcp_keys_) {
+    McpApprovalConfig approval;
+    approval.service_id = settings.audience;
+    approval.max_command_bytes = settings.approval_max_command_bytes;
+    approval.wait_cap_seconds = settings.approval_wait_ms / 1000;
+    approval.max_sql_bytes = cfg_.mcp.max_sql_bytes;
+    const auto user_of_uri = [](const std::string& uri) {
+      const auto parsed = parse_clickhouse_uri(uri, nullptr);
+      return parsed ? parsed->user : std::string();
+    };
+    for (const auto& host : cfg_.hosts) {
+      if (host.mcp_uri.empty()) continue;
+      approval.hosts.push_back(McpApprovalHost{host.id, user_of_uri(host.mcp_uri), host.mcp_write_uri.empty() ? std::string() : user_of_uri(host.mcp_write_uri)});
+    }
+    McpApprovalPorts ports;
+    const auto call_context = [] {
+      PdpCallContext context;
+      context.request_id = current_request_context().request_id;
+      return context;
+    };
+    ports.ask = [this, call_context](const std::string& subject, const AccessQuestion& question, bool usage, bool units_optional) {
+      return pdp_->decide_approval(subject, question, usage, units_optional, call_context());
+    };
+    ports.submit = [this, call_context](const PdpApprovalRequest& request) { return pdp_->approval_submit(request, call_context()); };
+    ports.verdict = [this, call_context](const std::string& request_id, const std::string& subject, uint64_t wait, bool renew) {
+      return pdp_->approval_verdict(request_id, subject, wait, renew, call_context());
+    };
+    mcp_approval_ = std::make_unique<McpApprovalGate>(std::move(approval), std::move(ports));
+    if (mcp_creator_) mcp_creator_->set_approval(mcp_approval_.get());
+  }
   // The identity mode of POST /mcp: the PDP decides each request for the subject of the identity token.
   if (mcp_keys_ && cfg_.mcp.identity_auth()) {
     std::vector<std::string> hosts;
@@ -298,7 +340,8 @@ void Server::init_access() {
     }
     // The tools of the identity mode apply the ceilings that the document declares for their actions (mcp_host_limits).
     // A use of an action that lists a budget (the tool run_query, mcp.session) asks with context.usage.
-    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, std::move(hosts), access_features(), decide_for(true), use_for(true));
+    mcp_subject_ = std::make_unique<McpSubjectAccess>(settings.audience, hosts, access_features(), decide_for(true), use_for(true));
+    mcp_subject_->set_approval(mcp_approval_.get());
   }
 }
 
@@ -561,8 +604,16 @@ bool Server::access_allows_all(httplib::Response& res, const std::vector<AccessQ
     refuse_decision(res, decisions[i], questions[i].action);
     return false;
   }
+  // A key never has more than its creator, but the uses of the key go through the approval of the creator (docs/access.md, "Approval of an action"):
+  // for the actions of the tools of the key, a reason of ProcurAuth 17.1 means that the creator holds the action, and this check passes. The
+  // action of the page (mcp.keys.write) is a use of the person now, and it cannot wait.
+  const auto holds_for_key = [&](size_t i) {
+    if (decisions[i].allowed) return true;
+    return for_key && mcp_approval_ && questions[i].action != "mcp.keys.write" && !decisions[i].failed &&
+           (decisions[i].reason == PdpReason::ApprovalRequired || decisions[i].reason == PdpReason::ApprovalPending);
+  };
   for (size_t i = 0; i < questions.size(); ++i) {
-    if (decisions[i].allowed) continue;
+    if (holds_for_key(i)) continue;
     refuse_decision(res, decisions[i], questions[i].action);
     return false;
   }

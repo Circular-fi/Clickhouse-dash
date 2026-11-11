@@ -7,6 +7,7 @@
 //     mode = "authzen"                 # or "open"
 //     identity { header, issuer, audience, public_keys | public_keys_env | public_keys_file, max_age, clock_skew }
 //     pdp      { url | url_env | url_file, token_env | token_file, timeout, cache_ttl, ca_file, verify }
+//     approval { wait, max_command_bytes }     # optional: the approval of a person for an action (ProcurAuth section 17)
 //   }
 
 #include "access_identity.hpp"
@@ -52,6 +53,11 @@ struct AccessSettings {
   int64_t pdp_batch_timeout_ms = 2 * 1000;
   // The highest procurauth_usage_max_seconds of the metadata of the PDP that ChDash accepts (docs/access.md, "Metadata of the PDP").
   int64_t pdp_usage_max_seconds = 120;
+  // approval { } (docs/access.md, "Approval of an action"). The capability is always on.
+  // The longest wait of one call for a verdict (the cap of the argument wait_s). 0: a call never waits.
+  int64_t approval_wait_ms = 15 * 1000;
+  // The largest compact JSON text of op and view of a request.
+  int64_t approval_max_command_bytes = 16 * 1024;
 
   bool enforced() const { return mode == AccessMode::Authzen; }
 };

@@ -24,6 +24,7 @@ option(CHDASH_BUILD_METRICS_TESTS "Build the unit tests of the Metrics page: the
 option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_TELEMETRY_TESTS "Build the unit tests of the OTLP export: the encoding, the queue, the batches, the spans of an MCP call, with a fake OTLP receiver" OFF)
 option(CHDASH_BUILD_ACCESS_TESTS "Build the unit tests of the access of humans: the signatures, the identity token, the rules of the routes, the client of the PDP (no network)" OFF)
+option(CHDASH_BUILD_APPROVAL_TESTS "Build the unit tests of the approval of an action: the effect (JCS, SHA-256), the client of the PDP, the gate of the tools" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
@@ -121,7 +122,7 @@ if (CHDASH_BUILD_CODEC_TESTS)
 endif()
 
 # The tools of MCP: the dispatch, what the tools share, and the tools by family.
-set(CHDASH_MCP_TOOL_SOURCES mcp_access.cpp mcp_subject_access.cpp mcp_creator_access.cpp mcp_untrusted.cpp mcp_trace.cpp mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
+set(CHDASH_MCP_TOOL_SOURCES approval_effect.cpp mcp_approval.cpp mcp_access.cpp mcp_subject_access.cpp mcp_creator_access.cpp mcp_untrusted.cpp mcp_trace.cpp mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
 
 # The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
 set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_read.cpp query_library_request.cpp query_library_rules.cpp)
@@ -138,7 +139,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
-    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_sql.cpp user_sql_policy.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
     error_envelope.cpp request_context.cpp config.cpp config_secret.cpp config_schema.cpp telemetry_settings.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp
     ${CHDASH_ACCESS_SOURCES} otlp_export.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
@@ -289,6 +290,20 @@ if (CHDASH_BUILD_TELEMETRY_TESTS)
   chdash_configure_target(chdash_telemetry_test)
 endif()
 
+if (CHDASH_BUILD_APPROVAL_TESTS)
+  # The approval of an action by a person (ProcurAuth section 17): the vectors of the effect, the client of the PDP on a fake transport and the
+  # gate of the tools with a scripted PDP (no network, no ClickHouse). The sources are those of the MCP tests.
+  add_executable(chdash_approval_test ../tests/native/approval_test.cpp
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_sql.cpp user_sql_policy.cpp mcp_protocol.cpp mcp_telemetry.cpp ${CHDASH_MCP_TOOL_SOURCES}
+    error_envelope.cpp request_context.cpp config.cpp config_secret.cpp config_schema.cpp telemetry_settings.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp
+    ${CHDASH_ACCESS_SOURCES} otlp_export.cpp)
+  target_include_directories(chdash_approval_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_approval_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_approval_test PRIVATE clickhouse-cpp-lib chdash_signatures Threads::Threads)
+  chdash_configure_target(chdash_approval_test)
+endif()
 if (CHDASH_BUILD_ACCESS_TESTS)
   # The access of humans (docs/access.md): the signature checks against the vectors of the RFCs, the PEM keys, the identity token, the
   # actions and the rule of each route, and the client of the PDP on a fake transport.

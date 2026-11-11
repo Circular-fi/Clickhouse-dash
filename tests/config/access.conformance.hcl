@@ -36,7 +36,7 @@ access {
 query_library {
   enabled  = true
   file     = "/tmp/chdash-conformance-library.json"
-  writable = true
+  writable = false
 }
 
 # The identity mode of MCP (docs/mcp.md, "The identity mode"). The operation mcp_call_plain of the profile is the tool list_databases on
@@ -44,6 +44,12 @@ query_library {
 mcp {
   enabled   = true
   auth_mode = "identity"
+  usage {
+    enabled  = true
+    dir      = "/tmp"
+    instance = "conformance"
+    all_keys = true
+  }
 }
 
 # One host, with the runner account. GET /api/explorer/functions?host_id=conf is the use of explorer.read on this host.
@@ -56,5 +62,8 @@ clickhouse {
     system_password_file = "/conformance/ch-password"
     mcp_uri              = "clickhouse://chdash@clickhouse-conformance:9000"
     mcp_password_file    = "/conformance/ch-password"
+    # The write account of the tool run_write_query (the cases of the approvals run it). The script creates the user.
+    mcp_write_uri           = "clickhouse://chdash_write@clickhouse-conformance:9000"
+    mcp_write_password_file = "/conformance/ch-write-password"
   }
 }

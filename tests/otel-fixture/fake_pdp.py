@@ -37,6 +37,17 @@ the headers that matter and the body). The tests set its answers and read what i
                              The PDP follows 6.11: a request with context.usage at any level that is not one evaluation (an
                              Access Evaluation request, or an Access Evaluations request without items), or with "match": "subtree",
                              or with units other than 1, gets HTTP 400 and counts nothing.
+POST /control/approval   {"actions": ["query.run.write", ...] or ["*"], "submit": {"status": 409, "error": "no_device"}, "max_command_bytes": 16384}
+                             the approval gate of ProcurAuth section 17 (docs/access.md, "Approval of an action"). An action in "actions"
+                             needs an approval for each subject. A question without context.approval.effect gets approval_required; with an
+                             effect, the state of the approval gives approval_required (with an evaluation_id), approval_pending,
+                             approval_denied, approval_expired (a question with usage) or true; a question with usage consumes a usable
+                             approval. "submit" makes the submission answer that status. The routes of the approval API (17.4):
+                             POST /approval/v1/requests, GET /approval/v1/requests/<id>?subject=&wait=&renew=true and
+                             POST /approval/v1/requests/<id>/keepalive. The test plays the person with
+                             POST /control/approval/decide {"request_id": "...", "decision": "approve" | "decline" | "cancel"} and reads
+                             GET /control/approval/received {"submissions": [...], "reads": [...]} (the body, the query and the headers of each).
+                             /control/reset forgets the approvals too.
     GET  /healthz            200
     GET  /.well-known/authzen-configuration
                              404 by default (a PDP without metadata). With FAKE_PDP_PUBLIC_URL (the base URL that the clients
@@ -78,7 +89,7 @@ import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 MAX_REQUESTS = 2000
 MAX_BODY_BYTES = 1024 * 1024
@@ -93,6 +104,11 @@ DEFAULT_ANSWER = {"default": True, "deny": [], "allow": [], "deny_subjects": [],
                   "search": json.loads(os.environ["FAKE_PDP_SEARCH"]) if os.environ.get("FAKE_PDP_SEARCH") else None, "echo_request_id": True,
                   "limits": {}, "usage": {}}
 COUNTERS: dict = {}
+APPROVAL_CONFIG: dict = {"actions": [], "submit": None, "max_command_bytes": 16384}
+APPROVALS: list = []      # one dict for each request that a service submitted
+EVALUATIONS: dict = {}    # evaluation_id -> the facts of the question that got it
+APPROVAL_RECEIVED: dict = {"submissions": [], "reads": []}
+APPROVAL_MEMBERS = {"evaluation_id", "effect", "op", "view", "approval_ref", "lease_s", "until", "supersedes"}
 UNKNOWN_SUBJECT = {"decision": False, "context": {"reason": "unknown_subject"}}
 INVALID_RESOURCE = {"decision": False, "context": {"reason": "invalid_resource"}}
 INVALID_REQUEST = {"decision": False, "context": {"reason": "invalid_request"}}
@@ -182,6 +198,10 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     if isinstance(fixed, dict):
         return json.loads(json.dumps(fixed))
     granted = allowed(answer, subject, action, chain, match == "subtree")
+    if granted and match == "node":
+        gated = approval_gate(subject, action, chain, context)
+        if gated is not None:
+            return gated
     out: dict = {"decision": granted}
     limits = ceilings_of(answer, str((action or {}).get("name", "")), chain, match == "subtree") if granted else {}
     if limits:
@@ -189,6 +209,41 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     if granted and usage_of(context) is not None:
         return take_units(answer, subject, action, out)
     return out
+
+
+def approval_gate(subject: dict, action: dict, chain: list[str], context: dict) -> dict | None:
+    """The answer of the approval gate (ProcurAuth 17.1) for a true decision, or None when the action needs no approval or an approval that
+    can be used is there for a question without usage."""
+    name = str((action or {}).get("name", ""))
+    with LOCK:
+        actions = list(APPROVAL_CONFIG["actions"])
+    if "*" not in actions and name not in actions:
+        return None
+    effect = ((context or {}).get("approval") or {}).get("effect") if isinstance(context, dict) else None
+    if effect is None:
+        return {"decision": False, "context": {"reason": "approval_required"}}
+    subject_id = str((subject or {}).get("id", ""))
+    path = "/".join(chain)
+    with LOCK:
+        found = [a for a in APPROVALS if (a["subject"], a["action"], a["path"], a["effect"]) == (subject_id, name, path, effect)]
+        latest = found[-1] if found else None
+        status = latest["status"] if latest else "none"
+        usage = isinstance(context, dict) and usage_of(context) is not None
+        if status in ("none", "consumed") or (status == "void" and not usage):
+            ident = f"ev-{len(EVALUATIONS) + 1}"
+            EVALUATIONS[ident] = {"subject": subject_id, "action": name, "path": path, "effect": effect}
+            return {"decision": False, "context": {"reason": "approval_required", "evaluation_id": ident}}
+        if status == "pending":
+            ident = f"ev-{len(EVALUATIONS) + 1}"
+            EVALUATIONS[ident] = {"subject": subject_id, "action": name, "path": path, "effect": effect}
+            return {"decision": False, "context": {"reason": "approval_pending", "evaluation_id": ident}}
+        if status == "denied":
+            return {"decision": False, "context": {"reason": "approval_denied"}}
+        if status == "void":
+            return {"decision": False, "context": {"reason": "approval_expired"}}
+        if status == "approved" and usage:
+            latest["status"] = "consumed"
+    return None
 
 
 def ceilings_of(answer: dict, name: str, chain: list[str], subtree: bool) -> dict:
@@ -242,6 +297,43 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         return json.loads(raw or b"{}")
 
+    def approval_submit(self, body: dict):
+        """POST /approval/v1/requests (17.4). The checks follow the portal: the members, the control, the evaluation, the effect, the size, the view."""
+        if not self.approval_auth():
+            return
+        with LOCK:
+            APPROVAL_RECEIVED["submissions"].append({"body": body, "authorization": self.headers.get("Authorization", ""), "at": time.time()})
+            config = dict(APPROVAL_CONFIG)
+        forced = config["submit"]
+        if isinstance(forced, dict):
+            payload = {"error": forced.get("error", "unavailable")}
+            if forced.get("retry_after"):
+                payload["retry_after"] = forced["retry_after"]
+            return self.reply(int(forced["status"]), payload)
+        if not isinstance(body, dict) or not set(body) <= APPROVAL_MEMBERS:
+            return self.reply(422, {"error": "invalid_argument"})
+        controls = [k for k in ("approval_ref", "lease_s", "until") if k in body]
+        if len(controls) != 1:
+            return self.reply(422, {"error": "lease_required" if not controls else "invalid_lease"})
+        if len(json.dumps(body.get("op"), separators=(",", ":"))) + len(json.dumps(body.get("view"), separators=(",", ":"))) > int(config["max_command_bytes"]):
+            return self.reply(413, {"error": "command_too_large"})
+        with LOCK:
+            facts = EVALUATIONS.get(body.get("evaluation_id"))
+        if not facts or facts["effect"] != body.get("effect"):
+            return self.reply(422, {"error": "invalid_evaluation"})
+        if not isinstance(body.get("op"), dict):
+            return self.reply(422, {"error": "invalid_op"})
+        if not pointers_ok(body.get("view"), body["op"]):
+            return self.reply(422, {"error": "invalid_view"})
+        with LOCK:
+            for a in APPROVALS:
+                if a["status"] == "pending" and (a["subject"], a["action"], a["path"], a["effect"]) == (facts["subject"], facts["action"], facts["path"], facts["effect"]):
+                    return self.reply(200, {"request_id": a["id"], "code": a["code"], "verdict": "pending"})
+            number = len(APPROVALS) + 1
+            request = {"id": f"apr_{number}", "code": f"K7Q{number}", "status": "pending", "body": body, **{k: facts[k] for k in ("subject", "action", "path", "effect")}}
+            APPROVALS.append(request)
+        return self.reply(201, {"request_id": request["id"], "code": request["code"], "verdict": "pending"})
+
     def do_GET(self):  # noqa: N802 - the name of the base class
         if self.path == "/healthz":
             return self.reply(200, {"ok": True})
@@ -264,7 +356,43 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/control/received":
             with LOCK:
                 return self.reply(200, {"requests": list(RECEIVED)})
+        if self.path == "/control/approval/received":
+            with LOCK:
+                return self.reply(200, json.loads(json.dumps(APPROVAL_RECEIVED)))
+        if self.path.startswith("/approval/v1/requests/"):
+            return self.approval_read()
         return self.reply(404, {"error": "not found"})
+
+    def approval_auth(self) -> bool:
+        if self.headers.get("Authorization", "") != f"Bearer {TOKEN}":
+            self.reply(401, {"error": "unauthorized"})
+            return False
+        return True
+
+    def approval_read(self, keepalive: bool = False, body: dict | None = None):
+        """GET /approval/v1/requests/<id>?subject=&wait=&renew=true, and the keepalive (17.4). The answer is the verdict only."""
+        if not self.approval_auth():
+            return
+        url = urlsplit(self.path)
+        parts = url.path.split("/")
+        request_id = parts[4] if len(parts) > 4 else ""
+        query = parse_qs(url.query)
+        subject = (body or {}).get("subject") if keepalive else (query.get("subject") or [""])[0]
+        with LOCK:
+            APPROVAL_RECEIVED["reads"].append(
+                {"id": request_id, "keepalive": keepalive, "query": {k: v[0] for k, v in query.items()}, "subject": subject,
+                 "authorization": self.headers.get("Authorization", ""), "at": time.time()})
+        wait = min(int((query.get("wait") or ["0"])[0] or 0), 5)
+        deadline = time.time() + wait
+        while True:
+            with LOCK:
+                found = [a for a in APPROVALS if a["id"] == request_id and a["subject"] == subject]
+                verdict = verdict_of(found[0]) if found else None
+            if verdict is None:
+                return self.reply(404, {"error": "not_found"})
+            if verdict != "pending" or time.time() >= deadline:
+                return self.reply(200, {"verdict": verdict})
+            time.sleep(0.1)
 
     def do_POST(self):  # noqa: N802 - the name of the base class
         global ANSWER
@@ -276,8 +404,29 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 RECEIVED.clear()
                 COUNTERS.clear()
+                APPROVALS.clear()
+                EVALUATIONS.clear()
+                APPROVAL_RECEIVED["submissions"].clear()
+                APPROVAL_RECEIVED["reads"].clear()
+                APPROVAL_CONFIG.update({"actions": [], "submit": None, "max_command_bytes": 16384})
                 ANSWER = dict(DEFAULT_ANSWER)
             return self.reply(200, {"ok": True})
+        if self.path == "/control/approval":
+            with LOCK:
+                APPROVAL_CONFIG.update({"actions": [], "submit": None, "max_command_bytes": 16384})
+                APPROVAL_CONFIG.update({k: v for k, v in body.items() if k in APPROVAL_CONFIG})
+            return self.reply(200, {"ok": True})
+        if self.path == "/control/approval/decide":
+            with LOCK:
+                found = [a for a in APPROVALS if a["id"] == body.get("request_id")]
+                if not found:
+                    return self.reply(404, {"error": "unknown request"})
+                found[0]["status"] = {"approve": "approved", "decline": "denied", "cancel": "void"}[str(body.get("decision"))]
+            return self.reply(200, {"ok": True})
+        if self.path == "/approval/v1/requests":
+            return self.approval_submit(body)
+        if self.path.startswith("/approval/v1/requests/") and self.path.endswith("/keepalive"):
+            return self.approval_read(True, body)
         if self.path == "/control/answer":
             with LOCK:
                 COUNTERS.clear()
@@ -332,6 +481,29 @@ class Handler(BaseHTTPRequestHandler):
             context = item["context"] if "context" in item else body.get("context")
             out.append(decide(subject, action, resource, context))
         return self.reply(200, {"evaluations": out}, echo)
+
+
+def verdict_of(approval: dict) -> str:
+    """The verdict of a request (17.6): pending, approved, denied or void."""
+    return {"pending": "pending", "approved": "approved", "consumed": "approved", "denied": "denied", "void": "void"}[approval["status"]]
+
+
+def pointers_ok(view: dict, op: dict) -> bool:
+    """17.9: each pointer of the view names a value of op; the view has no other member."""
+    if not isinstance(view, dict) or not set(view) <= {"title", "fields", "body", "body_label"}:
+        return False
+    pointers = [view["body"]] if "body" in view else []
+    for pair in view.get("fields") or []:
+        if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(x, str) for x in pair)):
+            return False
+        pointers.append(pair[1])
+    for pointer in pointers:
+        node = op
+        for part in [x.replace("~1", "/").replace("~0", "~") for x in pointer.split("/")[1:]]:
+            if not isinstance(node, dict) or part not in node:
+                return False
+            node = node[part]
+    return True
 
 
 def usage_request_valid(path: str, body: dict) -> bool:

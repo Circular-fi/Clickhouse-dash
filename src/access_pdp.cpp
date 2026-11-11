@@ -21,6 +21,7 @@ namespace chdash {
 namespace {
 
 constexpr const char* kEvaluationPath = "/access/v1/evaluation";
+constexpr const char* kApprovalCannotWait = "approval_cannot_wait";
 constexpr const char* kEvaluationsPath = "/access/v1/evaluations";
 
 void write_entity(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view type, std::string_view id) {
@@ -60,11 +61,19 @@ void write_action(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_vie
 
 // The context of a question: {"match": "subtree"} for the navigation, else empty (the PDP takes "node"). The question of a use has
 // {"usage": {"units": 1}} (ProcurAuth 6.4) and never the match "subtree" (6.11).
-void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match, bool usage = false) {
+void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match, bool usage = false, const std::string& effect = std::string()) {
   w.StartObject();
   if (match == AccessMatch::Subtree) {
     w.Key("match");
     w.String("subtree");
+  }
+  // ProcurAuth 17.1: context.approval has one member, the effect. The question never has op or view.
+  if (!effect.empty()) {
+    w.Key("approval");
+    w.StartObject();
+    w.Key("effect");
+    write_json_text(w, effect);
+    w.EndObject();
   }
   if (usage) {
     w.Key("usage");
@@ -110,8 +119,15 @@ PdpReason reason_of(const rapidjson::Value& value) {
   if (text == "invalid_resource") return PdpReason::InvalidResource;
   if (text == "invalid_request") return PdpReason::InvalidRequest;
   if (text == "budget_exceeded") return PdpReason::BudgetExceeded;
+  if (text == "approval_required") return PdpReason::ApprovalRequired;
+  if (text == "approval_pending") return PdpReason::ApprovalPending;
+  if (text == "approval_denied") return PdpReason::ApprovalDenied;
+  if (text == "approval_expired") return PdpReason::ApprovalExpired;
   return PdpReason::Other;
 }
+
+// The longest evaluation_id that the client accepts and sends back (ProcurAuth 17.1: a text that only the PDP reads).
+constexpr size_t kMaxEvaluationIdBytes = 1024;
 
 // context.limits of a true decision (ProcurAuth 7.3): an object of whole numbers from 0, with no name two times.
 bool limits_of(const rapidjson::Value& value, PdpLimits* limits) {
@@ -154,6 +170,12 @@ bool decision_of(const rapidjson::Value& value, PdpAnswer* answer) {
   error_of(members, answer);
   if (!answer->decision) {
     // A false decision: its reason, and retry_after of budget_exceeded. ChDash ignores its limits and its usage (ProcurAuth 7.6).
+    // The evaluation_id (ProcurAuth 17.1) is a text. The client keeps it for the submission and never reads it. A text of another type, or
+    // a text that is too long, makes the answer not valid: the client could not send it back.
+    if (const auto id = members.FindMember("evaluation_id"); id != members.MemberEnd()) {
+      if (!id->value.IsString() || id->value.GetStringLength() == 0 || id->value.GetStringLength() > kMaxEvaluationIdBytes) return false;
+      answer->evaluation_id.assign(id->value.GetString(), id->value.GetStringLength());
+    }
     const auto reason = members.FindMember("reason");
     if (reason == members.MemberEnd()) return true;
     answer->reason = reason_of(reason->value);
@@ -188,6 +210,7 @@ AccessDecision decision_from(const PdpAnswer& answer, const char* source) {
   out.unknown_subject = answer.unknown_subject;
   out.reason = answer.reason;
   out.retry_after = answer.retry_after;
+  out.evaluation_id = answer.evaluation_id;
   out.limits = answer.limits;
   out.usage_units = answer.usage_units;
   out.error_status = answer.error_status;
@@ -225,9 +248,38 @@ const char* pdp_reason_name(PdpReason reason) {
     case PdpReason::InvalidResource: return "invalid_resource";
     case PdpReason::InvalidRequest: return "invalid_request";
     case PdpReason::BudgetExceeded: return "budget_exceeded";
+    case PdpReason::ApprovalRequired: return "approval_required";
+    case PdpReason::ApprovalPending: return "approval_pending";
+    case PdpReason::ApprovalDenied: return "approval_denied";
+    case PdpReason::ApprovalExpired: return "approval_expired";
     case PdpReason::Other: return "other";
   }
   return "other";
+}
+
+bool pdp_reason_is_approval(PdpReason reason) {
+  return reason == PdpReason::ApprovalRequired || reason == PdpReason::ApprovalPending || reason == PdpReason::ApprovalDenied ||
+         reason == PdpReason::ApprovalExpired;
+}
+
+const char* pdp_verdict_name(PdpVerdict verdict) {
+  switch (verdict) {
+    case PdpVerdict::Pending: return "pending";
+    case PdpVerdict::Approved: return "approved";
+    case PdpVerdict::Denied: return "denied";
+    case PdpVerdict::Void: return "void";
+  }
+  return "void";
+}
+
+PdpVerdict pdp_verdict_of(std::string_view text, bool* known) {
+  if (known) *known = true;
+  if (text == "pending") return PdpVerdict::Pending;
+  if (text == "approved") return PdpVerdict::Approved;
+  if (text == "denied") return PdpVerdict::Denied;
+  if (text == "void") return PdpVerdict::Void;
+  if (known) *known = false;
+  return PdpVerdict::Void;
 }
 
 AccessOutcome access_outcome(const AccessDecision& decision) {
@@ -240,11 +292,15 @@ AccessOutcome access_outcome(const AccessDecision& decision) {
 AccessDecision access_refusal_of(const std::vector<AccessDecision>& decisions) {
   if (decisions.empty()) return failed_decision();
   const AccessDecision* budget = nullptr;
+  const AccessDecision* approval = nullptr;
   for (const AccessDecision& decision : decisions) {
     const AccessOutcome outcome = access_outcome(decision);
     if (outcome == AccessOutcome::Failed) return decision;
     if (outcome == AccessOutcome::BudgetExceeded && (!budget || *decision.retry_after > *budget->retry_after)) budget = &decision;
+    if (outcome == AccessOutcome::Denied && !approval && pdp_reason_is_approval(decision.reason)) approval = &decision;
   }
+  // A reason of 17.1 tells that a use needs an approval: the call cannot wait, so it gets the refusal approval_cannot_wait (17.7a).
+  if (approval && !budget) return *approval;
   return budget ? *budget : decisions.front();
 }
 
@@ -268,9 +324,17 @@ AccessRefusal access_refusal(const AccessDecision& decision, std::string_view ac
     case AccessOutcome::Allowed:
     case AccessOutcome::Denied:
       out.status = 403;
+      out.retryable = false;
+      if (pdp_reason_is_approval(decision.reason)) {
+        // A reason of ProcurAuth 17.1: the use needs the approval of a person, and this call cannot wait (17.7a): a plain HTTP route has no
+        // result that tells the agent that the action waits, and no way to give a control. The refusal is HTTP 403 with this stable code.
+        // ChDash sends no effect and submits no request. The route writes the body {"error": "approval_cannot_wait"} (refuse_decision).
+        out.error_code = kApprovalCannotWait;
+        out.message = "The action " + name + " needs the approval of a person, and this request cannot wait for it.";
+        break;
+      }
       out.error_code = "forbidden";
       out.message = "The action " + name + " is not allowed.";
-      out.retryable = false;
       break;
   }
   return out;
@@ -398,6 +462,8 @@ void PdpClient::cache_store(std::string key, const PdpAnswer& answer, std::chron
   if (options_.cache_ttl.count() <= 0) return;
   // ProcurAuth 10.1: never an answer that took units. An answer with units 0 may be kept.
   if (answer.usage_units && *answer.usage_units > 0) return;
+  // ProcurAuth 10.1, 17.7: never an answer with a reason of 17.1. It tells the state of an approval, which changes with the answer of a person.
+  if (pdp_reason_is_approval(answer.reason)) return;
   auto life = std::chrono::duration_cast<std::chrono::steady_clock::duration>(options_.cache_ttl);
   // A false answer with budget_exceeded is kept for the lower of retry_after and cache_ttl.
   // The comparison is in whole seconds first: a very large retry_after must not overflow the arithmetic of the clock.
@@ -812,6 +878,11 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
   {
     std::lock_guard<std::mutex> lock(mu_);
     for (size_t i = 0; i < questions.size(); ++i) {
+      // A question with an effect goes through decide_approval: nothing is kept for it (ProcurAuth 17.7). Here it is a fault of the caller.
+      if (!questions[i].approval_effect.empty()) {
+        out[i] = failed_decision();
+        continue;
+      }
       if (options_.cache_ttl.count() > 0) {
         const std::string key = cache_key(subject, questions[i]);
         const auto it = cache_.find(std::string_view(key));
@@ -909,10 +980,12 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
 
 AccessDecision PdpClient::decide_use(const std::string& subject, const AccessQuestion& question, const PdpCallContext& context) {
   const auto log_use = [&](const AccessDecision& decision) {
+    // A field keeps a view of its text: the path must outlive the line (it is not a temporary of the initializer list).
+    const std::string resource = access_resource_path(question.resource);
     std::vector<LogField> fields = {{"request_id", context.request_id},
                                     {"subject", subject},
                                     {"action", question.action},
-                                    {"resource", access_resource_path(question.resource)},
+                                    {"resource", resource},
                                     {"match", access_match_name(question.match)},
                                     {"usage", true},
                                     {"decision", decision.allowed},
@@ -1003,6 +1076,329 @@ AccessDecision PdpClient::decide_use(const std::string& subject, const AccessQue
   if (on_call_) on_call_(call);
   log_use(out);
   return out;
+}
+
+// ---- Approval of an effect (ProcurAuth section 17) -------------------------------------------------------------------------
+
+std::string PdpClient::approval_request_body(const std::string& subject, const AccessQuestion& question, bool usage) {
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("subject");
+  write_entity(w, "user", subject);
+  w.Key("action");
+  write_action(w, question.action);
+  w.Key("resource");
+  write_resource(w, question.resource);
+  w.Key("context");
+  write_context(w, question.match, usage, question.approval_effect);
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+AccessDecision PdpClient::decide_approval(const std::string& subject, const AccessQuestion& question, bool usage, bool units_optional,
+                                           const PdpCallContext& context) {
+  const auto log_question = [&](const AccessDecision& decision) {
+    // The effect is a hash: the log line never holds an op, a view or a text of the SQL. A field keeps a view of its text: `resource` outlives the line.
+    const std::string resource = access_resource_path(question.resource);
+    std::vector<LogField> fields = {{"request_id", context.request_id},
+                                    {"subject", subject},
+                                    {"action", question.action},
+                                    {"resource", resource},
+                                    {"match", access_match_name(question.match)},
+                                    {"usage", usage},
+                                    {"approval", true},
+                                    {"decision", decision.allowed},
+                                    {"source", decision.source},
+                                    {"reason", pdp_reason_name(decision.reason)},
+                                    {"failed", decision.failed}};
+    if (usage) fields.emplace_back("units", decision.usage_units.value_or(0));
+    if (decision.retry_after) fields.emplace_back("retry_after", *decision.retry_after);
+    if (decision.usage_invalid) fields.emplace_back("usage_invalid", true);
+    log_event(LogLevel::Info, "access.decision", fields);
+  };
+  // A question that has no effect, or the match "subtree" (6.11, 17.1): a fault of the caller. Fail closed, send nothing.
+  if (question.approval_effect.empty() || question.match != AccessMatch::Node) {
+    AccessDecision refused = failed_decision();
+    log_question(refused);
+    return refused;
+  }
+
+  PdpEndpoints known;
+  if (options_.discovery) {
+    if (!ensure_metadata(context, &known)) {
+      log_event(LogLevel::Warn, "access.pdp_failed",
+                {{"request_id", context.request_id}, {"path", ""}, {"status", 0}, {"error", "the metadata of the PDP is not available"},
+                 {"evaluations", uint64_t{1}}});
+      AccessDecision failed = failed_decision();
+      log_question(failed);
+      return failed;
+    }
+  } else {
+    known = endpoints();
+  }
+
+  const std::chrono::milliseconds timeout = usage ? usage_timeout() : options_.timeout;
+  PdpCall call;
+  call.path = known.evaluation;
+  call.evaluations = 1;
+  const std::vector<std::pair<std::string, std::string>> headers = request_headers(context, &call);
+  call.start_unix_nano = otlp_now_unix_nano();
+  const auto started = std::chrono::steady_clock::now();
+  const std::string body = approval_request_body(subject, question, usage);
+  // A question with usage never goes again (10.6). A question without usage can: it counts nothing.
+  const PdpHttpResult result = usage ? transport_->post_once(call.path, body, headers, timeout) : transport_->post(call.path, body, headers, timeout);
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  call.end_unix_nano = otlp_now_unix_nano();
+  call.status = result.status;
+
+  std::vector<PdpAnswer> decisions;
+  call.error = check_result(result, elapsed, context, call.path, timeout);
+  if (call.error.empty() && !parse_answer(result.body, 1, &decisions)) call.error = "the answer is not a valid AuthZEN answer";
+
+  AccessDecision out;
+  if (call.error.empty()) {
+    PdpAnswer answer = decisions.front();
+    if (usage && !units_optional) answer = use_answer_of(answer);
+    out = decision_from(answer, "pdp");
+    out.usage_invalid = usage && !units_optional && decisions.front().decision && !answer.decision;
+    // Nothing is kept: 10.1 and 17.7. A true answer that consumed an approval has units 0 or 1, and is not kept in either case.
+  } else {
+    out = failed_decision();
+    log_event(LogLevel::Warn, "access.pdp_failed",
+              {{"request_id", context.request_id}, {"path", call.path}, {"status", call.status}, {"error", call.error}, {"evaluations", uint64_t{1}}});
+  }
+  if (on_call_) on_call_(call);
+  log_question(out);
+  return out;
+}
+
+namespace {
+
+constexpr const char* kApprovalPath = "/approval/v1/requests";
+// The longest request_id and code that the client accepts from the PDP. The code is for the agent, the id comes back in a path.
+constexpr size_t kMaxRequestIdBytes = 256;
+constexpr size_t kMaxCodeBytes = 64;
+
+bool visible_ascii(std::string_view text) {
+  return std::all_of(text.begin(), text.end(), [](unsigned char c) { return c > 0x20 && c < 0x7f; });
+}
+
+// A text for a query value or a path segment (RFC 3986): the unreserved characters stay, each other byte is %XX.
+std::string percent_encode(std::string_view text) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::string out;
+  for (const char raw : text) {
+    const unsigned char c = static_cast<unsigned char>(raw);
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~') {
+      out.push_back(raw);
+    } else {
+      out.push_back('%');
+      out.push_back(kHex[c >> 4]);
+      out.push_back(kHex[c & 0x0F]);
+    }
+  }
+  return out;
+}
+
+// The code of an error of the approval API for a log line: a fixed word, never text of the PDP.
+const char* approval_status_word(PdpApprovalReply::Status status) {
+  switch (status) {
+    case PdpApprovalReply::Status::Ok: return "ok";
+    case PdpApprovalReply::Status::NoDevice: return "no_device";
+    case PdpApprovalReply::Status::RateLimited: return "rate_limited";
+    case PdpApprovalReply::Status::InvalidArgument: return "invalid_argument";
+    case PdpApprovalReply::Status::Unavailable: return "unavailable";
+  }
+  return "unavailable";
+}
+
+} // namespace
+
+std::string PdpClient::approval_submit_body(const PdpApprovalRequest& request) {
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("evaluation_id");
+  write_json_text(w, request.evaluation_id);
+  w.Key("effect");
+  write_json_text(w, request.effect);
+  // op and view are JSON texts that the caller built. They are the only text of the command (17.9a).
+  w.Key("op");
+  w.RawValue(request.op_json.data(), request.op_json.size(), rapidjson::kObjectType);
+  w.Key("view");
+  w.RawValue(request.view_json.data(), request.view_json.size(), rapidjson::kObjectType);
+  // Exactly one control, as the agent gave it (17.5). The client sends no explanation, no allow_* flag and no hint.
+  switch (request.control) {
+    case PdpApprovalRequest::Control::ApprovalRef:
+      w.Key("approval_ref");
+      write_json_text(w, request.control_text);
+      break;
+    case PdpApprovalRequest::Control::LeaseSeconds:
+      w.Key("lease_s");
+      w.Uint64(request.lease_seconds);
+      break;
+    case PdpApprovalRequest::Control::Until:
+      w.Key("until");
+      write_json_text(w, request.control_text);
+      break;
+  }
+  if (!request.supersedes.empty()) {
+    w.Key("supersedes");
+    write_json_text(w, request.supersedes);
+  }
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string PdpClient::approval_verdict_path(const std::string& base_path, const std::string& request_id, const std::string& subject,
+                                             uint64_t wait_seconds, bool renew) {
+  std::string path = base_path + kApprovalPath + "/" + percent_encode(request_id) + "?subject=" + percent_encode(subject);
+  if (wait_seconds > 0) path += "&wait=" + std::to_string(wait_seconds);
+  if (renew) path += "&renew=true";
+  return path;
+}
+
+PdpApprovalReply PdpClient::parse_approval_reply(int status, const std::string& body, std::optional<uint64_t> retry_after_header, bool submission) {
+  PdpApprovalReply out;
+  out.http_status = status;
+  rapidjson::Document doc;
+  const bool parsed = parse_json_bounded(doc, body) && doc.IsObject();
+  if (status == 200 || status == 201) {
+    if (!parsed) return out;
+    const auto text = [&](const char* name, size_t max) -> std::optional<std::string> {
+      const auto it = doc.FindMember(name);
+      if (it == doc.MemberEnd() || !it->value.IsString()) return std::nullopt;
+      const std::string value(it->value.GetString(), it->value.GetStringLength());
+      if (value.empty() || value.size() > max) return std::nullopt;
+      return value;
+    };
+    if (submission) {
+      // The id and the code of the request. The code is text for the agent: it must be printable ASCII (ProcurAuth 17.4).
+      const auto id = text("request_id", kMaxRequestIdBytes);
+      const auto code = text("code", kMaxCodeBytes);
+      if (!id || !code || !visible_ascii(*id) || !visible_ascii(*code)) return out;
+      out.request_id = *id;
+      out.code = *code;
+      // The verdict of a submission is not used: the request waits. A text that is not a verdict means nothing.
+      if (const auto verdict = doc.FindMember("verdict"); verdict != doc.MemberEnd() && verdict->value.IsString()) {
+        out.verdict = pdp_verdict_of(text_of(verdict->value));
+      } else {
+        out.verdict = PdpVerdict::Pending;
+      }
+    } else {
+      const auto verdict = doc.FindMember("verdict");
+      if (verdict == doc.MemberEnd() || !verdict->value.IsString()) return out;
+      out.verdict = pdp_verdict_of(text_of(verdict->value));
+    }
+    out.status = PdpApprovalReply::Status::Ok;
+    return out;
+  }
+  std::string code;
+  if (parsed) {
+    if (const auto error = doc.FindMember("error"); error != doc.MemberEnd() && error->value.IsString()) code = std::string(text_of(error->value));
+  }
+  if (status == 429) {
+    uint64_t seconds = 0;
+    if (parsed) {
+      if (const auto retry = doc.FindMember("retry_after"); retry != doc.MemberEnd() && retry->value.IsUint64()) seconds = retry->value.GetUint64();
+    }
+    if (seconds < 1 && retry_after_header) seconds = *retry_after_header;
+    out.retry_after = seconds >= 1 ? seconds : 1;
+    out.status = PdpApprovalReply::Status::RateLimited;
+  } else if (status == 409 && (code == "no_device" || code == "no_phone")) {
+    out.status = PdpApprovalReply::Status::NoDevice;
+  } else if ((status == 413 && code == "command_too_large") ||
+             (status == 422 && (code == "invalid_argument" || code == "invalid_lease" || code == "lease_required"))) {
+    out.status = PdpApprovalReply::Status::InvalidArgument;
+  } else if (status == 404 && !submission) {
+    // An unknown request, a request of another service and a request of another subject get the same answer (17.4).
+    out.status = PdpApprovalReply::Status::InvalidArgument;
+  }
+  return out;
+}
+
+PdpApprovalReply PdpClient::approval_submit(const PdpApprovalRequest& request, const PdpCallContext& context) {
+  PdpApprovalReply failed;
+  PdpCall call;
+  call.path = options_.base_path + kApprovalPath;
+  call.evaluations = 0;
+  const std::vector<std::pair<std::string, std::string>> headers = request_headers(context, &call);
+  call.start_unix_nano = otlp_now_unix_nano();
+  const auto started = std::chrono::steady_clock::now();
+  // A second submission of the same request gives the same id (17.4): the transport can send it again after a lost connection.
+  const PdpHttpResult result = transport_->post(call.path, approval_submit_body(request), headers, options_.timeout);
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  call.end_unix_nano = otlp_now_unix_nano();
+  call.status = result.status;
+  PdpApprovalReply reply;
+  if (!result.error.empty()) {
+    call.error = "no answer: " + result.error;
+  } else if (elapsed > options_.timeout) {
+    call.error = "the answer came after the timeout";
+  } else if (result.body.size() > options_.max_answer_bytes) {
+    call.error = "the answer is too large";
+  } else {
+    if (result.status == 401 || result.status == 403) {
+      log_event(LogLevel::Error, "access.pdp_credential_refused", {{"request_id", context.request_id}, {"path", call.path}, {"status", result.status}});
+    }
+    std::optional<uint64_t> header;
+    reply = parse_approval_reply(result.status, result.body, header, true);
+    if (reply.status == PdpApprovalReply::Status::Unavailable) call.error = "status " + std::to_string(result.status);
+  }
+  if (!call.error.empty()) reply = failed;
+  reply.http_status = result.status;
+  // The log line has the word of the outcome, the id and the code of the request. It never has op, view, SQL, the control of the agent or a text of the PDP.
+  std::vector<LogField> fields = {{"request_id", context.request_id}, {"route", "submit"}, {"status", result.status}, {"outcome", approval_status_word(reply.status)}};
+  if (reply.status == PdpApprovalReply::Status::Ok) {
+    fields.emplace_back("approval_request", reply.request_id);
+    fields.emplace_back("approval_code", reply.code);
+  }
+  log_event(reply.status == PdpApprovalReply::Status::Ok ? LogLevel::Info : LogLevel::Warn, "access.approval", fields);
+  if (on_call_) on_call_(call);
+  return reply;
+}
+
+PdpApprovalReply PdpClient::approval_verdict(const std::string& request_id, const std::string& subject, uint64_t wait_seconds, bool renew,
+                                             const PdpCallContext& context) {
+  PdpApprovalReply failed;
+  PdpCall call;
+  call.method = "GET";
+  call.path = approval_verdict_path(options_.base_path, request_id, subject, wait_seconds, renew);
+  call.evaluations = 0;
+  const std::vector<std::pair<std::string, std::string>> headers = request_headers(context, &call);
+  call.start_unix_nano = otlp_now_unix_nano();
+  const auto started = std::chrono::steady_clock::now();
+  // The PDP waits at most `wait` seconds for a verdict other than pending: the deadline of the read is longer by that time.
+  const std::chrono::milliseconds timeout = options_.timeout + std::chrono::seconds(wait_seconds);
+  const PdpHttpResult result = transport_->get(call.path, headers, timeout);
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  call.end_unix_nano = otlp_now_unix_nano();
+  call.status = result.status;
+  PdpApprovalReply reply;
+  if (!result.error.empty()) {
+    call.error = "no answer: " + result.error;
+  } else if (elapsed > timeout) {
+    call.error = "the answer came after the timeout";
+  } else if (result.body.size() > options_.max_answer_bytes) {
+    call.error = "the answer is too large";
+  } else {
+    if (result.status == 401 || result.status == 403) {
+      log_event(LogLevel::Error, "access.pdp_credential_refused", {{"request_id", context.request_id}, {"path", "/approval/v1/requests"}, {"status", result.status}});
+    }
+    reply = parse_approval_reply(result.status, result.body, std::nullopt, false);
+    if (reply.status == PdpApprovalReply::Status::Unavailable) call.error = "status " + std::to_string(result.status);
+  }
+  if (!call.error.empty()) reply = failed;
+  reply.http_status = result.status;
+  // The path of the call has the request id and the subject in its query: the span and the log keep only the route.
+  call.path = options_.base_path + kApprovalPath + "/{id}";
+  std::vector<LogField> fields = {{"request_id", context.request_id}, {"route", "status"}, {"renew", renew}, {"wait", wait_seconds},
+                                  {"status", result.status}, {"outcome", approval_status_word(reply.status)}};
+  if (reply.status == PdpApprovalReply::Status::Ok) fields.emplace_back("verdict", pdp_verdict_name(reply.verdict));
+  log_event(reply.status == PdpApprovalReply::Status::Ok ? LogLevel::Info : LogLevel::Warn, "access.approval", fields);
+  if (on_call_) on_call_(call);
+  return reply;
 }
 
 // ---- Resource Search (AuthZEN 1.0, l.1151-1210) --------------------------------------------------------------------------------

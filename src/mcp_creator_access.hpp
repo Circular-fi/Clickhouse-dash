@@ -13,16 +13,25 @@
 //     Failed: the request answers 503 with -32603, as the routes and the identity mode (owner decision of 2026-11-07);
 //   - a call of a tool whose action lists a budget (query.run.read lists `queries`: run_query, explain_query and the API tools of the Query
 //     page) is one use of the creator (call). The question of the host of the call has context.usage, and no question without
-//     context.usage goes before it. A spent budget gives BudgetExceeded and a failure of this question gives Failed, as on the routes.
+//     context.usage goes before it. A spent budget gives BudgetExceeded and a failure of this question gives Failed, as on the routes;
+//   - the approval of a person (docs/access.md, "Approval of an action"): the creator of a key is the subject of the PDP, so a key has the same
+//     lazy flow as the identity mode (McpApprovalGate). A reason of ProcurAuth 17.1 on a question that the key asks for its creator does not
+//     make the action refused: the creator holds it, and the use needs an approval. The state of the key and the standing checks of a call
+//     accept such a reason; the question of the operation goes through the gate. A key of the configuration has no creator and no PDP: it
+//     asks nothing and needs no approval.
 // Pure code: the decisions come from a function that the server gives (PdpClient::decide), and the clock is a function too.
 
 #include "access_pdp.hpp"
 #include "mcp_access.hpp"
+#include "mcp_approval.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_scope.hpp"
 
 #include <rapidjson/document.h>
 
+#include "log.hpp"
+
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -84,6 +93,13 @@ public:
   McpCreatorAccess(std::string service_id, std::chrono::milliseconds period, Decide decide, Clock clock, DecideUse decide_use = {},
                    HasBudget has_budget = {});
 
+  // The approval of a person (mcp_approval.hpp). With a gate, a call of a key follows protocol 17.7 for its creator, and get_action_status exists.
+  // Without one (the tests of the state), a reason of 17.1 is a plain refusal as before.
+  void set_approval(McpApprovalGate* approval) { approval_ = approval; }
+  bool has_approval() const { return approval_ != nullptr; }
+  // get_action_status for a key: the verdict of a request of the creator. It asks the PDP no question.
+  McpAccess status(const McpKey& key, const rapidjson::Value& arguments, McpCallInfo* info);
+
   // The state of a key of the page. One batch of the PDP for each key and each period at most.
   McpCreatorState state(const McpKey& key);
   // The first action of `tool` that the PDP refuses to the creator of the key, or an empty string when the creator may call it.
@@ -99,7 +115,9 @@ public:
   // the call before the use. The answer
   // of the use gives Allowed, Denied, BudgetExceeded (with retry_after) or Failed (no valid answer). A use that the PDP took is never asked
   // again. A tool whose action lists no budget asks as tool_refused_action does.
-  McpCreatorCall call(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments);
+  // With a gate and `info`, the call also follows the lazy flow of the approval: Allowed with info->answered set is a call that is over (the
+  // awaiting result or a tool error of the approval), and the control arguments are checked and marked in info->controls_present.
+  McpCreatorCall call(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* info = nullptr);
   // Forget the kept state of a key (after an adoption or a delete).
   void forget(const std::string& key_id);
 
@@ -118,9 +136,81 @@ private:
   Clock clock_;
   DecideUse decide_use_;
   HasBudget has_budget_;
+  McpApprovalGate* approval_ = nullptr;
   std::mutex mu_;
   // The key is the id of the key and its creator: an adoption changes the creator, so an old state never applies to the adopter.
   std::unordered_map<std::string, Kept> kept_;
+};
+
+// The tools of a key of the page in the authzen mode (docs/mcp.md, "Keys and the access of humans"): tools/list keeps the tools of the
+// state of the key (one batch of the PDP for each period), and tools/call asks the PDP for the actions of the called tool only.
+class McpCreatorTools final : public McpToolBackend {
+public:
+  McpCreatorTools(McpToolBackend& inner, McpCreatorAccess& gate, McpCreatorState state)
+      : inner_(inner), gate_(gate), state_(std::move(state)) {}
+
+  // A key with a creator has the approval flow of its creator (mcp_creator_access.hpp): each tool takes the control arguments, and the tool
+  // get_action_status exists. The write tool and the export tool exist in the identity mode only.
+  McpToolAvailability availability() const override {
+    McpToolAvailability out = inner_.availability();
+    out.approval = gate_.has_approval();
+    return out;
+  }
+  std::vector<std::string> approval_tool_names() const override {
+    return gate_.has_approval() ? std::vector<std::string>{kMcpStatusTool} : std::vector<std::string>();
+  }
+  McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now) override {
+    return inner_.call_tool(key, tool, arguments, now);
+  }
+  McpToolOutcome call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
+                               const McpCallInfo& info) override {
+    return inner_.call_tool_for(key, tool, arguments, now, info);
+  }
+  std::optional<std::vector<std::string>> permitted_tools(const McpKey& key, std::vector<std::string> tools) override {
+    // The batch of the state got no valid answer: tools/list answers 503, never a short list (binding 5.5, ProcurAuth 10.3).
+    if (state_.status == McpCreatorStatus::Unknown) return std::nullopt;
+    const auto kept = inner_.permitted_tools(key, std::move(tools));
+    if (!kept) return std::nullopt;
+    tools = *kept;
+    tools.erase(std::remove_if(tools.begin(), tools.end(),
+                               [&](const std::string& name) {
+                                 // The tool of the verdict has no action: each key that has a creator lists it (binding 4.1).
+                                 if (name == kMcpStatusTool) return !gate_.has_approval();
+                                 return std::find(state_.tools.begin(), state_.tools.end(), name) == state_.tools.end();
+                               }),
+                tools.end());
+    return tools;
+  }
+  // A failure of the PDP for any question of the call gives Failed: HTTP 503 with -32603, as on the routes and in the identity mode
+  // (owner decision of 2026-11-07). A call of a tool whose action lists a budget is one use of the creator (McpCreatorAccess::call): a spent
+  // budget gives the tool error budget_exceeded.
+  McpAccess tool_permitted(const McpKey& key, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call) override {
+    // The verdict of a request of the creator. It asks no question. The other tools of the approval flow exist in the identity mode only.
+    if (std::string_view(tool.name) == kMcpStatusTool) return gate_.status(key, arguments, call);
+    if (!mcp_find_tool(tool.name)) return McpAccess::Denied;
+    if (inner_.tool_permitted(key, tool, arguments, call) != McpAccess::Allowed) return McpAccess::Denied;
+    const McpCreatorCall decided = gate_.call(key, tool, arguments, call);
+    if (decided.access == McpAccess::Allowed) return McpAccess::Allowed;
+    if (decided.access == McpAccess::BudgetExceeded && call) call->retry_after = decided.retry_after.value_or(1);
+    // A key cannot apply a ceiling (ProcurAuth 7.5): the grant of the creator makes the tool unusable for the key. The answer says so.
+    if (decided.access == McpAccess::Denied && !decided.ceiling.empty() && call) call->ceiling_refused = decided.ceiling;
+    const char* outcome = decided.access == McpAccess::BudgetExceeded ? "budget_exceeded" : decided.access == McpAccess::Failed ? "failed" : "denied";
+    log_event(LogLevel::Warn, "mcp.tool_refused",
+              {{"key", key.id}, {"creator", key.creator}, {"tool", tool.name}, {"action", decided.action}, {"ceiling", decided.ceiling.substr(0, 128)},
+               {"outcome", outcome}, {"usage", decided.use}});
+    return decided.access;
+  }
+  // A request with no tool (initialize, ping, a notification): the batch of the state of the key is its question. No valid answer gives
+  // HTTP 503 with -32603 (a notification gets 503 with no body).
+  McpAccess session_permitted(const McpKey& key, uint64_t* retry_after) override {
+    if (state_.status == McpCreatorStatus::Unknown) return McpAccess::Failed;
+    return inner_.session_permitted(key, retry_after);
+  }
+
+private:
+  McpToolBackend& inner_;
+  McpCreatorAccess& gate_;
+  McpCreatorState state_;
 };
 
 } // namespace chdash

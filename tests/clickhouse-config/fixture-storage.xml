@@ -12,6 +12,9 @@
         </disks>
         <policies>
             <fixture_tiered>
+                <!-- A part moves to the volume `warm` only by the TTL rule of its table. The default factor (0.1) would move each part as soon as
+                     the free space of the host disk is below 10 %, and the tests would then depend on the host. -->
+                <move_factor>0</move_factor>
                 <volumes>
                     <hot>
                         <disk>fixture_hot</disk>

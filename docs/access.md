@@ -39,6 +39,10 @@ access {
     batch_timeout     = "2s"
     usage_max_seconds = 120
   }
+  approval {                             # optional: the approval of a person (refer to "Approval of an action")
+    wait              = "15s"
+    max_command_bytes = 16384
+  }
 }
 ```
 
@@ -60,11 +64,16 @@ access {
 | `pdp.search` | `false` | `true` uses the Resource Search of the PDP to list databases. It needs the metadata member `search_resource_endpoint` too. Refer to [Resource Search](#resource-search). |
 | `pdp.batch_timeout` | `2s` | The longest time of all the requests of one call that ChDash splits into several requests. From `10ms` to `5m`, and not less than `pdp.timeout`. Refer to [Decisions](#decisions). |
 | `pdp.usage_max_seconds` | `120` | The highest `procurauth_usage_max_seconds` of the metadata of the PDP that ChDash accepts. A whole number from 1 to 3600. Refer to [Metadata of the PDP](#metadata-of-the-pdp). |
+| `approval.wait` | `15s` | The longest time that one call of an MCP tool waits for the verdict of a person. From `0s` to `30s`. Refer to [Approval of an action](#approval-of-an-action). |
+| `approval.max_command_bytes` | `16384` | The largest size of the command of an approval request (`op` and `view`). From 1024 to 1048576. Refer to [Approval of an action](#approval-of-an-action). |
 
 These items stop the start:
 
 - No `access` block, no `mode`, or a `mode` that is not `authzen` or `open`.
-- `mode = "open"` with an `identity` block or a `pdp` block. The two contradict each other.
+- `mode = "open"` with an `identity` block, a `pdp` block or an `approval` block. The two contradict each other. `mode = "open"` with a `clickhouse.host` that has `mcp_write_uri` is the same contradiction.
+- A `clickhouse.host` with `mcp_write_uri` and `mcp.auth_mode` other than `identity`. The tool `run_write_query` exists only in the identity mode of MCP.
+- A `mcp_write_uri` without `mcp_uri`, or with the same user as `runner_uri`, `system_uri` or `mcp_uri`.
+- An `approval.max_command_bytes` below 1024 or above 1048576, and an `approval.wait` above `30s`.
 - `mode = "authzen"` without the `identity` block or the `pdp` block, or without one of their required keys.
 - A key text that does not hold only Ed25519 or P-256 public keys, or a P-256 point that is not on the curve.
 - A JWK Set with a private member (`d`), with a `kty` or `crv` that ChDash does not accept, or with two keys of the same `kid`.
@@ -169,8 +178,9 @@ The document lists the published actions only (ProcurAuth 5.2a). An action of a 
 | `observability.read` | The traces, the logs or the metrics are on for at least one host. |
 | `library.read` | At least one `query_library` block is enabled. |
 | `library.write` | At least one enabled `query_library` block has `writable = true`. |
-| `mcp.keys.read`, `mcp.usage.read` | `mcp.enabled` is `true`. |
-| `mcp.keys.write` | `mcp.enabled` is `true` and `mcp.keys.mode` is not `static`. |
+| `mcp.usage.read` | `mcp.enabled` is `true`. |
+| `mcp.keys.read` | `mcp.enabled` is `true` and `mcp.auth_mode` is not `identity`. The identity mode has no key of ChDash. |
+| `mcp.keys.write` | `mcp.enabled` is `true`, `mcp.auth_mode` is not `identity`, and `mcp.keys.mode` is not `static`. |
 | `mcp.session` | `mcp.enabled` is `true` and `mcp.auth_mode` is `identity`. |
 
 The navigation follows the document: a page whose actions are not published has no link, and `GET /api/version` lists the published actions only. A system that holds grants (the portal) keeps a grant for an action that is not published. The grant applies again when the action is published again, for example when you set `mcp.enabled = true`. ChDash reads the configuration at start: a change of these settings needs a restart.
@@ -356,7 +366,7 @@ Rules:
 ## Enforcement
 
 - ChDash checks the decision of each route before the route runs, also when the page does not show the action.
-- If the decision is `false`, ChDash sends status `403` with `{"error_code": "forbidden", "action": "<action>", "message": "The action <action> is not allowed.", "retryable": false}`.
+- If the decision is `false`, ChDash sends status `403` with `{"error_code": "forbidden", "action": "<action>", "message": "The action <action> is not allowed.", "retryable": false}`. When the reason of the answer is one of ProcurAuth 17.1 (the grant needs the approval of a person), the route cannot wait: status `403` with the body `{"error": "approval_cannot_wait"}` ([Approval of an action](#the-page-and-the-api)).
 - If the decision is `false` with the reason `budget_exceeded`, ChDash sends status `429` with `Retry-After` set to the seconds of `retry_after`. The body is `{"error_code": "too_many_requests", "action": "<action>", "retryable": true, ...}`.
 - If the PDP gives no valid answer (refer to [Decisions](#decisions)), ChDash sends status `503` with `{"error_code": "pdp_unavailable", "action": "<action>", "retryable": true, ...}`. It never sends `403` for a failure. When an operation needs several decisions, a failure comes before a denial: a failed question can hide a `true` answer.
 - A route that filters a list with the decisions does not filter on a failure: it answers `503`. These routes are the catalog, the storage map, the graph, the table card and the definition of the Explorer (action `explorer.read`), the names of `GET /api/meta` (action `query.run.read`), `GET /api/hosts`, `GET /api/hosts/stream` and the hosts of `GET /api/mcp/meta` (action `hosts`), `GET /api/version` (action `access`) and the route of the options (action `resources`).
@@ -624,6 +634,7 @@ An MCP key of the mode `keys` holds no identity token. Its creator is the person
 - One call takes one unit at most. An API tool calls its route in the process, and the route asks the PDP nothing.
 - A refused use gives the answers of [mcp.md](mcp.md#budgets-of-the-keys): the tool error `budget_exceeded` with `retry_after` for a spent budget, HTTP `503` for no valid answer. No valid answer to any other question of a request of a key also gives HTTP `503` with `-32603`, as on the routes (decision of 2026-11-07).
 - The tools of the other actions take no unit. These actions list no budget.
+- When the PDP answers a reason of 17.1 to the question of the use, the key follows the flow of the approval for its creator ([The keys of the page](#the-keys-of-the-page)).
 - ChDash keeps the state of a key for `pdp.cache_ttl`, and it gets this state from one batch without `context.usage` before it reads the body. When the state expires at a call of a tool of `query.run.read`, this batch can thus go before the question of the use in the same request: the owner accepts this exception to ProcurAuth 10.1 (decision of 2026-11-07).
 
 ## Navigation
@@ -652,9 +663,116 @@ Rules:
 - The links between pages follow the same rules: Open in Query (Explorer and System), a table or a database of the System page (Explorer), a trace of a result row (Observability) and Open in Usage of an MCP key.
 - The pages still check each action on their routes. A link that a page hides is not a permission.
 
+## Approval of an action
+
+A grant can ask for the approval of a person before each use of its action (ProcurAuth section 17). The grant has the property `confirm`. The PDP decides. ChDash does not know in advance which grant has it. The capability is always on: no key of the configuration turns it on or off, and the document of the actions has no member `approval` (ProcurAuth 5.2b). The portal gives no `approval_required` answer until its operator turns the approvals on.
+
+ChDash is a PEP that handles the reasons `approval_required`, `approval_pending`, `approval_denied` and `approval_expired` for each action that it asks about. The entry points differ, because only an agent can wait.
+
+| Entry point | What happens when the grant needs an approval |
+|---|---|
+| An MCP tool in the identity mode (an agent) | The flow below. One code serves each tool: `McpApprovalGate` in `src/mcp_approval.cpp`. |
+| A page or a route of the API (a person in a browser) | The call cannot wait (ProcurAuth 17.7a). ChDash fails closed. The route answers `403` with the body `{"error": "approval_cannot_wait"}`. It sends no effect and submits no request. |
+| An MCP key of the page (the mode `keys`) | The key has the same flow as an MCP tool of the identity mode, for its creator ([The keys of the page](#the-keys-of-the-page)). A key of the configuration has no creator and no PDP: it needs no approval. |
+| `tools/list`, the navigation, the questions with the match `subtree` | The PDP ignores `confirm` (ProcurAuth 17.8). Nothing changes. |
+| A request that calls no tool (`mcp.session`, `ping`) | The call cannot wait. HTTP 403 and `-32001` (binding 5.1b). ChDash sends no effect and submits no request. |
+
+### The flow of a tool call
+
+The PEP keeps no state. The agent calls the tool again after the approval. A call that needs no approval costs one question, as before.
+
+1. ChDash reads the control arguments. They are optional: `approval_ref`, `lease_s`, `until`, `wait_s` and `supersedes`. At most one of the first three. A bad control argument gives the tool error `invalid_argument`, and ChDash asks the PDP nothing.
+2. The question of [Questions](#questions), with no effect. For an action that lists a budget it has `context.usage`. A `true` answer runs the tool. An answer with another reason is the answer of [Decisions](#decisions). The next steps apply only to the reason `approval_required`.
+3. The call needs one of `approval_ref`, `lease_s` and `until` now. Without one, ChDash submits nothing and gives the tool error `invalid_argument`.
+4. ChDash builds the `op` and the `view` of the call and computes the effect: `"sha256:"` and the SHA-256 of the JCS text (RFC 8785) of `{"v":1,"service":<id>,"action":<action>,"resource":<node>,"op":<op>}`. The `resource` is the host or the database of the call, without the service. It asks again with `context.approval.effect` and without usage.
+5. `approval_required` or `approval_pending`: ChDash sends `POST /approval/v1/requests` to the PDP with the token of the PDP. The body has `evaluation_id` (as the PDP gave it, never read), `effect`, `op`, `view` and the control of the agent. The result is not an error:
+
+   ```json
+   {"action": {"id": "apr_9f3a", "status": "awaiting_approval", "code": "K7QF", "executed": false}}
+   ```
+
+   The second item of `content` starts with `NOT EXECUTED`. The tool did not run. The result has no `isError` member.
+6. `approval_denied` gives the tool error `approval_denied` (not retryable, with no comment). `approval_expired` gives `approval_expired`: the approval expired, was abandoned, was cancelled or was replaced, and ChDash cannot know which.
+7. The agent reads the verdict with the tool `get_action_status` and the `request_id`. The tool sends `GET /approval/v1/requests/<id>?renew=true&subject=<subject>` and gives `{"status": "pending" | "approved" | "denied" | "void"}`. A verdict that ChDash does not know is `void`. The read renews the lease for the agent. ChDash never renews on a timer of its own, and the call of a tool never renews.
+8. After `approved`, the agent calls the tool again with the same arguments. ChDash asks the question of step 2 (the PDP answers `approval_required` again, because that question has no effect), then the question of step 4. On `true`, it computes the effect again from the arguments that it runs and asks with `context.usage` and the effect. The PDP consumes the approval. The tool runs only after a `true` answer to this last question, one time. A second call needs a new approval. The answer to a question with an effect is never kept.
+
+`wait_s` is the most seconds that a call waits for the verdict after it submitted the request. ChDash waits for the lower of `wait_s` and `access.approval.wait`. A call without `wait_s` never waits. When the verdict is `approved` during the wait, the call asks again at once and runs the tool.
+
+| Answer of the approval API | Result for the agent |
+|---|---|
+| `201` or `200` with `request_id` and `code` | The result "awaiting_approval". |
+| `409` with `no_device` (or `no_phone`) | The tool error `approval_unavailable`, retryable. |
+| `429` | The tool error `approval_rate_limited`, retryable, with `retry_after`. |
+| `413`, `422` with `invalid_argument`, `invalid_lease` or `lease_required` | The tool error `invalid_argument`. |
+| Another status, no answer, a body that is not valid | HTTP 503 and `-32603`, as for a PDP that does not answer. ChDash fails closed. |
+
+A command above `access.approval.max_command_bytes` is refused before the PDP gets it, with the tool error `invalid_argument`. ChDash hides and cuts nothing.
+
+### The keys of the page
+
+An MCP key of the page (the mode `keys`) has a creator: the person who made it. The creator is the subject of each question that ChDash asks the PDP for this key ([MCP keys](#mcp-keys)). So the key has the flow above, with the creator as the subject. The agent that holds the key calls the tool again after the creator approves.
+
+- **The subject.** Each question, each request to the approval API and each read of a verdict uses the creator, never the key. The phone of the creator shows the request. The approval belongs to the creator, to the action, to the node and to the effect. Two keys of the same creator that make the same call use the same approval, and the first call that arrives consumes it.
+- **The tools.** Each tool of the key accepts the control arguments. `tools/list` shows them. `tools/list` also gives `get_action_status` to each key that has a creator. The tool reads the requests of the creator.
+- **The question of the call.** The standing questions of the key (its hosts and its databases) are checks that the creator can use the action. A reason of 17.1 on such a question means that the creator holds the action: it does not refuse the key, and `tools/list` keeps the tool. The call itself follows steps 1 to 8. A call of a tool of `query.run.read` takes its first question from the use of the budget `queries`. Another call takes it from the standing question of the host of the call, or of the database when the call names one.
+- **The op.** The `op` names the host of the call, also when the call leaves it out and the key has one host. So the same call always gives the same effect.
+- **The results.** The result that waits, and the result of `get_action_status`, have no `isError` member. The other results of the mode `keys` keep `isError` as before. The tool errors are the errors of the steps above.
+- **A ceiling.** A key applies no ceiling (7.5). A `true` answer to the question with the effect that has a ceiling is `false` for the key. The call gets the `403` with `-32001` of [MCP keys](#mcp-keys), and the tool does not run.
+- **The creation of a key.** ChDash asks the PDP for the actions of the key when a person makes or adopts a key. A reason of 17.1 means that the person holds the action, and the check passes. The action `mcp.keys.write` is a use of the person: it cannot wait, and it gets `403` with `{"error": "approval_cannot_wait"}`.
+
+Limits of the mode `keys`. These limits come from what the mode has:
+
+- A key of the configuration has no creator, so no subject. ChDash asks no PDP question for it and cannot ask an approval. It stays outside the approval, as the standalone keys of the ruling of 2026-11-11. It has no `get_action_status` and no control argument.
+- A tool that uses no action (`list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage`) asks the PDP nothing in the mode `keys`. The action `mcp.session` is not in the document of this mode. So these tools need no approval. They accept the control arguments and ignore them.
+- The tools `run_write_query` and `export_query` exist in the identity mode only. They need an account of the host (`mcp_write_uri`) and the check of the identity mode. A key has no tool for `query.run.write` and `query.export`.
+- A call that cannot name one node fails closed when more than one standing question of the key needs an approval. This happens when the key has several databases in its scope, the tool takes no database, and the grants for these databases have `confirm`. The call gets the answer of a tool that does not exist. Give the key one database, or ask the PDP to put `confirm` on the host.
+- A key of the page that the PDP does not know (the reason `unknown_subject`) is an orphan, as before: it gets the `401` and no approval is asked.
+
+### The op and the view
+
+The `op` holds each value that decides what the tool does. The `view` is a template of JSON Pointers into the `op`: the person reads values of the `op`, never a text that ChDash wrote apart. The control arguments are never in the `op`.
+
+| Tool | `op` | `view` |
+|---|---|---|
+| `run_write_query` | `tool`, `host`, `sql` (the statement that will run, without its closing `;`), `ch_user` (the user of `mcp_write_uri`) | Title `ClickHouse write`. Fields `Host` and `Runs as`. Body `/sql` with the label `SQL`. |
+| `run_query`, `explain_query`, `export_query` | `tool`, `host`, `sql`, `ch_user` (the user of `mcp_uri`), and `options` when the call has other arguments (`export_query` always has `{"format": ...}`, `explain_query` its `type`, `indexes` and `actions`) | Title `ClickHouse read`, `ClickHouse explain` or `ClickHouse export`. The same fields and body. |
+| Each other tool | `tool`, `host` (when the call has one), `arguments` | Title: the title of the tool. Fields `Tool` and `Host`. Body `/arguments` with the label `Arguments`. |
+
+`arguments` is the compact JSON text of the arguments of the call, without the control arguments, with the members in sorted order at each level. It is a text, so the numbers in it never break the integer rule of the effect. The order of the members that the agent wrote does not change the effect.
+
+There is no `database` member in the `op` of `run_write_query`. The statement names its databases in its text, and a grant on one database of a host would not bind it. The PDP is asked for the host.
+
+### The write tool
+
+The tool `run_write_query` runs exactly one statement that changes data or the schema. The first word is `INSERT`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `OPTIMIZE`, `RENAME`, `EXCHANGE`, `ATTACH`, `DETACH`, `UNDROP`, `DELETE`, `UPDATE`, or `WITH` with an `INSERT`. A statement that only reads is refused (`not_a_write`): `run_query` runs it with `readonly = 1` and needs no approval. ChDash also refuses a second statement, `INTO OUTFILE`, a `SETTINGS` clause, the table functions that read files and servers, and the statements of users, roles, quotas, policies, profiles and named collections. These checks are guard rails. The grants of the ClickHouse account decide what a statement can change.
+
+The statement runs with the account `mcp_write_uri` of the host, a user other than `mcp_uri`, without `readonly = 1`. The approval of a person gives no right in ClickHouse. A host without `mcp_write_uri` has no write tool: a call for this host gets the answer for a tool that does not exist. The PDP is asked for `query.run.write` on the host.
+
+### Logs
+
+The call log (`mcp.call`) of a call that had an effect has three more fields: `approval.effect` (the hash that the PDP and the phone show), `approval.outcome` (one of `awaiting`, `run`, `run_failed`, `approval_denied`, `approval_expired`, `approval_unavailable`, `approval_rate_limited`, `invalid_argument`, `pending`, `approved`, `denied`, `void`) and `approval.executed_sql` (for `run_write_query`: the statement that ChDash sent to ClickHouse). The owner of the portal compares them with the history of the phone to find a substitution. The line `access.approval` has the route (`submit` or `status`), the HTTP status, a fixed word for the outcome, the `request_id` and the `code` of a request, and the verdict. No log line holds a token, an explanation, an `approval_ref`, a comment of a refusal, the approver or the device: ChDash never gets them.
+
+### The page and the API
+
+A route of the pages or of the API cannot wait for an approval (ProcurAuth 17.7a). It sends no effect. When the PDP answers a reason of 17.1 (`approval_required`), the route answers `403` with exactly this body:
+
+```json
+{"error": "approval_cannot_wait"}
+```
+
+The code is stable. The log line `access.decision` has the action and the reason. ChDash asks no other action after this answer, so a statement that changes data never runs with `readonly = 1` instead. A statement that only reads runs: the grant of `query.run.read` decides, and `query.run.write` stays `false` for it. The use of the other action that a run asks without usage (to tell `readonly`) is not a required permission: a reason of 17.1 for it means `false`.
+
+Open point for ProcurAuth: a person in a browser cannot approve an action of the page that the person asks for. ChDash follows 17.7a and refuses it.
+
+Each action of the document has a call of an MCP tool, so the case U111 of ProcurAuth passes. `query.export` has the tool `export_query`. The actions `mcp.keys.read` and `mcp.keys.write` are not published in the identity mode: it has no key of ChDash to read or to write, because the keys live in the portal. The action `library.write` is published only when a query library is writable.
+
+### Network
+
+The approval API has no TLS, like the PDP listener (refer to [Transport](#transport)). The command goes in clear text on the link. Use a private network, or terminate TLS in front of the PDP.
+
 ## Logs and traces
 
-- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `match` (`node` or `subtree`), `decision`, `source` (`pdp`, `cache` or `error`), `reason` (`unknown_subject`, `invalid_resource`, `invalid_request`, `budget_exceeded`, `other`, or empty) and `failed` (`true` when the PDP gave no valid answer), and `error_status` and `error_message` when the item has a `context.error`. The line never holds a token. `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
+- For each decision, the log has one line `access.decision` with `request_id`, `subject`, `action`, `resource`, `match` (`node` or `subtree`), `decision`, `source` (`pdp`, `cache` or `error`), `reason` (`unknown_subject`, `invalid_resource`, `invalid_request`, `budget_exceeded`, `approval_required`, `approval_pending`, `approval_denied`, `approval_expired`, `other`, or empty) and `failed` (`true` when the PDP gave no valid answer), and `error_status` and `error_message` when the item has a `context.error`. The line never holds a token. `resource` is the path of the resource with the ids percent-encoded, for example `service:db/host:prod/database:analytics`.
 - The access log (`http.request`) has the field `subject` (`-` when there is none).
 - When the `telemetry` block is on, each call to the PDP is a CLIENT span `POST /access/v1/evaluation` or `POST /access/v1/evaluations`. Its parent is the span of the `traceparent` of the request; without one, the span starts a trace. The call sends the context of this span to the PDP (`traceparent`). The path of the span is the whole path of the request. Refer to [server-telemetry.md](server-telemetry.md#the-client-span-of-the-pdp).
 

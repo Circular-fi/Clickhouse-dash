@@ -837,6 +837,8 @@ private:
   std::unique_ptr<McpCreatorAccess> mcp_creator_;
   // The access of the identity mode of POST /mcp (mcp_subject_access.hpp). Set when mcp.auth_mode = "identity" (it needs the authzen mode).
   std::unique_ptr<McpSubjectAccess> mcp_subject_;
+  // The approval of a person for any action of a tool (mcp_approval.hpp). Set with mcp_subject_, in the identity mode.
+  std::unique_ptr<McpApprovalGate> mcp_approval_;
   // The OTLP export of the spans and of the call log of MCP. The pointer is null when telemetry.enabled is false.
   // A request only puts its items in the queue of the exporter.
   // The destructor sends the items that wait, within the time of the stop.

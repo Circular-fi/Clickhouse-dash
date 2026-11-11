@@ -119,6 +119,330 @@
           "sql": "SELECT 1"
         }
       }
+    },
+    "approval_calls": {
+      "explorer.read": {
+        "tool": "list_databases",
+        "arguments": {
+          "host": "conf"
+        },
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "approval": {
+          "op": {
+            "tool": "list_databases",
+            "arguments": "{\"host\":\"conf\"}",
+            "host": "conf"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "host": "conf",
+                "filter": "a*"
+              },
+              "op": {
+                "tool": "list_databases",
+                "arguments": "{\"filter\":\"a*\",\"host\":\"conf\"}",
+                "host": "conf"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "host": "conf",
+                "filter": "b*"
+              },
+              "op": {
+                "tool": "list_databases",
+                "arguments": "{\"filter\":\"b*\",\"host\":\"conf\"}",
+                "host": "conf"
+              }
+            }
+          }
+        }
+      },
+      "query.run.read": {
+        "tool": "run_query",
+        "arguments": {
+          "host": "conf",
+          "sql": "SELECT 1"
+        },
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "approval": {
+          "op": {
+            "tool": "run_query",
+            "host": "conf",
+            "sql": "SELECT 1",
+            "ch_user": "chdash"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "host": "conf",
+                "sql": "SELECT 2"
+              },
+              "op": {
+                "tool": "run_query",
+                "host": "conf",
+                "sql": "SELECT 2",
+                "ch_user": "chdash"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "host": "conf",
+                "sql": "SELECT 3"
+              },
+              "op": {
+                "tool": "run_query",
+                "host": "conf",
+                "sql": "SELECT 3",
+                "ch_user": "chdash"
+              }
+            }
+          }
+        }
+      },
+      "query.run.write": {
+        "tool": "run_write_query",
+        "arguments": {
+          "host": "conf",
+          "sql": "CREATE TABLE IF NOT EXISTS default.conf_a (x UInt8) ENGINE = Memory"
+        },
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "approval": {
+          "op": {
+            "tool": "run_write_query",
+            "host": "conf",
+            "sql": "CREATE TABLE IF NOT EXISTS default.conf_a (x UInt8) ENGINE = Memory",
+            "ch_user": "chdash_write"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "host": "conf",
+                "sql": "CREATE TABLE IF NOT EXISTS default.conf_b (x UInt8) ENGINE = Memory"
+              },
+              "op": {
+                "tool": "run_write_query",
+                "host": "conf",
+                "sql": "CREATE TABLE IF NOT EXISTS default.conf_b (x UInt8) ENGINE = Memory",
+                "ch_user": "chdash_write"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "host": "conf",
+                "sql": "CREATE TABLE IF NOT EXISTS default.conf_c (x UInt8) ENGINE = Memory"
+              },
+              "op": {
+                "tool": "run_write_query",
+                "host": "conf",
+                "sql": "CREATE TABLE IF NOT EXISTS default.conf_c (x UInt8) ENGINE = Memory",
+                "ch_user": "chdash_write"
+              }
+            }
+          }
+        }
+      },
+      "library.read": {
+        "tool": "query_library",
+        "arguments": {
+          "host": "conf"
+        },
+        "resource_type": "service",
+        "resource_id": "chdash",
+        "ancestors": [],
+        "approval": {
+          "op": {
+            "tool": "query_library",
+            "arguments": "{\"host\":\"conf\"}",
+            "host": "conf"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "host": "conf",
+                "params": {
+                  "limit": 1
+                }
+              },
+              "op": {
+                "tool": "query_library",
+                "arguments": "{\"host\":\"conf\",\"params\":{\"limit\":1}}",
+                "host": "conf"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "host": "conf",
+                "params": {
+                  "limit": 2
+                }
+              },
+              "op": {
+                "tool": "query_library",
+                "arguments": "{\"host\":\"conf\",\"params\":{\"limit\":2}}",
+                "host": "conf"
+              }
+            }
+          }
+        }
+      },
+      "system.read": {
+        "tool": "system_overview",
+        "arguments": {
+          "host": "conf"
+        },
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "approval": {
+          "op": {
+            "tool": "system_overview",
+            "arguments": "{\"host\":\"conf\"}",
+            "host": "conf"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "host": "conf",
+                "params": {
+                  "refresh": 0
+                }
+              },
+              "op": {
+                "tool": "system_overview",
+                "arguments": "{\"host\":\"conf\",\"params\":{\"refresh\":0}}",
+                "host": "conf"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "host": "conf",
+                "params": {
+                  "refresh": 1
+                }
+              },
+              "op": {
+                "tool": "system_overview",
+                "arguments": "{\"host\":\"conf\",\"params\":{\"refresh\":1}}",
+                "host": "conf"
+              }
+            }
+          }
+        }
+      },
+      "mcp.usage.read": {
+        "tool": "mcp_analysis_all_usage",
+        "arguments": {},
+        "resource_type": "service",
+        "resource_id": "chdash",
+        "ancestors": [],
+        "approval": {
+          "op": {
+            "tool": "mcp_analysis_all_usage",
+            "arguments": "{\"group\":\"key\",\"limit\":20,\"order\":\"requests\",\"series\":false,\"window\":\"24h\"}"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "limit": 1
+              },
+              "op": {
+                "tool": "mcp_analysis_all_usage",
+                "arguments": "{\"group\":\"key\",\"limit\":1,\"order\":\"requests\",\"series\":false,\"window\":\"24h\"}"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "limit": 2
+              },
+              "op": {
+                "tool": "mcp_analysis_all_usage",
+                "arguments": "{\"group\":\"key\",\"limit\":2,\"order\":\"requests\",\"series\":false,\"window\":\"24h\"}"
+              }
+            }
+          }
+        }
+      },
+      "query.export": {
+        "tool": "export_query",
+        "arguments": {
+          "host": "conf",
+          "sql": "SELECT 1"
+        },
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "other_action": "query.run.read",
+        "approval": {
+          "op": {
+            "tool": "export_query",
+            "host": "conf",
+            "sql": "SELECT 1",
+            "ch_user": "chdash",
+            "options": "{\"format\":\"csv\"}"
+          },
+          "variants": {
+            "effect_2": {
+              "arguments": {
+                "host": "conf",
+                "sql": "SELECT 2"
+              },
+              "op": {
+                "tool": "export_query",
+                "host": "conf",
+                "sql": "SELECT 2",
+                "ch_user": "chdash",
+                "options": "{\"format\":\"csv\"}"
+              }
+            },
+            "effect_3": {
+              "arguments": {
+                "host": "conf",
+                "sql": "SELECT 3"
+              },
+              "op": {
+                "tool": "export_query",
+                "host": "conf",
+                "sql": "SELECT 3",
+                "ch_user": "chdash",
+                "options": "{\"format\":\"csv\"}"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "timeouts": {

@@ -33,6 +33,13 @@ struct McpCallRecord {
   std::string host;
   std::string request_id;  // the JSON-RPC id, as text; empty when it is not known
   uint64_t rows = 0;
+  // The approval of a person (docs/access.md, "Approval of an action"). Set only for a call that had an effect: the call log then has
+  // approval.effect (the hash that the PDP and the phone know), approval.outcome (one fixed word) and, for a statement that ran,
+  // approval.executed_sql. The owner of the portal compares them with the history of the phone to find a substitution. The record never holds
+  // another text of the approval: no text of the agent, no explanation, no comment, no token.
+  std::string effect;
+  std::string executed_sql;
+  std::string approval;
   McpTraceContext trace;
   std::string trace_id;  // of the SERVER span: the trace of the context, or a new one
   std::string span_id;

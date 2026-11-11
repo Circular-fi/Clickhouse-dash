@@ -1133,7 +1133,8 @@ def test_disks_lists_the_fixture_disks_and_the_tiered_policy():
     policies = {policy["name"]: policy for policy in payload["policies"]}
     tiered = policies["fixture_tiered"]["volumes"]
     assert [(v["name"], v["priority"], v["disks"]) for v in tiered] == [("hot", 1, ["fixture_hot"]), ("warm", 2, ["fixture_warm"])], tiered
-    assert all(abs(v["move_factor"] - 0.1) < 1e-6 and v["volume_type"] == "JBOD" for v in tiered), tiered
+    # The fixture sets move_factor 0 (clickhouse-config/fixture-storage.xml): a part moves by the TTL rule only, never by the free space of the host.
+    assert all(v["move_factor"] == 0 and v["volume_type"] == "JBOD" for v in tiered), tiered
     assert payload["disks_truncated"] is False and payload["policies_truncated"] is False
 
 
