@@ -183,7 +183,9 @@ The document lists the published actions only (ProcurAuth 5.2a). An action of a 
 | `mcp.usage.read` | `mcp.enabled` is `true` and `mcp.usage.enabled` is `true`. In the mode `identity`, `mcp.usage.all_keys` must also be `true` (the tool `mcp_analysis_all_usage`). |
 | `mcp.keys.read` | `mcp.enabled` is `true` and `mcp.auth_mode` is not `identity`. The identity mode has no key of ChDash. |
 | `mcp.keys.write` | `mcp.enabled` is `true`, `mcp.auth_mode` is not `identity`, and `mcp.keys.mode` is not `static`. |
-| `mcp.session` | `mcp.enabled` is `true` and `mcp.auth_mode` is `identity`. |
+| `mcp.hosts.read` | `mcp.enabled` is `true` and `mcp.auth_mode` is `identity` (the tool `list_hosts`). |
+| `mcp.analysis.read` | `mcp.enabled` is `true` and `mcp.auth_mode` is `identity` (the tools `mcp_analysis_my_limits` and `mcp_analysis_my_usage`). |
+| `mcp.session` | `mcp.enabled` is `true` and `mcp.auth_mode` is `identity`. No tool uses it: it is for the requests that call no tool. |
 
 An action that the document does not publish is a plain denial for ChDash: it never asks the PDP about it, and no grant can give it ([Actions and tools](#actions-and-tools)). The navigation follows the document: a page whose actions are not published has no link, and `GET /api/version` lists the published actions only. A system that holds grants (the portal) keeps a grant for an action that is not published. The grant applies again when the action is published again, for example when you set `mcp.enabled = true`. ChDash reads the configuration at start: a change of these settings needs a restart.
 
@@ -200,7 +202,9 @@ An action that the document does not publish is a plain denial for ChDash: it ne
 | `mcp.keys.read` | `service` | `GET /api/mcp/keys`, `GET /api/mcp/keys/<id>/access`, `GET /api/mcp/access` |
 | `mcp.keys.write` | `service` | `POST /api/mcp/keys`, `DELETE /api/mcp/keys/<id>`, `POST /api/mcp/keys/<id>/adopt` |
 | `mcp.usage.read` | `service` | `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET /api/mcp/keys/<id>/usage`, `GET /api/mcp/keys/<id>/cost` |
-| `mcp.session` | `service` | `POST /mcp` in the mode `identity`: each request that calls no tool, and the tools that use no action of the pages. Each one takes a unit of the budget `requests` ([Budgets](#budgets)). |
+| `mcp.hosts.read` | `service` | `POST /mcp` in the mode `identity`: the tool `list_hosts`. It lists the hosts that the person can see. |
+| `mcp.analysis.read` | `service` | `POST /mcp` in the mode `identity`: the tools `mcp_analysis_my_limits` and `mcp_analysis_my_usage`. They show the limits and the usage of the subject itself. |
+| `mcp.session` | `service` | `POST /mcp` in the mode `identity`: each request that calls no tool (`initialize`, `ping`, `server/discover`, a notification). Each one takes a unit of the budget `requests` ([Budgets](#budgets)). No tool uses this action. |
 
 The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
 
@@ -264,7 +268,8 @@ ChDash never lets an operation run on a `subtree` decision. A `subtree` question
 | `observability.read` | The host. | The parameter `host_id`. |
 | `library.read`, `library.write` | The service. | None: the query library is global. |
 | `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read` | The service. | None: the MCP keys and their usage are global. |
-| `mcp.session` | The service. | None: it is the permission to use the MCP endpoint (refer to [The MCP endpoint](#the-mcp-endpoint)). |
+| `mcp.hosts.read`, `mcp.analysis.read` | The service. | None: the first lists the hosts that the person can see, the second shows the limits and the usage of the person. |
+| `mcp.session` | The service. | None: it is the permission to use the MCP endpoint, for the requests that call no tool (refer to [The MCP endpoint](#the-mcp-endpoint)). |
 
 Rules:
 
@@ -278,7 +283,7 @@ Rules:
 
 ChDash shows only the hosts on which the human holds one action at least:
 
-- One batch asks each action that takes a host on each host of the configuration. The same batch asks each other action on the service. Each question of this batch has the match `subtree`. `GET /api/version`, `GET /api/hosts` and each page render ask the same questions, so the cache of the decisions serves them all.
+- One batch asks each action that takes a host on each host of the configuration. The same batch asks each other action on the service. Each question of this batch has the match `subtree`. `GET /api/version`, `GET /api/hosts` and each page render ask the same questions, so the cache of the decisions serves them all. The batch does not ask `mcp.hosts.read`, `mcp.analysis.read` and `mcp.session`: no page uses them, and a `subtree` answer never permits a tool.
 - A host is visible when one decision of the batch on the host is `true`. A grant on the service, on the host or on a database of the host makes the host visible.
 - `GET /api/hosts`, `GET /api/hosts/stream` and the hosts of `GET /api/mcp/meta` list only the visible hosts. The stream keeps the hosts of its start.
 - The host picker of a page shows only the visible hosts on which the human holds one action of that page. For example, the System page needs `system.read` on the host.
@@ -291,7 +296,10 @@ ChDash shows only the hosts on which the human holds one action at least:
 The Explorer lists only the databases on which the human holds `explorer.read`:
 
 - The catalog, the storage map and the graph (`GET /api/explorer/catalog`, `/storage` and `/graph`) have the rule `explorer.read` on the host. ProcurAuth 4.4 says that a `true` answer for `subtree` is for the display only. A PEP MUST NOT let an operation run because of it. So the route asks `node` on the host, with the `subtree` question of the display in the same batch. A `true` answer for `node` lets the route run for the host, with the ceilings of this answer.
-- Sometimes only the `subtree` answer is `true`: the person holds a grant on a database of the host. The host is then visible, and the route runs in the mode "filtered". It returns only the databases that a `node` decision of their own allows. It answers `403` when it has none. The statements of these three routes read the catalog with the account of the host, for all the databases. The persons share the result. Nothing that no `node` decision allowed leaves ChDash. This is the reading of 4.4 that ChDash applies, and the question stays open for the specification.
+- Sometimes only the `subtree` answer is `true`: the person holds a grant on a database of the host. The host is then visible, and the route runs in the mode "filtered". It reads nothing for the host as a whole.
+- In the mode "filtered", the route first lists the names of the databases that the runner knows. These names are candidates only, and they are never shown. It asks `explorer.read` with the match `node` for each name (with `pdp.search = true`, one Resource Search can do this). It reads only the databases that a decision allows. The route answers `403` when no database is allowed.
+- The catalog gets the totals of the allowed databases only. The storage map and the graph are built from the objects of the allowed databases only: ChDash discovers the objects of no other database for this request. A lineage that leads out of the allowed databases shows `[HIDDEN]` or nothing.
+- ChDash keeps nothing of a filtered read. The shared caches of the catalog, of the storage map and of the graph hold the whole host, and only a person with `node` on the host reads them. So two persons with different decisions never share a result. A filtered read costs more than a cached read: use a grant on the host for a person who reads many databases.
 - The route keeps only the readable databases. One batch asks `explorer.read` with the match `node` on the host and on each database of the answer. A decision on the host that is `true` keeps every database. Without it, a database stays when its own decision is `true`. The cache of the PDP serves these questions.
 - With `pdp.search = true`, one Resource Search for `explorer.read` can replace the questions of the databases of the catalog (refer to [Resource Search](#resource-search)).
 - A request that names a database (the parameter `database` of the catalog, the table card, the definition of a graph object) asks `node` on that database. A database that the human cannot read gets `403`, as before.
@@ -433,7 +441,7 @@ Every value is below 2^53. A reader that uses floating point numbers reads each 
 | `query.run.read`, `query.run.write`, `query.export` | All six. |
 | `explorer.read` | `max_rows`, `max_rows_read`, `max_duration`, `max_memory`. |
 | `system.read`, `observability.read` | `max_rows_read`, `max_rows`, `max_duration`. |
-| `library.read`, `library.write`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read`, `mcp.session` | None. |
+| `library.read`, `library.write`, `mcp.keys.read`, `mcp.keys.write`, `mcp.usage.read`, `mcp.hosts.read`, `mcp.analysis.read`, `mcp.session` | None. |
 
 The same actions also list budgets: `queries` on `query.run.read` and `query.run.write`, `exports` on `query.export`, `requests` on `mcp.session`. A budget is not a ceiling: the PDP never sends it in `context.limits`.
 
@@ -557,7 +565,7 @@ A grant can carry budgets (ProcurAuth section 6). A budget is an amount of units
 |---|---|---|---|
 | `queries` | query | `query.run.read`, `query.run.write` | A run of SQL is accepted: `POST /api/query/run` and `POST /api/query`. Also when the replay of Deep Analyze starts (`POST /api/query/deep-analysis`). Also at each MCP call of a tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`): in the mode `identity` the unit is a unit of the subject of the token, and in the mode `keys` it is a unit of the creator of the key ([MCP keys](#mcp-keys)). |
 | `exports` | export | `query.export` | The download of an export starts (`POST /api/export/stream`). |
-| `requests` | request | `mcp.session` | An MCP request reads no data of a host (mode `identity`): `initialize`, `ping`, `server/discover`, a notification, a method that ChDash does not know, and the tools that use `mcp.session`. |
+| `requests` | request | `mcp.session` | An MCP request that calls no tool (mode `identity`): `initialize`, `ping`, `server/discover`, a notification, and a method that ChDash does not know. |
 
 No other action lists a budget. The pages, the Explorer, the System page, the query library and the routes of the MCP page (the keys and their usage) take no unit. A budget is listed only when its action is published: `requests` is not in the document when `mcp.session` is not.
 
@@ -585,8 +593,8 @@ Rules:
 
 - **One question for each use.** ChDash never sends `context.usage` in a batch, and never with the match `subtree` (ProcurAuth 6.11). It never sends the same question without `context.usage` before this question (ProcurAuth 10.1). The other permissions of the operation go before it, without `context.usage` (ProcurAuth 5.5a).
 - **A run.** ChDash classifies the SQL ([Read and write](#read-and-write)). A read is a use of `query.run.read`. A write, and an SQL that ChDash does not know, are a use of `query.run.write`. ChDash first asks the action of the use with `context.usage`. No question without `context.usage` comes before it, because the other run action is no required permission: a person needs one of the two. When the answer is `true`, ChDash asks the other run action without `context.usage`. This answer gives `readonly` and the ceilings of the other class. A failure of this second question gives `503` after the unit is taken. When the first answer is a plain `false` and the unit is not taken, ChDash asks the other action with `context.usage` (ProcurAuth 10.1). It chooses in this order and stops at the first answer. A person who holds `query.run.write` only can thus run a read. ChDash never asks a second action after an answer that took a unit, after `budget_exceeded` and after a failure.
-- **An export.** The other permissions are `query.run.read` and `query.run.write` on the host of the job, without `context.usage`. The use is `query.export`, with `context.usage`.
-- **MCP.** The mode `identity` sends one question with `context.usage` for each request that calls no tool (`mcp.session`), for each tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`, on the host or the database of the call) and for the tools that use `mcp.session`. A call without `host` runs nothing: it asks the match `subtree` without `context.usage` and takes no unit. The questions of `tools/list` have no `context.usage`. The mode `keys` sends one question with `context.usage` for the creator of the key at each call of a tool of `query.run.read` ([MCP keys](#mcp-keys)).
+- **An export.** The other permissions are `query.run.read` and `query.run.write` on the host of the job, without `context.usage`. The use is `query.export`, with `context.usage`. For the MCP tool `export_query`, the approval follows the use alone: only `confirm` on `query.export` asks an approval. A reason of 17.1 for `query.run.read` gives the tool error `scope_needs_approval` and submits nothing.
+- **MCP.** The mode `identity` sends one question with `context.usage` for each request that calls no tool (`mcp.session`) and for each tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`, on the host or the database of the call). A call without `host` runs nothing: it asks the match `subtree` without `context.usage` and takes no unit. The questions of `tools/list` have no `context.usage`. The mode `keys` sends one question with `context.usage` for the creator of the key at each call of a tool of `query.run.read` ([MCP keys](#mcp-keys)).
 - **No other question.** An action that the document lists with no budget gets no `context.usage`.
 
 The check of the rule of a run asks nothing, because the action of the use depends on the SQL. The handler of the route asks, when it has the SQL. Until then the statements of the request run with `readonly = 1` and with the lowest value of each ceiling (fail closed).
@@ -638,7 +646,7 @@ An MCP key of the mode `keys` holds no identity token. Its creator is the person
 - A refused use gives the answers of [mcp.md](mcp.md#budgets-of-the-keys): the tool error `budget_exceeded` with `retry_after` for a spent budget, HTTP `503` for no valid answer. No valid answer to any other question of a request of a key also gives HTTP `503` with `-32603`, as on the routes (decision of 2026-11-07).
 - The tools of the other actions take no unit. These actions list no budget.
 - When the PDP answers a reason of 17.1 to the question of the use, the key follows the flow of the approval for its creator ([The keys of the page](#the-keys-of-the-page)).
-- ChDash keeps the state of a key for `pdp.cache_ttl`, and it gets this state from one batch without `context.usage` before it reads the body. The state can expire at a call of a tool of `query.run.read`. This batch then goes before the question of the use in the same request. ProcurAuth 10.1 says that the PEP MUST NOT send the same question without `context.usage` before the use. The owner accepts this exception (decision of 2026-11-07). The batch decides which tools `tools/list` shows and whether the key is an orphan: it is a question for the display. The fix that follows the specification is to ask this batch with the match `subtree` (ProcurAuth 4.4). It changes the list of tools of a key whose creator holds a grant with a ceiling. So it waits for a decision of the owner.
+- ChDash keeps the state of a key for `pdp.cache_ttl`, and it gets this state from one batch before it reads the body. The batch decides which tools `tools/list` shows and whether the key is an orphan. It is a question for the display, so it has the match `subtree` (ProcurAuth 4.4) and no `context.usage`. It is never the question of a use (ProcurAuth 10.1), and the PDP ignores `confirm` for it (17.8). Effect for a key whose creator has a grant with a ceiling: the tool stays in `tools/list` (before 1.5.0 the tool left the list), and the call gets the refusal of a key that cannot apply a ceiling (`403`, `-32001`, fixed message). The owner decided this on 2026-11-12.
 
 ## Navigation
 
@@ -732,7 +740,7 @@ An MCP key of the page (the mode `keys`) has a creator: the person who made it. 
 Limits of the mode `keys`. These limits come from what the mode has:
 
 - A key of the configuration has no creator, so no subject. ChDash asks no PDP question for it and cannot ask an approval. It stays outside the approval, as the standalone keys of the ruling of 2026-11-11. It has no `get_action_status` and no control argument.
-- A tool that uses no action (`list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage`) asks the PDP nothing in the mode `keys`. The action `mcp.session` is not in the document of this mode. So these tools need no approval. They accept the control arguments and ignore them.
+- A tool that uses no action (`list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage`) asks the PDP nothing in the mode `keys`. The actions `mcp.hosts.read`, `mcp.analysis.read` and `mcp.session` are not in the document of this mode. So these tools need no approval. They accept the control arguments and ignore them.
 - The tools `run_write_query`, `export_query` and `library_write` exist in the identity mode only. A key has no tool for `query.run.write`, `query.export` and `library.write`. So the document of the mode `keys` does not publish these three actions ([Actions and tools](#actions-and-tools)).
 - A call that cannot name one node is a tool error when more than one standing question of the key needs an approval. This happens when the key has several databases in its scope, the call names none of them, and the grants for these databases have `confirm`. The error is `invalid_argument`. For a tool that takes a database, the message tells the agent to name one database in the argument `database`. For a tool that names no database, the message tells the agent to use a tool that does. Before 1.5.0, the agent got the answer of a tool that does not exist.
 - The pages of the keys (`mcp.keys.read`, `mcp.keys.write`) and of the usage (`mcp.usage.read`) are pages of the mode `keys`. Their actions have no tool. A page cannot wait, so they are in the exception of [The page and the API](#the-page-and-the-api).
@@ -789,7 +797,7 @@ Each function of ChDash must be able to wait for an approval, so each published 
 - The mode `keys` has no tool with an effect and no export. It does not publish `query.run.write`, `query.export` and `library.write`. It publishes the pages of the keys (`mcp.keys.read`, `mcp.keys.write`) and of the usage (`mcp.usage.read`, when `mcp.usage.enabled` is `true`). These pages are routes, so they are in the exception above.
 - MCP off: no tool exists. The pages publish what they serve, and they cannot wait.
 
-A person cannot use an action that the document does not publish: ChDash answers `403` without a question to the PDP, and the Query page runs each statement with `readonly = 1`. The test `test_actions_and_tools_agree` (`tests/native/approval_test.cpp`) checks the rule on 216 configurations of the identity mode and on the mode `keys`: each published action has a tool, and each tool names a published action or `mcp.session`. The conformance run has three variants (`docs/conformance.md`).
+A person cannot use an action that the document does not publish: ChDash answers `403` without a question to the PDP, and the Query page runs each statement with `readonly = 1`. The test `test_actions_and_tools_agree` (`tests/native/approval_test.cpp`) checks the rule on 216 configurations of the identity mode and on the mode `keys`: each published action has a tool, and each tool names a published action. `mcp.session` has no tool: it is for the requests that call no tool. The conformance run has three variants (`docs/conformance.md`).
 
 ### Routes with no action
 

@@ -91,7 +91,11 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
   }
 
   const std::vector<std::string> tools = mcp_effective_tools(key.tools, key.databases);
-  const std::vector<AccessQuestion> questions = mcp_key_access_questions(key.tools, key.hosts, key.databases, service_id_);
+  std::vector<AccessQuestion> questions = mcp_key_access_questions(key.tools, key.hosts, key.databases, service_id_);
+  // The state shows which tools the key lists: a question for the display. It has the match `subtree` (ProcurAuth 4.4), so it is never the same
+  // question as the question of a use (10.1), and the PDP ignores `confirm` for it (17.8). A ceiling of the creator is checked at the call, where the
+  // question has the match `node`: the tool stays listed and the call gets the refusal of a key that cannot apply a ceiling.
+  for (auto& question : questions) question.match = AccessMatch::Subtree;
   std::vector<AccessDecision> decisions;
   if (!questions.empty()) decisions = decide_(key.creator, questions);
   decisions.resize(questions.size());

@@ -76,6 +76,9 @@ public:
   bool table_readable(const AclAccess& access, const std::string& database, const std::string& table);
   // Every object that the identity reads. Throws AclUnavailable.
   std::shared_ptr<const AclTableSet> table_set(const AclAccess& access);
+  // The objects of the databases of `only` that the identity reads (the others are never discovered). Nothing is kept: a person who has a
+  // decision on some databases only (ProcurAuth 4.4) must not share a set with a person who has other decisions. Throws AclUnavailable.
+  std::shared_ptr<const AclTableSet> table_set_for(const AclAccess& access, const std::vector<std::string>& only);
 
   // Use refresh=1 after changes of grants. The next answers for the identity are read after this call.
   void invalidate(const AclAccess& access);
@@ -101,6 +104,9 @@ private:
 class AclView {
 public:
   AclView(AclService& service, AclAccess access) : service_(service), access_(std::move(access)) {}
+  // A view that sees the databases of `only` (sorted) and no other: the person has a decision for these databases only.
+  AclView(AclService& service, AclAccess access, std::vector<std::string> only)
+      : service_(service), access_(std::move(access)), restricted_(true), only_(std::move(only)) {}
 
   // The databases that the identity reads (sorted). Throws AclUnavailable.
   const std::vector<std::string>& databases();
@@ -119,6 +125,10 @@ private:
   AclAccess access_;
   std::shared_ptr<const AclDatabases> databases_;
   std::unordered_map<std::string, std::shared_ptr<const AclObjects>> objects_;
+  bool restricted_ = false;
+  std::vector<std::string> only_;
+  std::vector<std::string> visible_names_;
+  bool visible_names_ready_ = false;
 };
 
 } // namespace chdash

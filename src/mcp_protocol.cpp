@@ -487,7 +487,8 @@ const char* mcp_tool_input_schema(std::string_view tool) {
   static const char* const host =
       "\"host\":{\"type\":\"string\",\"description\":\"ClickHouse host name. Optional when the key has one host; "
       "see list_hosts.\"}";
-  static const std::string list_hosts = R"({"type":"object","properties":{},"additionalProperties":false})";
+  static const std::string list_hosts =
+      R"({"type":"object","properties":{"host":{"type":"string","description":"Only this host (a name from the list). Without it, every host that you can see."}},"additionalProperties":false})";
   static const std::string list_databases = std::string("{\"type\":\"object\",\"properties\":{") + host +
       ",\"filter\":{\"type\":\"string\",\"description\":\"Glob on the database name; * matches any text.\"}},"
       "\"additionalProperties\":false}";

@@ -48,8 +48,10 @@ McpKey mcp_identity_key(const std::string& subject) {
 
 const char* mcp_tool_identity_action(const McpToolInfo& tool) {
   if (const char* action = mcp_tool_access_action(tool)) return action;
-  // list_hosts and the analysis of the key itself use no action of the pages: they use the action of the session.
-  return tool.api ? "unknown" : "mcp.session";
+  // list_hosts and the analysis of the caller read no data of a host: each has an action of its own. mcp.session is never the action of a tool.
+  if (std::string_view(tool.name) == "list_hosts") return "mcp.hosts.read";
+  if (std::string_view(tool.name) == "mcp_analysis_my_limits" || std::string_view(tool.name) == "mcp_analysis_my_usage") return "mcp.analysis.read";
+  return "unknown";
 }
 
 McpSubjectAccess::McpSubjectAccess(std::string service_id, std::vector<std::string> hosts, AccessFeatures features, Decide decide,
@@ -171,12 +173,16 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
   // The ceilings of that permission lower the ceilings of the call, as the ceilings of its own action do (ProcurAuth 5.5a).
   const bool needs_other = std::string_view(tool.name) == kMcpExportTool && question->match == AccessMatch::Node;
   PdpLimits other_limits;
+  bool scope_needs_approval = false;
   const auto other_stop = [&]() -> std::optional<AccessDecision> {
     if (!needs_other) return std::nullopt;
     std::vector<AccessDecision> other = decide_(subject, {AccessQuestion{"query.run.read", question->resource}});
     other.resize(1);
     if (other.front().failed) return other.front();
     if (!other.front().allowed) {
+      // ProcurAuth 5.5a, spec question 53: the approval follows the action of the use alone (query.export). The other permission only limits the
+      // scope: a reason of 17.1 for it can start no approval. The call is refused with a tool error that says so (never an approval).
+      scope_needs_approval = pdp_reason_is_approval(other.front().reason);
       AccessDecision denied;
       denied.source = "pdp";
       return denied;
@@ -206,6 +212,12 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
     std::vector<AccessDecision> decisions = decide_(subject, {*question});
     decisions.resize(1);
     decision = decisions.front();
+  }
+  if (scope_needs_approval && info) {
+    info->answered = mcp_tool_error("scope_needs_approval",
+                                    "The grant for the scope of this call (query.run.read) asks for an approval. An approval covers only the action of the tool "
+                                    "(query.export), so the call is refused. Ask the owner for a grant of query.run.read without confirm.");
+    return McpAccess::Allowed;
   }
   switch (access_outcome(decision)) {
     case AccessOutcome::Allowed: break;

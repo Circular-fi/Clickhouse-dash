@@ -141,9 +141,75 @@ Result<Cached<ExplorerCatalog>> ExplorerService::catalog(const RequestContext&, 
 // ---------------------------------------------------------------------------
 // The storage map
 
-Result<Cached<ExplorerStorageMap>> ExplorerService::storage(const RequestContext&, const HostSpec& host, const std::string& host_id, bool refresh) const {
+Result<std::vector<std::string>> ExplorerService::database_names(const HostSpec& host) const {
+  using Out = Result<std::vector<std::string>>;
+  try {
+    const auto listed = acl_.databases(access_of_(host));
+    std::vector<std::string> names = listed->databases;
+    names.insert(names.end(), listed->unverified.begin(), listed->unverified.end());
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return Out::ok(std::move(names));
+  } catch (const AclUnavailable& e) {
+    return Out::fail(make_error(503, e.code, e.what()));
+  }
+}
+
+Result<Cached<ExplorerCatalog>> ExplorerService::catalog_for(const HostSpec& host, const std::vector<std::string>& only) const {
+  using Out = Result<Cached<ExplorerCatalog>>;
+  const AclAccess access = access_of_(host);
+  std::string error;
+  auto runner = connect_(host.runner_uri, &error);
+  if (!runner) return Out::fail(make_error(503, "runner_unavailable", reason_or(error, "Cannot connect to the runner context.")));
+  try {
+    const auto listed = acl_.databases(access);
+    auto value = std::make_shared<ExplorerCatalog>();
+    value->generated_at_ms = static_cast<uint64_t>(now_ms());
+    for (const auto& name : listed->databases) {
+      if (std::binary_search(only.begin(), only.end(), name)) value->databases.push_back(name);
+    }
+    for (const auto& name : listed->unverified) {
+      if (std::binary_search(only.begin(), only.end(), name)) value->databases.push_back(name);
+    }
+    std::sort(value->databases.begin(), value->databases.end());
+    value->acl_truncated = listed->truncated;
+    std::string summary_error;
+    (void)load_explorer_database_summaries(*runner, value->databases, value->database_summaries, &summary_error);
+    return Out::ok(Cached<ExplorerCatalog>{value, false});
+  } catch (const AclUnavailable& e) {
+    return Out::fail(make_error(503, e.code, e.what()));
+  } catch (const std::exception& e) {
+    runner->invalidate();
+    return Out::fail(make_error(503, "explorer_catalog_failed", e.what()));
+  }
+}
+
+Result<Cached<ExplorerStorageMap>> ExplorerService::storage(const RequestContext&, const HostSpec& host, const std::string& host_id, bool refresh,
+                                                            const std::vector<std::string>* only) const {
   using Out = Result<Cached<ExplorerStorageMap>>;
   const AclAccess access = access_of_(host);
+  if (only) {
+    // The person has decisions for some databases only: the read sees these databases and nothing else, and nothing is kept.
+    std::string error;
+    auto runner = connect_(host.runner_uri, &error);
+    if (!runner) return Out::fail(make_error(503, "runner_unavailable", reason_or(error, "Cannot connect to the runner context.")));
+    auto system = connect_(system_uri_of(host), &error);
+    if (!system) return Out::fail(make_error(503, "system_context_unavailable", reason_or(error, "Cannot connect to the system context.")));
+    try {
+      AclView acl(acl_, access, *only);
+      auto value = std::make_shared<ExplorerStorageMap>();
+      if (!load_explorer_storage_map(*system, *runner, acl, *value, &error)) {
+        return Out::fail(make_error(503, "explorer_storage_failed", reason_or(error, "Unable to load the Explorer storage distribution.")));
+      }
+      return Out::ok(Cached<ExplorerStorageMap>{value, false});
+    } catch (const AclUnavailable& e) {
+      return Out::fail(make_error(503, e.code, e.what()));
+    } catch (const std::exception& e) {
+      runner->invalidate();
+      system->invalidate();
+      return Out::fail(make_error(503, "explorer_storage_failed", e.what()));
+    }
+  }
   if (refresh) acl_.invalidate(access);
 
   auto result = stores_.storage.get_revalidating(
@@ -338,9 +404,39 @@ Result<ExplorerPreview> ExplorerService::preview(const RequestContext&, const Ho
 // The authorized graph of one host. It first runs the ACL discovery of the runner.
 // Then it adds the system-context catalog and the graph data, for those objects only.
 // The graph and definition routes share it. Both routes use the same AllowedObjectSet boundary.
-Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec& host, const std::string& host_id, bool refresh) const {
+Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec& host, const std::string& host_id, bool refresh,
+                                                                  const std::vector<std::string>* only) const {
   using Out = Result<Snapshot>;
   const AclAccess access = access_of_(host);
+  if (only) {
+    // The person has decisions for some databases only (ProcurAuth 4.4): the catalog and the graph are read for these databases and nothing else, and
+    // nothing is kept, so no other person shares them.
+    std::shared_ptr<const AclTableSet> allowed;
+    try {
+      allowed = acl_.table_set_for(access, *only);
+    } catch (const AclUnavailable& e) {
+      return Out::fail(make_error(503, e.code, e.what()));
+    }
+    std::string error;
+    auto system = connect_(system_uri_of(host), &error);
+    if (!system) return Out::fail(make_error(503, "system_context_unavailable", error));
+    auto runner = connect_(host.runner_uri, &error);
+    if (!runner) return Out::fail(make_error(503, "runner_unavailable", reason_or(error, "Cannot connect to the runner context.")));
+    const ExplorerIdentities identities{access.key};
+    auto catalog = std::make_shared<ExplorerCatalog>();
+    if (!load_explorer_catalog(*system, *runner, caches_, identities, allowed->allowed, *catalog, &error)) {
+      return Out::fail(make_error(503, "explorer_catalog_failed", error));
+    }
+    catalog->acl_truncated = allowed->truncated;
+    auto graph = std::make_shared<ExplorerGraph>();
+    if (!load_explorer_graph(*system, *runner, caches_, identities.runner, allowed->allowed, *catalog, *graph, &error)) {
+      return Out::fail(make_error(503, "explorer_graph_failed", error));
+    }
+    Snapshot snapshot;
+    snapshot.graph = graph;
+    snapshot.stale = false;
+    return Out::ok(std::move(snapshot));
+  }
   if (refresh) {
     acl_.invalidate(access);
     // Sidebar entries are keyed "<scope>\0catalog-list\0A" (all the databases) or "<scope>\0catalog-list\0D<database>".
@@ -414,9 +510,9 @@ Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec
 }
 
 Result<GraphScopeAnswer> ExplorerService::graph(const RequestContext&, const HostSpec& host, const std::string& host_id, const GraphScopeRequest& scope,
-                                               bool lineage_enabled, bool storage_enabled, bool refresh) const {
+                                               bool lineage_enabled, bool storage_enabled, bool refresh, const std::vector<std::string>* only) const {
   using Out = Result<GraphScopeAnswer>;
-  auto snapshot = graph_snapshot(host, host_id, refresh);
+  auto snapshot = graph_snapshot(host, host_id, refresh, only);
   if (!snapshot.value) return Out::fail(std::move(snapshot.error));
   GraphScopeAnswer answer;
   answer.graph = snapshot.value->graph;

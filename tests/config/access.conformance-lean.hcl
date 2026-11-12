@@ -1,4 +1,4 @@
-# The variant "lean" of tests/config/access.conformance.hcl (docs/conformance.md): no write account, no usage, a library that no person can change, and no signal. The
+# The variant "lean" of tests/config/access.conformance.hcl (docs/conformance.md): no write account, the usage without all_keys, a library that no person can change, and no signal. The
 # actions that no tool can serve are not declared: query.run.write, mcp.usage.read and library.write. Profile: tests/conformance/profile-lean.json.
 # ChDash under test of the ProcurAuth runner `access-conformance --role pep` (docs/conformance.md, tests/conformance/run.sh).
 # The runner acts as the edge, the PDP and the client. The script mounts the work directory at /conformance: it holds the public keys
@@ -50,7 +50,12 @@ mcp {
   # The tests send many requests with no valid key from one address: the limit of contract 3.9 is tested in mcp.unauth.hcl.
   unauthenticated_rate_limit_per_minute = 0
   auth_mode = "identity"
-  # No usage: mcp.usage.read is not declared.
+  # The usage is on, without all_keys: the tool mcp_analysis_my_usage exists (mcp.analysis.read), and mcp.usage.read is not published.
+  usage {
+    enabled  = true
+    dir      = "/tmp"
+    instance = "conformance"
+  }
 }
 
 # One host, with the runner account. GET /api/explorer/functions?host_id=conf is the use of explorer.read on this host.

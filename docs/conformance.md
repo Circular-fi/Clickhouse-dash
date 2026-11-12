@@ -99,9 +99,9 @@ The action document depends on the configuration (refer to [access.md](access.md
 
 | Variant | Configuration | Published actions that differ | `approval_calls` |
 |---|---|---|---|
-| default | A library that no person can change, the write account, the usage with `all_keys` and one host. | `query.run.write` and `mcp.usage.read` are published. `library.write` and `observability.read` are not. | 7 actions |
-| full | A writable library, the traces on (the script makes the tables of `otel`), the write account and the usage with `all_keys`. | Also `library.write` (the tool `library_write`, with the operation `import` of an empty library: it runs each time) and `observability.read` (the tool `list_services`). | 9 actions |
-| lean | No write account, no usage, a library that no person can change, no signal. | `query.run.write` and `mcp.usage.read` are not published: no tool serves them. | 5 actions |
+| default | A library that no person can change, the write account, the usage with `all_keys` and one host. | `query.run.write` and `mcp.usage.read` are published. `library.write` and `observability.read` are not. | 9 actions |
+| full | A writable library, the traces on (the script makes the tables of `otel`), the write account and the usage with `all_keys`. | Also `library.write` (the tool `library_write`, with the operation `import` of an empty library: it runs each time) and `observability.read` (the tool `list_services`). | 11 actions |
+| lean | No write account, the usage without `all_keys`, a library that no person can change, no signal. | `query.run.write` and `mcp.usage.read` are not published: no tool serves them. | 7 actions |
 
 Run the three of them before a release:
 
@@ -145,7 +145,7 @@ The run used the static release binary of the branch `feat/alignment`, built wit
 | Result | Default | Full | Lean |
 |---|---|---|---|
 | Run | 117 cases: 114 passed, 0 failed, 3 skipped | 117 cases: 114 passed, 0 failed, 3 skipped | 117 cases: 114 passed, 0 failed, 3 skipped |
-| Actions with a call in `approval_calls` | 7 | 9 | 5 |
+| Actions with a call in `approval_calls` | 9 | 11 | 7 |
 | Expected failures (`tests/conformance/expected.txt`) | none | none | none |
 
 The cases U96 and U97 pass: the profile has `mcp_call_multi` (`export_query`). The skipped cases are these:

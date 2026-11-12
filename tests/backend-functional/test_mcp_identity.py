@@ -230,7 +230,7 @@ def test_u87_the_host_and_the_database_of_a_call_name_its_resource():
 
 @needs_identity
 def test_a_grant_on_one_host_hides_the_other_host_in_list_hosts():
-    answer(default=False, subjects={"alice": ["mcp.session@service:db", "explorer.read@host:local"]})
+    answer(default=False, subjects={"alice": ["mcp.hosts.read@service:db", "explorer.read@host:local"]})
     result = call_tool("list_hosts", {}).json()["result"]["structuredContent"]
     assert [h["name"] for h in result["hosts"]] == ["local"]
     # A call on the other host looks like a tool that does not exist.
@@ -378,9 +378,13 @@ def test_u95_a_request_with_no_tool_is_one_use_of_mcp_session():
     assert rpc("ping").status_code == 200
     asked = usage_questions("mcp.session")
     assert len(asked) == 1 and asked[0]["context"] == {"usage": {"units": 1}} and asked[0]["resource"] == {"type": "service", "id": AUDIENCE}
-    # A tool of the action mcp.session (list_hosts) is a use of its action too.
+    # mcp.session is never the action of a tool: list_hosts asks mcp.hosts.read and the analysis of the caller asks mcp.analysis.read, with no usage.
     assert call_tool("list_hosts", {}).status_code == 200
-    assert len(usage_questions("mcp.session")) == 2
+    assert call_tool("mcp_analysis_my_limits", {}).status_code == 200
+    assert len(usage_questions("mcp.session")) == 1
+    named = {e["action"]["name"] for e in evaluations()}
+    assert {"mcp.hosts.read", "mcp.analysis.read"} <= named
+    assert not usage_questions("mcp.hosts.read") and not usage_questions("mcp.analysis.read")
 
 
 @needs_identity

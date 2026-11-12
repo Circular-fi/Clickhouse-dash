@@ -51,12 +51,19 @@ const AccessPage* access_page_of_shell(std::string_view shell) {
   return nullptr;
 }
 
+namespace {
+
+// The actions of the MCP endpoint that no page uses: they ask nothing for the navigation.
+bool navigation_action(std::string_view name) { return name != "mcp.hosts.read" && name != "mcp.analysis.read" && name != "mcp.session"; }
+
+} // namespace
+
 std::vector<AccessQuestion> access_navigation_questions(const std::string& service_id, const std::vector<std::string>& hosts,
                                                         const std::string& database, const AccessFeatures& features) {
   std::vector<AccessQuestion> out;
   const std::vector<AccessAction> actions = access_published_actions(features);
   for (const AccessAction& action : actions) {
-    if (!action.host) out.push_back(AccessQuestion{action.name, access_service_resource(service_id), AccessMatch::Subtree});
+    if (!action.host && navigation_action(action.name)) out.push_back(AccessQuestion{action.name, access_service_resource(service_id), AccessMatch::Subtree});
   }
   for (const auto& host : hosts) {
     for (const AccessAction& action : actions) {
@@ -104,6 +111,7 @@ std::vector<std::pair<std::string, bool>> access_action_summary(const std::vecto
                                                                const AccessFeatures& features) {
   std::vector<std::pair<std::string, bool>> out;
   for (const AccessAction& action : access_published_actions(features)) {
+    if (!navigation_action(action.name)) continue;
     bool allowed = false;
     for (size_t i = 0; i < questions.size() && i < decisions.size() && !allowed; ++i) {
       if (page_level(questions[i]) && decisions[i].allowed && questions[i].action == action.name) allowed = true;

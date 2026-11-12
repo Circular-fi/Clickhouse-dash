@@ -6286,7 +6286,7 @@ void test_identity_access() {
   pdp.fails = false;
 
   // tools/list: one item for each action, the service, the match subtree, no usage.
-  pdp.grants["alice"] = {"mcp.session@service:db", "explorer.read@service:db/host:prod"};
+  pdp.grants["alice"] = {"mcp.hosts.read@service:db", "mcp.analysis.read@service:db", "explorer.read@service:db/host:prod"};
   const McpKey key = mcp_identity_key("alice");
   std::vector<std::string> tools = mcp_effective_tools(key.tools, key.databases, McpToolAvailability::everything());
   const size_t before = pdp.asked.size();
@@ -6299,10 +6299,11 @@ void test_identity_access() {
     CHECK(q.match == AccessMatch::Subtree);
     CHECK(actions.insert(q.action).second);  // one item for each action
   }
-  CHECK(actions.count("explorer.read") && actions.count("mcp.session") && actions.count("query.run.read") && actions.count("system.read"));
+  CHECK(actions.count("explorer.read") && actions.count("mcp.hosts.read") && actions.count("mcp.analysis.read") && actions.count("query.run.read") && actions.count("system.read"));
   const auto has = [&](const char* name) { return std::find(listed->begin(), listed->end(), name) != listed->end(); };
   CHECK(has("list_databases") && has("describe_table") && has("explorer_catalog"));  // explorer.read (a grant below the service counts)
-  CHECK(has("list_hosts") && has("mcp_analysis_my_limits"));                          // mcp.session
+  CHECK(has("list_hosts") && has("mcp_analysis_my_limits"));                          // mcp.hosts.read and mcp.analysis.read
+  CHECK(actions.count("mcp.session") == 0);                                            // mcp.session is never the action of a tool
   CHECK(!has("run_query") && !has("system_overview") && !has("mcp_analysis_all_usage"));
   // The order of the catalog stays.
   CHECK(std::is_sorted(listed->begin(), listed->end(), [&](const std::string& a, const std::string& b) {
@@ -6347,15 +6348,17 @@ void test_identity_access() {
   CHECK_EQ(text("list_databases", R"({"host":""})"), std::string("explorer.read@service:db~"));
   // A host that MCP does not reach: the service, the match node. The PDP never gets the name.
   CHECK_EQ(text("list_databases", R"({"host":"attacker-chose-this"})"), std::string("explorer.read@service:db"));
-  // The tools with no action of the pages use mcp.session, and mcp.usage.read stays on the service.
-  CHECK_EQ(text("list_hosts", "{}"), std::string("mcp.session@service:db"));
-  CHECK_EQ(text("mcp_analysis_my_usage", "{}"), std::string("mcp.session@service:db"));
+  // The tools with no action of the pages have an action of their own, and mcp.usage.read stays on the service.
+  CHECK_EQ(text("list_hosts", "{}"), std::string("mcp.hosts.read@service:db"));
+  CHECK_EQ(text("mcp_analysis_my_usage", "{}"), std::string("mcp.analysis.read@service:db"));
+  CHECK_EQ(text("mcp_analysis_my_limits", "{}"), std::string("mcp.analysis.read@service:db"));
   CHECK_EQ(text("mcp_analysis_all_usage", "{}"), std::string("mcp.usage.read@service:db"));
-  CHECK_EQ(std::string(mcp_tool_identity_action(*mcp_find_tool("list_hosts"))), std::string("mcp.session"));
+  CHECK_EQ(std::string(mcp_tool_identity_action(*mcp_find_tool("list_hosts"))), std::string("mcp.hosts.read"));
+  CHECK_EQ(std::string(mcp_tool_identity_action(*mcp_find_tool("mcp_analysis_my_limits"))), std::string("mcp.analysis.read"));
   CHECK_EQ(std::string(mcp_tool_identity_action(*mcp_find_tool("run_query"))), std::string("query.run.read"));
 
   // A call: allowed, denied, failed.
-  pdp.grants["alice"] = {"explorer.read@service:db/host:prod/database:test2", "mcp.session@service:db"};
+  pdp.grants["alice"] = {"explorer.read@service:db/host:prod/database:test2", "mcp.hosts.read@service:db"};
   McpCallInfo info;
   CHECK(access.call("alice", *mcp_find_tool("describe_table"), args_of(R"({"host":"prod","database":"test2","table":"t"})"), &info) == McpAccess::Allowed);
   CHECK(!info.ceilings.any());
@@ -6397,23 +6400,23 @@ void test_identity_access() {
   CHECK(access.call("carol", *mcp_find_tool("run_query"), args_of(R"({"host":"prod","sql":"select 1"})"), &six) == McpAccess::Allowed);
   CHECK(*six.ceilings.max_rows_read == 11 && *six.ceilings.max_bytes_read == 12 && *six.ceilings.max_rows == 13);
   CHECK(*six.ceilings.max_result_bytes == 14 && *six.ceilings.max_duration_seconds == 15 && *six.ceilings.max_memory_bytes == 16);
-  // mcp.session declares no ceiling: list_hosts with a ceiling is a denial.
-  pdp.grants["carol"].push_back("mcp.session@service:db");
-  pdp.limits["mcp.session"] = {{"max_rows", 5}};
+  // mcp.hosts.read declares no ceiling: list_hosts with a ceiling is a denial.
+  pdp.grants["carol"].push_back("mcp.hosts.read@service:db");
+  pdp.limits["mcp.hosts.read"] = {{"max_rows", 5}};
   CHECK(access.call("carol", *mcp_find_tool("list_hosts"), none, &refused) == McpAccess::Denied);
   pdp.limits.clear();
 
   // list_hosts: the hosts that the person can see (the navigation questions for the subject).
-  pdp.grants["dave"] = {"mcp.session@service:db", "explorer.read@service:db/host:stage/database:d1"};
+  pdp.grants["dave"] = {"mcp.hosts.read@service:db", "explorer.read@service:db/host:stage/database:d1"};
   McpCallInfo dave;
   CHECK(access.call("dave", *mcp_find_tool("list_hosts"), none, &dave) == McpAccess::Allowed);
   CHECK(dave.visible_hosts.has_value());
   CHECK(*dave.visible_hosts == (std::vector<std::string>{"stage"}));
-  pdp.grants["erin"] = {"mcp.session@service:db", "explorer.read@service:db"};
+  pdp.grants["erin"] = {"mcp.hosts.read@service:db", "explorer.read@service:db"};
   McpCallInfo erin;
   CHECK(access.call("erin", *mcp_find_tool("list_hosts"), none, &erin) == McpAccess::Allowed);
   CHECK(*erin.visible_hosts == (std::vector<std::string>{"prod", "stage"}));
-  pdp.grants["frank"] = {"mcp.session@service:db"};
+  pdp.grants["frank"] = {"mcp.hosts.read@service:db"};
   McpCallInfo frank;
   CHECK(access.call("frank", *mcp_find_tool("list_hosts"), none, &frank) == McpAccess::Allowed);
   CHECK(frank.visible_hosts->empty());
@@ -6431,7 +6434,7 @@ void test_identity_budgets() {
   UsePdp use;
   IdentityPdp pdp;
   const chdash_test::GrantRules rules("db");
-  pdp.grants["alice"] = {"mcp.session@service:db", "explorer.read@service:db", "query.run.read@service:db", "system.read@service:db"};
+  pdp.grants["alice"] = {"mcp.session@service:db", "mcp.hosts.read@service:db", "explorer.read@service:db", "query.run.read@service:db", "system.read@service:db"};
   const McpSubjectAccess::DecideUse use_fn = [&use](const std::string& subject, const AccessQuestion& question) {
     use.asked.emplace_back(subject, question);
     return use.answer;
@@ -6525,10 +6528,14 @@ void test_identity_budgets() {
   CHECK(access.call("alice", *mcp_find_tool("run_query"), none, &info) == McpAccess::Allowed);
   CHECK(access.call("alice", *mcp_find_tool("explain_query"), none, &info) == McpAccess::Allowed);
   CHECK(use.asked.empty());
-  // The tools of the action mcp.session are uses of its budget.
+  // list_hosts has the action mcp.hosts.read, which lists no budget: the call asks without usage. mcp.session is never the action of a tool.
   CHECK(access.call("alice", *mcp_find_tool("list_hosts"), none, &info) == McpAccess::Allowed);
-  CHECK_EQ(use.asked.size(), size_t(1));
-  CHECK_EQ(question_text(use.asked.back().second), std::string("mcp.session@service:db"));
+  CHECK(use.asked.empty());
+  bool asked_hosts = false;
+  for (const auto& entry : pdp.asked) {
+    for (const auto& q : entry.second) asked_hosts = asked_hosts || question_text(q) == "mcp.hosts.read@service:db";
+  }
+  CHECK(asked_hosts);
 
   // Without the function of the uses (the tests of the other cases), or without the action in the document, no question has usage.
   McpSubjectAccess plain("db", {"prod"}, AccessFeatures{}, identity_decide(pdp, rules));
@@ -6863,7 +6870,7 @@ void test_identity_protocol() {
   pdp.fails = false;
 
   // U26, U88, U89, U90, U94: tools/list, a refused tool and an unknown tool.
-  pdp.grants["alice"] = {"mcp.session@service:db", "explorer.read@service:db/host:prod"};
+  pdp.grants["alice"] = {"mcp.session@service:db", "mcp.hosts.read@service:db", "mcp.analysis.read@service:db", "explorer.read@service:db/host:prod"};
   {
     const auto list = handle(rpc("tools/list", meta, "7"), modern_headers("tools/list"));
     CHECK_EQ(list.http_status, 200);

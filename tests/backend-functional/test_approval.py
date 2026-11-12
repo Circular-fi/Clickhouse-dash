@@ -440,9 +440,26 @@ def test_the_export_action_asks_for_an_approval_like_any_other_action():
 
 
 @needs_approval
+def test_the_approval_of_an_export_follows_the_use_action_alone():
+    # Spec question 53: only a confirm on query.export submits the call for approval. A confirm on query.run.read (the scope) asks no approval:
+    # the call is refused with a tool error that says so, and nothing goes to the approval API.
+    gate("query.run.read")
+    error = error_of(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))
+    assert error["code"] == "scope_needs_approval" and "query.export" in error["message"], error
+    assert received()["submissions"] == []
+    assert not [q for q in questions() if q["action"] == "query.export" and "approval" in q["context"]]
+    gate("query.export")
+    action = awaiting(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))
+    assert received()["submissions"][-1]["body"]["op"]["tool"] == "export_query"
+    decide(action["id"], "decline")
+
+
+@needs_approval
 def test_the_action_document_has_no_approval_member_and_no_action_of_the_keys():
     document = SESSION.get(f"{BASE_URL}/.well-known/procurauth/actions", timeout=10).json()
     names = {a["name"] for a in document["actions"]}
     assert "query.export" in names and "mcp.session" in names
+    # The tools that read no data of a host have an action of their own (mcp.session is only for the requests that call no tool).
+    assert {"mcp.hosts.read", "mcp.analysis.read"} <= names
     assert not {"mcp.keys.read", "mcp.keys.write"} & names
     assert all("approval" not in a for a in document["actions"])

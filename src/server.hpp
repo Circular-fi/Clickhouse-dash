@@ -634,6 +634,9 @@ private:
 
   // GET /.well-known/procurauth/resources (access_options.hpp, docs/access.md, "The route of the options").
   void handle_procurauth_resources(const httplib::Request& req, httplib::Response& res);
+  // The routes that list the databases of a host (catalog, storage, graph) in the mode "filtered" (access_list_filtered): the databases that a
+  // `node` decision allows, sorted, in *only. false: the answer is written (503 for a failure of the PDP or of the runner, 403 with no database).
+  bool explorer_filtered_databases(const HostSpec& host, const std::string& host_id, httplib::Response& res, std::vector<std::string>* only);
   void handle_explorer_catalog(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);

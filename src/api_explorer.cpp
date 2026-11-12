@@ -74,10 +74,45 @@ std::unique_ptr<ChExecutor> Server::open_explorer_executor(const std::string& ur
       error);
 }
 
+bool Server::explorer_filtered_databases(const HostSpec& host, const std::string& host_id, httplib::Response& res, std::vector<std::string>* only) {
+  // ProcurAuth 4.4: the person has no `node` decision on the host, so the route reads no database for the host. It lists the databases that the runner
+  // knows (names, never shown), asks `node` for each one, and reads only the databases that a decision allows.
+  const auto names = explorer_service_.database_names(host);
+  if (!names.value) {
+    send_error(res, names.error);
+    return false;
+  }
+  bool failed = false;
+  const auto readable = access_readable_databases({"explorer.read"}, host_id, *names.value, &failed, true);
+  if (failed) {
+    access_unavailable(res, "explorer.read");
+    return false;
+  }
+  only->clear();
+  if (readable) {
+    only->assign(readable->begin(), readable->end());
+  } else {
+    *only = *names.value;
+  }
+  std::sort(only->begin(), only->end());
+  if (only->empty()) {
+    access_forbidden(res, "explorer.read");
+    return false;
+  }
+  return true;
+}
+
 void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Response& res) {
   ExplorerRoute route;
   if (!open_explorer_route(cfg_, health_.get(), req, res, param_of(req, "host_id"), &route)) return;
   const std::string database_filter = param_of(req, "database");
+  if (database_filter.empty() && access_list_filtered()) {
+    std::vector<std::string> only;
+    if (!explorer_filtered_databases(*route.host, route.host_id, res, &only)) return;
+    const auto filtered = explorer_service_.catalog_for(*route.host, only);
+    if (!filtered.value) return send_error(res, filtered.error);
+    return send_json(res, explorer::catalog_json(route.host_id, database_filter, *filtered.value->value, false));
+  }
   const auto answer = explorer_service_.catalog(current_request_context(), *route.host, route.host_id, database_filter, refresh_of(req));
   if (!answer.value) return send_error(res, answer.error);
   // The catalog lists only the databases on which the human holds explorer.read (docs/access.md, "Hidden hosts"): one batch asks each
@@ -104,7 +139,10 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
 void Server::handle_explorer_storage(const httplib::Request& req, httplib::Response& res) {
   ExplorerRoute route;
   if (!open_explorer_route(cfg_, health_.get(), req, res, param_of(req, "host_id"), &route)) return;
-  const auto answer = explorer_service_.storage(current_request_context(), *route.host, route.host_id, refresh_of(req));
+  std::vector<std::string> only;
+  const bool filtered = access_list_filtered();
+  if (filtered && !explorer_filtered_databases(*route.host, route.host_id, res, &only)) return;
+  const auto answer = explorer_service_.storage(current_request_context(), *route.host, route.host_id, refresh_of(req), filtered ? &only : nullptr);
   if (!answer.value) return send_error(res, answer.error);
   // The map holds every database. A grant on some databases keeps only those (docs/access.md): one batch asks each database.
   const ExplorerStorageMap& map = *answer.value->value;
@@ -195,8 +233,11 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
       return access_forbidden(res, "explorer.read");
     }
   }
+  std::vector<std::string> only;
+  const bool filtered = access_list_filtered();
+  if (filtered && !explorer_filtered_databases(*route.host, route.host_id, res, &only)) return;
   const auto answer = explorer_service_.graph(current_request_context(), *route.host, route.host_id, scope, cfg_.explorer.lineage,
-                                              cfg_.explorer.storage_topology, refresh_of(req));
+                                              cfg_.explorer.storage_topology, refresh_of(req), filtered ? &only : nullptr);
   if (!answer.value) return send_error(res, answer.error);
   const explorer::GraphScopeAnswer& graph = *answer.value;
   // A lineage or a cluster topology crosses databases. A grant on some databases keeps only their nodes: one batch asks each

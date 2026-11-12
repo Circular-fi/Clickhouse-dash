@@ -8,7 +8,8 @@
 //   - tools/call asks the action of the tool on the resource that the arguments name: the host, or the database of the host (binding 3.2).
 //     A call of a tool whose action lists a budget is one use (binding 3.4), so its question has context.usage: the tools of query.run.read
 //     (run_query, explain_query, format_sql, explorer_names, query_execution) take a unit of `queries`, and the tools of the action
-//     mcp.session (list_hosts, the analysis of the key itself) take a unit of `requests`. The other tools ask without it.
+//     The tools list_hosts (mcp.hosts.read) and the analysis of the caller (mcp.analysis.read) have an action of their own, and no budget. The
+//     other tools ask without usage.
 // The subject is opaque: it can be a person or a key of the portal ("key:..."). The code reads no meaning from it.
 // Pure code: the decisions come from a function that the server gives (PdpClient::decide), so the tests use fakes.
 
@@ -31,7 +32,8 @@ namespace chdash {
 McpKey mcp_identity_key(const std::string& subject);
 
 // The action that a tool asks in the identity mode. It is the action of the access of humans (mcp_tool_access_action). The tools
-// that have no such action, list_hosts and the analysis of the key itself, ask mcp.session. "unknown" for a route without a rule.
+// that have no such action have one of their own: list_hosts asks mcp.hosts.read, the analysis of the caller mcp.analysis.read. mcp.session is
+// never the action of a tool. "unknown" for a route without a rule.
 const char* mcp_tool_identity_action(const McpToolInfo& tool);
 
 class McpSubjectAccess {
@@ -62,7 +64,7 @@ public:
   std::optional<AccessQuestion> call_question(const McpToolInfo& tool, const rapidjson::Value& arguments) const;
   // The decision of a call. For Allowed, `call` receives the ceilings (the lowest of the actions of the tool) and, for list_hosts, the
   // hosts that the person can see. A true answer with a ceiling that the action of the tool does not declare is Denied (ProcurAuth 7.5).
-  // A tool whose action lists a budget (the tools of query.run.read and of mcp.session) asks with context.usage when the question names a
+  // A tool whose action lists a budget (the tools of query.run.read and query.run.write, and query.export) asks with context.usage when the question names a
   // node: the call is one use. A true answer without context.usage.units is Denied (6.12). For BudgetExceeded, `call->retry_after` has the seconds. A call
   // without a host asks "subtree" and runs nothing: it is no use, and it asks without usage.
   McpAccess call(const std::string& subject, const McpToolInfo& tool, const rapidjson::Value& arguments, McpCallInfo* call);

@@ -173,6 +173,30 @@ std::shared_ptr<const AclTableSet> AclService::table_set(const AclAccess& access
   return answer<AclTableSet>(result);
 }
 
+std::shared_ptr<const AclTableSet> AclService::table_set_for(const AclAccess& access, const std::vector<std::string>& only) {
+  auto value = std::make_shared<AclTableSet>();
+  const auto deadline = std::chrono::steady_clock::now() + options_.discovery_time;
+  const auto listed = databases(access);
+  value->truncated = listed->truncated;
+  append_issues(value->issues, listed->issues);
+  for (const auto& database : listed->databases) {
+    if (!std::binary_search(only.begin(), only.end(), database)) continue;
+    if (std::chrono::steady_clock::now() >= deadline) {
+      value->truncated = true;
+      value->unverified_databases.push_back(database);
+      continue;
+    }
+    const auto readable = objects(access, database);
+    for (const auto& object : readable->objects) value->allowed.add_table(object);
+    value->truncated = value->truncated || readable->truncated;
+    append_issues(value->issues, readable->issues);
+  }
+  for (const auto& database : listed->unverified) {
+    if (std::binary_search(only.begin(), only.end(), database)) value->unverified_databases.push_back(database);
+  }
+  return value;
+}
+
 void AclService::invalidate(const AclAccess& access) {
   const std::string prefix = scope_of(access);
   databases_.invalidate_prefix(prefix);
@@ -192,7 +216,14 @@ void AclService::invalidate(const AclAccess& access, const std::string& database
 
 const std::vector<std::string>& AclView::databases() {
   if (!databases_) databases_ = service_.databases(access_);
-  return databases_->databases;
+  if (!restricted_) return databases_->databases;
+  if (!visible_names_ready_) {
+    for (const auto& name : databases_->databases) {
+      if (std::binary_search(only_.begin(), only_.end(), name)) visible_names_.push_back(name);
+    }
+    visible_names_ready_ = true;
+  }
+  return visible_names_;
 }
 
 bool AclView::database_visible(const std::string& database) {

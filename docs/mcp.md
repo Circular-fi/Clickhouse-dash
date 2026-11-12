@@ -497,7 +497,7 @@ The identity mode adds no field to a message of MCP.
 | --- | --- | --- | --- |
 | `initialize`, `ping`, `server/discover`, a notification, any other method | `mcp.session`, with `context.usage` ([Budgets](#budgets)) | The service | HTTP 403 and `-32001` (a notification has no body) |
 | `tools/list` | One question for each action of the tools, with the match `subtree` | The service | The tools of a `false` action are not listed |
-| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)). The tools of `query.run.read` and of `mcp.session` ask with `context.usage` ([Budgets](#budgets)). | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
+| `tools/call` | The action of the tool ([the map of the tools](#the-map-of-the-tools)). The tools of `query.run.read` ask with `context.usage` ([Budgets](#budgets)). | The host or the database that the arguments name | HTTP 200 and `-32602`, as for a tool that does not exist |
 
 - `tools/list` sends one batch with one item for each action, not for each tool. Tools with the same action share one item. The order of the tools does not change. A tool whose action the configuration does not publish is not listed.
 - `tools/call` asks the PDP for the resource of the call. The argument `host` names the host. The argument `database` (or `params.database` and `body.database` of an API tool) names the database of the host. A `host` that ChDash does not know goes to the service, so the PDP never gets a host name that the client chose.
@@ -509,7 +509,8 @@ The identity mode adds no field to a message of MCP.
 
 | Tool | Action |
 | --- | --- |
-| `list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage` | `mcp.session` (service) |
+| `list_hosts` | `mcp.hosts.read` (service) |
+| `mcp_analysis_my_limits`, `mcp_analysis_my_usage` | `mcp.analysis.read` (service) |
 | `list_databases`, `list_tables`, `describe_table`, `query_table` | `explorer.read` (host, or database) |
 | `list_services`, `search_traces`, `get_trace`, `search_logs`, `list_metrics`, `query_metric` | `observability.read` (host) |
 | `run_query`, `explain_query` | `query.run.read` (host) |
@@ -522,9 +523,9 @@ The identity mode adds no field to a message of MCP.
 
 A tool of the identity mode names an action that the document publishes. The document and the tools agree: an action that no tool serves is not published ([access.md](access.md#actions-and-tools)). `query.run.write` is published when a host has `mcp_write_uri`. `query.export` is published when a host has `mcp_uri`. `library.write` is published when a query library is writable. `mcp.usage.read` is published when `mcp.usage.enabled` and `mcp.usage.all_keys` are true.
 
-The tools `list_hosts`, `mcp_analysis_my_limits` and `mcp_analysis_my_usage` use no action of the pages. They show only the service and the subject itself, so they use `mcp.session`. The PDP can grant `mcp.session` to each person who may use MCP.
+The tools `list_hosts`, `mcp_analysis_my_limits` and `mcp_analysis_my_usage` use no action of the pages. `list_hosts` has the action `mcp.hosts.read`. The two analysis tools have the action `mcp.analysis.read`: they show only the limits and the usage of the subject itself. These actions list no budget. `mcp.session` is never the action of a tool: a grant with `confirm` on it would refuse the whole endpoint, because a request that calls no tool cannot wait.
 
-The action `mcp.session` is in the document of the actions when MCP is on and `mcp.auth_mode` is `identity`. In the mode `keys`, the document does not list it.
+The actions `mcp.hosts.read`, `mcp.analysis.read` and `mcp.session` are in the document of the actions when MCP is on and `mcp.auth_mode` is `identity`. In the mode `keys`, the document does not list them.
 
 ### The approval of a person
 
@@ -562,7 +563,7 @@ The action document declares the budget `requests` on `mcp.session`, and the bud
 | Request | Use |
 | --- | --- |
 | `initialize`, `ping`, `server/discover`, a notification, any other method with no tool | One use of `mcp.session`: one unit of `requests`. |
-| `tools/call` of `list_hosts`, `mcp_analysis_my_limits` or `mcp_analysis_my_usage` | One use of `mcp.session`: one unit of `requests`. |
+| `tools/call` of `list_hosts`, `mcp_analysis_my_limits` or `mcp_analysis_my_usage` | No unit: their actions list no budget. |
 | `tools/call` of a tool of `query.run.read` with a host: `run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution` | One use of `query.run.read` on the host (or on the database that `explorer_names` names): one unit of `queries` (decision of 2026-11-07). The API tool calls its route in the process, and the route asks the PDP nothing, so a call takes one unit at most. |
 | `tools/call` of another tool | No use. The question has no `context.usage`. |
 | `tools/call` of a tool of `query.run.read` without `host` | No use. The tool gives `host_required` and runs nothing. |
@@ -600,7 +601,7 @@ A true answer can have `limits` (ProcurAuth 7.3). For a tool call, ChDash takes 
 
 The tools of the data, of the SQL and of the observability send these settings with their statements. They send a setting only when the settings profile of the MCP user has no lower value. When the profile has `readonly = 1`, ClickHouse takes no setting. ChDash then counts `max_rows_read`, `max_read_size` and `max_duration` itself, and it refuses a call that has a `max_memory` ceiling ([The settings profile of the user](#the-settings-profile-of-the-user)). `export_query` applies the ceilings of its own action and of `query.run.read`, the lowest value of each. An API tool gives the ceilings to the route that it calls. The route then applies them as it does for the pages ([access.md](access.md#how-chdash-applies-a-ceiling)).
 
-The PDP can send for an action only the ceilings that the document declares for that action ([access.md](access.md#actions-that-list-ceilings)). For example, `explorer.read` declares `max_rows`, `max_rows_read`, `max_duration` and `max_memory`, and `mcp.session` declares none. A ceiling that the action does not declare, a name that ChDash does not know, or a value below 1 cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`.
+The PDP can send for an action only the ceilings that the document declares for that action ([access.md](access.md#actions-that-list-ceilings)). For example, `explorer.read` declares `max_rows`, `max_rows_read`, `max_duration` and `max_memory`, and `mcp.session`, `mcp.hosts.read` and `mcp.analysis.read` declare none. A ceiling that the action does not declare, a name that ChDash does not know, or a value below 1 cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`.
 
 In the mode `keys`, the key of the page applies no ceiling. A `true` answer for the creator of the key with a ceiling is `false` for the key. This refusal is final. A retry gives the same answer, so it is never a `503`. These rules apply:
 
@@ -636,7 +637,7 @@ The rate limit keeps one bucket for each subject. When the table has 65,536 buck
 
 ### Migration to the keys of the portal
 
-1. Set `access.mode = "authzen"` and the `identity` and `pdp` blocks ([access.md](access.md)). The portal must grant `mcp.session` and the actions of the tools to its people and its keys.
+1. Set `access.mode = "authzen"` and the `identity` and `pdp` blocks ([access.md](access.md)). The portal must grant `mcp.session`, `mcp.hosts.read`, `mcp.analysis.read` and the actions of the tools to its people and its keys.
 2. Set `mcp.auth_mode = "identity"`. Remove the `mcp_key` blocks, `mcp.storage_file`, `mcp.keys` and `mcp.auth_header`. ChDash stops at start while they stay in the file.
 3. Make a key of the portal for each agent. The agent sends the key to the edge of the portal. The edge sends the identity token to ChDash.
 4. Make the calls name the `host`. A call without it gets `host_required`.
@@ -655,7 +656,7 @@ ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from
 | 4.1 to 4.3 | Done. One batch, one item for each action, match `subtree`. |
 | 5.1, 5.5, 5.6 | Done. The messages are fixed. |
 | 5.3, 5.4 (`budget_exceeded`) | Done. A tool error on `tools/call`, HTTP 429 with `-31429` on another request ([Budgets](#budgets)). |
-| 3.4, 3.6a (`context.usage`) | Done for the tools of `query.run.read`, the tools of `mcp.session` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
+| 3.4, 3.6a (`context.usage`) | Done for the tools of `query.run.read` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
 | 3.5 | Not applicable. ChDash has no call that asks the client for input. |
 | 3.5a, 5.7, 5.7a, 5.7b | Done, for every tool ([The approval of a person](#the-approval-of-a-person)). The tool `get_action_status` exists in this mode. |
 | 3.5a, 5.7, 5.7a, 5.7b (the mode `keys`) | Done for each key of the page, with its creator as the subject ([The approval of a key of the page](#the-approval-of-a-key-of-the-page)). A key of the configuration has no subject: it stays outside the approval. |
@@ -861,7 +862,7 @@ How the API tools work:
 
 ### `list_hosts`
 
-No arguments. Result: `{"hosts": [{"name": "prod", "label": "...", "healthy": true}], "count": 1}`. `healthy` is the general health of the host. It comes from the same check as the rest of ChDash. It is `null` when the health is not known.
+One optional argument, `host`: it keeps only this host. Result: `{"hosts": [{"name": "prod", "label": "...", "healthy": true}], "count": 1}`. `healthy` is the general health of the host. It comes from the same check as the rest of ChDash. It is `null` when the health is not known.
 
 ### `list_databases`
 
@@ -950,7 +951,7 @@ The tool calls the route of the library in the process, as the Query page does. 
 
 `export_query` exists only in the identity mode, for each host that has `mcp_uri`. Arguments: `host` (required), `sql` (one read statement, as for `run_query`), `format` (`csv`, the default, or `json`) and the control arguments of [The approval of a person](#the-approval-of-a-person). It runs the statement with `readonly = 1` and the caps of the call, and it gives the rows as the text of an export in `untrusted.content`: `csv` has a header line, and `json` is an array of objects. The result also has `host`, `format`, `columns`, `row_count`, `truncated` and `elapsed_ms`. `truncated` is `true` when a row cap or a byte cap cut the rows. The tool does not download a file: the stream of a file stays on the page.
 
-The tool is the use of the action `query.export` (one unit of the budget `exports`). It needs a second permission, `query.run.read` on the host (ProcurAuth 5.5a). ChDash asks it after the check of the arguments and of the control arguments (contract 9.4, steps 1 and 2: a bad argument asks the PDP nothing), without usage and without effect. A `false` answer gives the answer of a tool that does not exist. The ceilings of this answer lower the ceilings of the call: the lowest value of each ceiling applies, and a ceiling that `query.run.read` does not declare makes the answer `false`. The `op` of an approval has `tool`, `host`, `sql`, `ch_user` and `options` (the text of `{"format": ...}`).
+The tool is the use of the action `query.export` (one unit of the budget `exports`). It needs a second permission, `query.run.read` on the host (ProcurAuth 5.5a). ChDash asks it after the check of the arguments and of the control arguments (contract 9.4, steps 1 and 2: a bad argument asks the PDP nothing), without usage and without effect. A plain `false` answer gives the answer of a tool that does not exist. The approval follows the action of the use alone (spec question 53): only `confirm` on `query.export` submits the call for approval. `query.run.read` only limits the scope. When the PDP answers `approval_required` or `approval_pending` for it, the call is refused with the tool error `scope_needs_approval`, and nothing goes to the approval API. The ceilings of this answer lower the ceilings of the call: the lowest value of each ceiling applies, and a ceiling that `query.run.read` does not declare makes the answer `false`. The `op` of an approval has `tool`, `host`, `sql`, `ch_user` and `options` (the text of `{"format": ...}`).
 
 ### The analysis tools
 
@@ -1100,7 +1101,7 @@ The common codes of the contract (6.2) have the same meaning in ChDash:
 | `timeout` | The query took longer than its time limit. | Yes |
 | `unavailable` | ChDash cannot connect to the ClickHouse host, or the connection failed. ChDash 1.0.6 named this code `host_unavailable`. | Yes |
 
-The other codes are specific to ChDash: `not_enabled`, `trace_not_found`, `metric_not_found`, `host_required`, `no_host`, `unknown_column`, `unsupported_column_type`, `sql_too_large`, `empty_sql`, `invalid_sql`, `multiple_statements`, `statement_not_allowed`, `clause_not_allowed`, `function_not_allowed`, `api_unavailable` (retryable), `api_error` and `internal_error`. Some codes come from ClickHouse: `readonly`, `permission_denied`, `memory_limit`, `read_limit`, `syntax_error`, `cancelled` and `query_failed`. An API tool keeps the code of its route (`invalid_metrics_range`, `unknown_host`, ...).
+The other codes are specific to ChDash: `not_enabled`, `trace_not_found`, `metric_not_found`, `host_required`, `no_host`, `unknown_column`, `unsupported_column_type`, `sql_too_large`, `empty_sql`, `invalid_sql`, `multiple_statements`, `statement_not_allowed`, `clause_not_allowed`, `function_not_allowed`, `api_unavailable` (retryable), `api_error`, `internal_error`, `ceiling_unenforceable` and `scope_needs_approval`. Some codes come from ClickHouse: `readonly`, `permission_denied`, `memory_limit`, `read_limit`, `syntax_error`, `cancelled` and `query_failed`. An API tool keeps the code of its route (`invalid_metrics_range`, `unknown_host`, ...).
 
 When a tool names a database or a table, and the route answers `object_not_found`, the tool answers `not_found`. This is the same answer as for an object out of the scope of the key. A call to a tool name that does not exist gives the JSON-RPC error `-32602`.
 

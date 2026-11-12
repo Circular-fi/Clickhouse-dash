@@ -79,7 +79,9 @@ const std::vector<AccessAction>& access_actions() {
       {"mcp.keys.read", false, false, "See the MCP keys and what each key can read."},
       {"mcp.keys.write", false, false, "Make, delete and adopt MCP keys."},
       {"mcp.usage.read", false, false, "See the usage and the cost of the MCP keys."},
-      {"mcp.session", false, false, "Use the MCP endpoint: its requests that call no tool, and the tools that read no data of a host."},
+      {"mcp.hosts.read", false, false, "List the ClickHouse hosts that the person can see: the MCP tool list_hosts."},
+      {"mcp.analysis.read", false, false, "Read the limits and the usage of the person himself: the MCP tools mcp_analysis_my_limits and mcp_analysis_my_usage."},
+      {"mcp.session", false, false, "Use the MCP endpoint: its requests that call no tool (initialize, ping, server/discover and the notifications)."},
   };
   return actions;
 }
@@ -128,7 +130,9 @@ bool access_action_published(const AccessAction& action, const AccessFeatures& f
   // The usage is counted only when mcp.usage.enabled is true. In the identity mode the only function of the action is the tool
   // mcp_analysis_all_usage, which needs mcp.usage.all_keys too. The pages of the keys mode read the usage of the keys of their creator.
   if (name == "mcp.usage.read") return features.mcp && features.mcp_usage && (!features.mcp_session || features.mcp_usage_tool);
-  if (name == "mcp.session") return features.mcp && features.mcp_session;
+  // The two actions of the tools that read no data of a host (list_hosts and the analysis of the caller). They are in the identity mode: the mode keys
+  // has no action for these tools. mcp.session is for the requests that call no tool.
+  if (name == "mcp.hosts.read" || name == "mcp.analysis.read" || name == "mcp.session") return features.mcp && features.mcp_session;
   return true;
 }
 

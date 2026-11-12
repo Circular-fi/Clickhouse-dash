@@ -1581,6 +1581,18 @@ void test_keys_mode_approval() {
     CHECK(called.outcome.json.find("names no database") != std::string::npos);
   }
 
+  // A08: the state of a key is a question for the display (the match subtree, ProcurAuth 4.4): the tool of a creator whose grant has a ceiling stays
+  // listed. The call has the match node, and a key applies no ceiling: the call is refused there.
+  {
+    KeysRig rig;
+    AccessDecision with_ceiling = yes(0);
+    with_ceiling.limits["max_rows"] = 5;
+    rig.pdp.by_action["explorer.read"] = with_ceiling;
+    const McpCreatorState state = rig.creators.state(key);
+    CHECK(std::find(state.tools.begin(), state.tools.end(), "list_databases") != state.tools.end());
+    // (The server applies the rule of the ceiling in its function of decisions: the call is refused there, tests/backend-functional/test_access.py.)
+  }
+
   // A tool that uses no action asks the PDP nothing, and takes the controls without a result of the approval.
   {
     KeysRig rig;
@@ -1920,6 +1932,25 @@ void test_export_other_permission_order_and_ceilings() {
     CHECK(info.ceilings.max_rows_read == 500 && info.ceilings.max_duration_seconds == 7 && info.ceilings.max_rows == 50);
   }
   {
+    // Spec question 53: the approval follows the action of the use alone. A reason of 17.1 for the other permission starts no approval: the call is
+    // refused with a tool error, and the PDP gets no question with an effect.
+    asked.clear();
+    other.limits.clear();
+    other.allowed = false;
+    other.reason = PdpReason::ApprovalRequired;
+    McpCallInfo info;
+    const McpAccess refused = access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1","lease_s":900})"), &info);
+    CHECK(refused == McpAccess::Allowed && info.answered && info.answered->is_error && code_of(*info.answered) == "scope_needs_approval");
+    CHECK(script.submitted.empty() && script.asked.empty());
+    CHECK_EQ(asked.size(), size_t(1));  // only the question of the other permission
+    // A plain false for the other permission stays the answer of a tool that does not exist.
+    other.reason = PdpReason::None;
+    McpCallInfo plain;
+    CHECK(access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1"})"), &plain) == McpAccess::Denied && !plain.answered);
+    other.allowed = true;
+    other.limits["max_rows_read"] = 500;
+  }
+  {
     // A ceiling that the other action does not declare makes its answer false (ProcurAuth 7.5).
     asked.clear();
     other.limits["max_nothing"] = 1;
@@ -1994,6 +2025,8 @@ void test_actions_and_tools_agree() {
               }
               // Every declared action has a tool. The identity mode has no action without one.
               for (const auto& action : declared) {
+                // mcp.session is the action of the requests that call no tool (initialize, ping, notifications): no tool serves it.
+                if (action == "mcp.session") continue;
                 CHECK(served.count(action) == 1);
                 if (served.count(action) == 0) std::fprintf(stderr, "the action %s has no tool (library %d explorer %d system %d observability %d hosts %d usage %d)\n", action.c_str(), library, explorer, system, observability, hosts, usage);
               }
@@ -2003,6 +2036,8 @@ void test_actions_and_tools_agree() {
               CHECK((declared.count("query.export") == 1) == (hosts > 0));
               CHECK((declared.count("mcp.usage.read") == 1) == (usage == 2));
               CHECK(declared.count("mcp.keys.read") == 0 && declared.count("mcp.keys.write") == 0);
+              // The tools that read no data of a host have an action of their own, and mcp.session is never the action of a tool.
+              CHECK(declared.count("mcp.hosts.read") == 1 && declared.count("mcp.analysis.read") == 1 && served.count("mcp.session") == 0);
               ++configurations;
             }
           }
@@ -2029,6 +2064,8 @@ void test_actions_and_tools_agree() {
     std::set<std::string> declared;
     for (const auto& action : access_published_actions(features)) declared.insert(action.name);
     CHECK(declared.count("query.run.write") == 0 && declared.count("query.export") == 0 && declared.count("library.write") == 0 && declared.count("mcp.session") == 0);
+    // The mode keys has no action for these tools (the creator of a key has no PDP question for them).
+    CHECK(declared.count("mcp.hosts.read") == 0 && declared.count("mcp.analysis.read") == 0);
     McpToolAvailability availability;
     availability.usage = in.usage;
     availability.all_keys = in.usage_all_keys;

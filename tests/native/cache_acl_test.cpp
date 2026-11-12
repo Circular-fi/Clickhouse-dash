@@ -731,6 +731,28 @@ void acl_service_single_flight_per_identity() {
   CHECK(connects == 1);
 }
 
+// ProcurAuth 4.4: a person with a `node` decision on some databases only. The discovery for this person reads the objects of these databases and of
+// no other, keeps nothing, and the view of the person sees these databases only.
+void acl_a_restricted_set_and_view_touch_only_the_allowed_databases() {
+  AclService::Options opts;
+  opts.stale_for = ms(0);
+  AclService service(opts);
+  auto runner = std::make_shared<FakeSource>();
+  runner->objects["open"] = {{"a", "all"}};
+  runner->objects["secret"] = {{"s", "all"}};
+  runner->objects["third"] = {{"t", "all"}};
+  const auto access = fake_access(runner, acl_identity_key("clickhouse://runner@h:9000"), nullptr);
+  const std::vector<std::string> only = {"open"};
+  const auto set = service.table_set_for(access, only);
+  CHECK(set->allowed.allows_table("open", "a") && !set->allowed.allows_database("secret") && !set->allowed.allows_database("third"));
+  // The objects of the other databases were never discovered: the cache of the objects has no entry for them.
+  const auto before = service.table_set(access);  // the whole set is another call: it reads them now
+  CHECK(before->allowed.allows_table("secret", "s"));
+  AclView view(service, access, only);
+  CHECK((view.databases() == std::vector<std::string>{"open"}));
+  CHECK(view.visible("open", "a") && !view.visible("secret", "s") && !view.database_visible("third"));
+}
+
 void acl_view_asks_each_database_once() {
   AclService::Options opts;
   opts.stale_for = ms(0);
@@ -939,6 +961,7 @@ int main() {
   acl_service_failures_are_not_kept_as_answers();
   acl_service_single_flight_per_identity();
   acl_view_asks_each_database_once();
+  acl_a_restricted_set_and_view_touch_only_the_allowed_databases();
   ddl_text_cache_never_shares_texts_between_identities();
   ddl_text_cache_reads_names_in_batches_and_is_bounded();
   ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps();

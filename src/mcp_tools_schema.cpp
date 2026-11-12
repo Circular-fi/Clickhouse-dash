@@ -11,7 +11,9 @@ namespace mcp_tools {
 // ---- the tools ---------------------------------------------------------------------------------------
 
 std::string tool_list_hosts(Ctx& ctx, const rapidjson::Value& args) {
-  reject_unknown(args, {});
+  reject_unknown(args, {"host"});
+  // The optional argument `host` keeps only this host. It is not a resource of the call (the action mcp.hosts.read is on the service).
+  const std::string only = opt_string(args, "host", 256).value_or("");
   rapidjson::StringBuffer sb;
   Writer w(sb);
   w.StartObject();
@@ -24,6 +26,7 @@ std::string tool_list_hosts(Ctx& ctx, const rapidjson::Value& args) {
                                [&](const std::string& name) { return std::find(ctx.visible_hosts->begin(), ctx.visible_hosts->end(), name) == ctx.visible_hosts->end(); }),
                 names.end());
   }
+  if (!only.empty()) names.erase(std::remove_if(names.begin(), names.end(), [&](const std::string& name) { return name != only; }), names.end());
   for (const auto& name : names) {
     std::string label = name;
     for (const auto& host : ctx.config.hosts) {

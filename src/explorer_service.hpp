@@ -87,7 +87,14 @@ class ExplorerService {
   // The sidebar. It holds the databases with their totals. With database_filter, it holds the objects of one database with the figures of the list.
   Result<Cached<ExplorerCatalog>> catalog(const RequestContext& context, const HostSpec& host, const std::string& host_id,
                                           const std::string& database_filter, bool refresh) const;
-  Result<Cached<ExplorerStorageMap>> storage(const RequestContext& context, const HostSpec& host, const std::string& host_id, bool refresh) const;
+  // `only` (sorted): the person has a `node` decision for these databases only (ProcurAuth 4.4). The read touches no other database, nothing is
+  // kept, and nothing is shared with a person who has other decisions. Null: the whole host, kept and shared as before.
+  Result<Cached<ExplorerStorageMap>> storage(const RequestContext& context, const HostSpec& host, const std::string& host_id, bool refresh,
+                                             const std::vector<std::string>* only = nullptr) const;
+  // The names of the databases that the runner lists. They are candidates for the decisions `node` of the person and are never shown.
+  Result<std::vector<std::string>> database_names(const HostSpec& host) const;
+  // The sidebar for the databases of `only` (sorted) only, with their totals. Nothing is kept.
+  Result<Cached<ExplorerCatalog>> catalog_for(const HostSpec& host, const std::vector<std::string>& only) const;
   // The card of a table, kept per object.
   Result<Cached<ExplorerTableDetail>> table(const RequestContext& context, const HostSpec& host, const std::string& host_id,
                                             const std::string& database, const std::string& table, bool refresh) const;
@@ -98,8 +105,9 @@ class ExplorerService {
                                   size_t limit) const;
 
   // The graph of the host, cut to a scope. The logical graph (lineage) and the physical graph (storage topology) are on or off, as configured.
+  // `only`: as for storage().
   Result<GraphScopeAnswer> graph(const RequestContext& context, const HostSpec& host, const std::string& host_id, const GraphScopeRequest& scope,
-                                 bool lineage_enabled, bool storage_enabled, bool refresh) const;
+                                 bool lineage_enabled, bool storage_enabled, bool refresh, const std::vector<std::string>* only = nullptr) const;
   // The definition of one logical object of the graph. It uses only the kept graph, so nothing is read for the caller.
   Result<DefinitionAnswer> definition(const RequestContext& context, const HostSpec& host, const std::string& host_id, const std::string& database,
                                       const std::string& table, bool refresh) const;
@@ -111,7 +119,7 @@ class ExplorerService {
     std::shared_ptr<const ExplorerGraph> graph;
     bool stale = false;
   };
-  Result<Snapshot> graph_snapshot(const HostSpec& host, const std::string& host_id, bool refresh) const;
+  Result<Snapshot> graph_snapshot(const HostSpec& host, const std::string& host_id, bool refresh, const std::vector<std::string>* only = nullptr) const;
 
   Connect connect_;
   AccessOf access_of_;

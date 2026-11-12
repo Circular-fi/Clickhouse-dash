@@ -929,6 +929,12 @@ def test_a_grant_on_one_database_of_one_host_allows_that_database_only():
     # The catalog of the host of the grant lists that database only; the other host and the other databases of this host are not listed.
     catalog = call("GET", "/api/explorer/catalog?host_id=other", tok=tok)
     assert catalog.status_code == 200 and catalog.json()["databases"] == ["chdash_ui"], catalog.text[:300]
+    # ProcurAuth 4.4: the storage map and the graph are read for the databases that a node decision allows, and for no other.
+    storage = call("GET", "/api/explorer/storage?host_id=other", tok=tok)
+    assert storage.status_code == 200 and [d["name"] for d in storage.json()["databases"]] == ["chdash_ui"], storage.text[:300]
+    graph = call("GET", "/api/explorer/graph?host_id=other", tok=tok)
+    assert graph.status_code == 200, graph.text[:300]
+    assert {n.get("database") for n in graph.json().get("nodes", []) if n.get("database")} <= {"chdash_ui"}, graph.text[:300]
     assert call("GET", "/api/explorer/catalog?host_id=local", tok=tok).status_code == 403
     # A grant below a host shows that host (the match "subtree", addendum 1), and only that host.
     assert [h["id"] for h in call("GET", "/api/hosts", tok=tok).json()["hosts"]] == ["other"]
@@ -1226,6 +1232,30 @@ def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
         assert failed.status_code == 503 and failed.json()["error"]["code"] == -32603, failed.text
         assert mcp_rpc(secret, "tools/list", {}).status_code == 503
         assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
+    finally:
+        answer(default=True)
+        mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
+
+
+@needs_mcp
+def test_the_state_of_a_key_is_a_question_for_the_display_and_a_ceiling_is_refused_at_the_call():
+    # ProcurAuth 4.4 and 10.1: the batch that decides which tools a key lists has the match subtree, and it is never the question of a use. A creator
+    # who gets a ceiling later keeps the tool in the list. The call asks with the match node, and a key applies no ceiling (7.5): 403 with -32001.
+    allow = ["mcp.keys.read", "mcp.keys.write", "explorer.read"]
+    answer(default=False, allow=allow)
+    tok = token("ceiling-creator")
+    made = make_mcp_key(tok, f"ceiling-{uuid.uuid4().hex[:8]}", ["list_hosts", "list_databases"], ["*"])
+    assert made.status_code == 201, made.text
+    key, secret = made.json()["key"], made.json()["secret"]
+    try:
+        before = len(received())
+        assert "list_databases" in listed_tools(secret)
+        state = [e for r in received()[before:] for e in evaluations(r) if e["action"]["name"] == "explorer.read"]
+        assert state and all(e["context"].get("match") == "subtree" for e in state), state
+        answer(default=False, allow=allow, limits={"explorer.read": {"max_rows": 5}})
+        assert "list_databases" in listed_tools(secret)
+        refused = mcp_call(secret, "list_databases")
+        assert refused.status_code == 403 and refused.json()["error"]["code"] == -32001, refused.text
     finally:
         answer(default=True)
         mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})

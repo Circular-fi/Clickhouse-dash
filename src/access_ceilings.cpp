@@ -111,8 +111,8 @@ const std::vector<AccessBudgetInfo>& access_budget_table() {
        "unit, so an export that nobody downloads costs nothing.",
        "export"},
       {"requests", "MCP requests with no tool",
-       "The number of MCP requests that read no data of a host: initialize, ping, server/discover, the notifications and the tools of the "
-       "action mcp.session. Each one takes one unit. The other tools take units from the budget of their own action.",
+       "The number of MCP requests that call no tool: initialize, ping, server/discover and the notifications (the action mcp.session). "
+       "Each one takes one unit. The tools take units from the budget of their own action.",
        "request"},
   };
   return table;
