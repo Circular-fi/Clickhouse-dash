@@ -26,3 +26,20 @@ mcp {
     }
   }
 }
+
+clickhouse {
+  host {
+    name       = "local"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp"
+  }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
+}

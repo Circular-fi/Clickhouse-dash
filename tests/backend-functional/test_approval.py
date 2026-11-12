@@ -400,8 +400,8 @@ def test_a_page_run_of_a_write_that_needs_an_approval_is_refused_approval_cannot
 @needs_approval
 def test_every_route_and_every_method_without_a_tool_that_cannot_wait_is_refused():
     headers = {HEADER: token("alice")}
-    gate("explorer.read", "library.read", "mcp.session")
-    for path in ("/api/explorer/functions?host_id=local", "/api/query-library?host_id=local"):
+    gate("explorer.read", "system.read", "mcp.session")
+    for path in ("/api/explorer/functions?host_id=local", "/api/system/overview?host_id=local"):
         response = SESSION.get(f"{BASE_URL}{path}", headers=headers, timeout=20)
         assert response.status_code == 403 and response.json() == {"error": "approval_cannot_wait"}, (path, response.text)
     # An MCP method with no tool (ping): HTTP 403 and -32001 (binding 5.1b). No effect, no submission.

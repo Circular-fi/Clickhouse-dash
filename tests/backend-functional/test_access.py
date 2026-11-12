@@ -335,8 +335,11 @@ def test_a_false_decision_gives_403_with_the_action_and_a_true_one_200():
     body = response.json()
     assert body["error_code"] == "forbidden" and body["action"] == "system.read"
     assert "system.read" in body["message"]
-    # Another action of the same user is not touched.
-    assert call("GET", "/api/query-library").status_code in (404, 200)
+    # Another action of the same user is not touched. The instance has no library, so library.read is not published: a plain denial, with no
+    # question to the PDP (docs/access.md, "Actions and tools"). The system route of the other host answers.
+    library = call("GET", "/api/query-library")
+    assert library.status_code == 403 and library.json()["action"] == "library.read", library.text
+    assert call("GET", "/api/explorer/functions?host_id=local").status_code == 200
     answer(default=True)
     assert call("GET", SYSTEM).status_code == 200
 

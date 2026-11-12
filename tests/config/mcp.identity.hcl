@@ -39,6 +39,8 @@ mcp {
     enabled = true
     dir     = "/tmp"
     instance = "identity-test"
+    # all_keys is on: the tool mcp_analysis_all_usage serves mcp.usage.read, so the action is published (docs/access.md, "Actions and tools").
+    all_keys = true
   }
 }
 

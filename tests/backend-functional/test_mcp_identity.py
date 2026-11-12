@@ -408,8 +408,9 @@ def test_the_keys_page_has_no_key_of_chdash():
     answer(default=True)
     meta = SESSION.get(f"{BASE_URL}/api/mcp/meta", headers={HEADER: token()}, timeout=30).json()
     assert meta["auth_mode"] == "identity" and meta["auth_header"] == HEADER and meta["can_manage"] is False
+    # The identity mode does not publish mcp.keys.write (the keys live in the portal): the route is a plain denial with no question to the PDP.
     refused = SESSION.post(f"{BASE_URL}/api/mcp/keys", json={"name": "x"}, headers={HEADER: token()}, timeout=30)
-    assert refused.status_code == 403 and refused.json()["error_code"] == "manage_disabled"
+    assert refused.status_code == 403 and refused.json()["error_code"] == "forbidden" and refused.json()["action"] == "mcp.keys.write", refused.text
 
 
 @needs_identity
