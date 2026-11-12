@@ -925,6 +925,9 @@ void test_mcp_settings_follow_the_profile() {
   ChSettingsProfile one = open_profile();
   one.readonly = 1;
   CHECK(ch_mcp_settings(limits, one).settings.empty());
+  // The caller learns that the settings were refused: it must bound the statement itself (api_mcp.cpp) and refuse a memory ceiling.
+  CHECK(ch_mcp_settings(limits, one).settings_refused);
+  CHECK(!ch_mcp_settings(limits, open_profile()).settings_refused);
 
   // The profile wins. A limit that it sets is not sent when it is not larger than ours. The result of the call follows the profile.
   ChSettingsProfile strict = two;

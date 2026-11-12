@@ -8,6 +8,7 @@
 #include "sql_lexer.hpp"
 #include "user_sql_policy.hpp"
 
+#include <rapidjson/pointer.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -122,22 +123,34 @@ const std::vector<McpToolInfo>& mcp_approval_tools() {
   static const std::vector<McpToolInfo> tools = {
       {kMcpWriteTool, "sql", "Run a write SQL statement",
        "Run exactly one SQL statement that changes data or the schema (INSERT, CREATE, ALTER, DROP, TRUNCATE, OPTIMIZE, RENAME, EXCHANGE, "
-       "ATTACH, DETACH, UNDROP, DELETE, UPDATE, or WITH ... INSERT) on one host, with the write account of the host. The owner of the key can "
-       "need to approve the statement. Then the tool does not run it: it gives an action with the status awaiting_approval and executed false. "
-       "After the approval, call the tool again with the same arguments. Give exactly one of approval_ref, lease_s and until when the tool asks "
-       "for an approval. Read the verdict with get_action_status. A statement that only reads is refused: use run_query.",
+       "ATTACH, DETACH, UNDROP, DELETE, UPDATE, or WITH ... INSERT) on one host, with the write account of the host. Give exactly one of "
+       "approval_ref, lease_s and until when the tool asks for an approval. A statement that only reads is refused: use run_query.",
        true},
       {kMcpExportTool, "sql", "Export a query",
        "Run exactly one read-only SQL statement (SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN) and return its rows as the text of an export: "
        "`format` is csv (the default, with a header line) or json (an array of objects). The statement runs with readonly=1, a row cap, a byte "
        "cap and a time limit; `truncated` is true when rows or bytes were cut. The tool needs the actions query.export and query.run.read.",
        true},
+      {kMcpLibraryWriteTool, "query", "Change the query library",
+       "Change the saved queries of the server query library of one host with one `operation`: folder_create, folder_update, folder_delete, "
+       "query_create, query_update, query_delete or import. `body` is the JSON body of the route of the Query page (folder_create: name, "
+       "parent_id; query_create: name, description, sql, folder_id; the update operations take the fields to change; import: folders, queries, copy). `id` names "
+       "the folder or the query of an update or a delete. `recursive` deletes a folder with its content. `library` names one of several "
+       "libraries. Answers `not_enabled` when the configuration has no writable query_library. Give exactly one of approval_ref, lease_s and until "
+       "when the tool asks for an approval.",
+       false},
       {kMcpStatusTool, "sql", "Action status",
        "Read the verdict of an action that waits for the approval of its owner: pending, approved, denied or void. Give the id that the action "
        "gave. The read keeps the request alive. The tool runs nothing.",
        false},
   };
   return tools;
+}
+
+const char* mcp_approval_description_suffix() {
+  return " The owner of the key can need to approve this call: the policy decision point decides. Then the tool does not run. It gives an action "
+         "with the status awaiting_approval and executed false. After the approval, call the tool again with the same arguments. Read the "
+         "verdict with the tool get_action_status.";
 }
 
 const McpToolInfo* mcp_find_approval_tool(std::string_view name) {
@@ -160,12 +173,23 @@ const char* mcp_approval_tool_schema(std::string_view tool) {
   static const std::string status =
       "{\"type\":\"object\",\"properties\":{\"request_id\":{\"type\":\"string\",\"description\":\"The id of the action that waits.\"}},"
       "\"required\":[\"request_id\"],\"additionalProperties\":false}";
+  static const std::string library =
+      "{\"type\":\"object\",\"properties\":{\"host\":{\"type\":\"string\",\"description\":\"Required: the name of one host; see list_hosts.\"},"
+      "\"operation\":{\"type\":\"string\",\"enum\":[\"folder_create\",\"folder_update\",\"folder_delete\",\"query_create\",\"query_update\",\"query_delete\",\"import\"],"
+      "\"description\":\"What to change.\"},"
+      "\"id\":{\"type\":\"string\",\"description\":\"The id of the folder or of the query that an update or a delete names.\"},"
+      "\"library\":{\"type\":\"string\",\"description\":\"The name of one of several libraries; the first one is the default.\"},"
+      "\"recursive\":{\"type\":\"boolean\",\"description\":\"folder_delete: delete the content of the folder too.\"},"
+      "\"body\":{\"type\":\"object\",\"description\":\"The JSON body of the route of the Query page for this operation.\"}},"
+      "\"required\":[\"host\",\"operation\"],\"additionalProperties\":false}";
   if (tool == kMcpExportTool) return exporter.c_str();
+  if (tool == kMcpLibraryWriteTool) return library.c_str();
   return tool == kMcpWriteTool ? write.c_str() : status.c_str();
 }
 
 std::string mcp_approval_tool_annotations(const McpToolInfo& tool) {
-  const bool write = std::string_view(tool.name) == kMcpWriteTool;
+  // A tool with an effect has readOnlyHint false and openWorldHint true (contract 4.3).
+  const bool write = std::string_view(tool.name) == kMcpWriteTool || std::string_view(tool.name) == kMcpLibraryWriteTool;
   rapidjson::StringBuffer sb;
   Writer w(sb);
   w.StartObject();
@@ -178,6 +202,45 @@ std::string mcp_approval_tool_annotations(const McpToolInfo& tool) {
   w.Key("openWorldHint"); w.Bool(write);
   w.EndObject();
   return std::string(sb.GetString(), sb.GetSize());
+}
+
+// ---- the output schemas ----------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+// The members that every result can have (contract 4.5, 9.4; binding 5.3, 5.7): the action of a call that waits and the error object.
+const char* kActionMembers =
+    "\"action\":{\"type\":\"object\",\"description\":\"The call did not run: it waits for the approval of its owner (contract 9.4).\","
+    "\"properties\":{\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"awaiting_approval\"]},"
+    "\"code\":{\"type\":\"string\"},\"executed\":{\"type\":\"boolean\",\"enum\":[false]}},"
+    "\"required\":[\"id\",\"status\",\"code\",\"executed\"]},"
+    "\"error\":{\"type\":\"object\",\"description\":\"The call failed (contract 6.1).\","
+    "\"properties\":{\"code\":{\"type\":\"string\"},\"message\":{\"type\":\"string\"},\"retryable\":{\"type\":\"boolean\"},"
+    "\"retry_after\":{\"type\":\"integer\"},\"untrusted\":{\"type\":\"object\"}},\"required\":[\"code\",\"message\",\"retryable\"]}";
+
+}  // namespace
+
+const char* mcp_output_schema(std::string_view kind) {
+  static const std::string generic = std::string("{\"type\":\"object\",\"properties\":{") + kActionMembers +
+                                     ",\"untrusted\":{\"type\":\"object\",\"description\":\"The data of the answer: text that ChDash did not write.\"},"
+                                     "\"result\":{\"description\":\"The answer of a route that is not an object.\"}},"
+                                     "\"additionalProperties\":true}";
+  static const std::string sql = std::string("{\"type\":\"object\",\"properties\":{") + kActionMembers +
+                                 ",\"host\":{\"type\":\"string\"},\"columns\":{\"type\":\"array\"},"
+                                 "\"row_count\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"elapsed_ms\":{\"type\":\"integer\"},"
+                                 "\"untrusted\":{\"type\":\"object\"}},\"additionalProperties\":true}";
+  static const std::string status = std::string("{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"string\","
+                                                "\"enum\":[\"pending\",\"approved\",\"denied\",\"void\"]},") + kActionMembers + "},\"additionalProperties\":false}";
+  if (kind == "status") return status.c_str();
+  if (kind == "sql") return sql.c_str();
+  return generic.c_str();
+}
+
+const char* mcp_output_schema_kind(const McpToolInfo& tool) {
+  const std::string_view name = tool.name;
+  if (name == kMcpStatusTool) return "status";
+  if (name == "run_query" || name == "explain_query" || name == "query_table" || name == "export_query" || name == kMcpWriteTool) return "sql";
+  return "generic";
 }
 
 // ---- the control arguments -------------------------------------------------------------------------------------------------------------
@@ -247,24 +310,33 @@ std::string mcp_arguments_without_controls(const rapidjson::Value& arguments) {
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-std::string mcp_with_approval_properties(const std::string& schema_json) {
+std::string mcp_with_approval_properties(const std::string& schema_json, const McpApprovalBounds& bounds) {
   rapidjson::Document doc;
   doc.Parse(schema_json.c_str(), schema_json.size());
   if (doc.HasParseError() || !doc.IsObject()) return schema_json;
   auto& alloc = doc.GetAllocator();
   const auto props = doc.FindMember("properties");
   if (props == doc.MemberEnd() || !props->value.IsObject()) return schema_json;
-  const auto add = [&](const char* name, const char* type, const char* description, int minimum) {
+  const auto add = [&](const char* name, const char* type, const std::string& description, int64_t minimum, int64_t maximum = -1) {
     rapidjson::Value property(rapidjson::kObjectType);
     property.AddMember("type", rapidjson::Value(type, alloc), alloc);
     if (minimum >= 0) property.AddMember("minimum", minimum, alloc);
-    property.AddMember("description", rapidjson::Value(description, alloc), alloc);
+    if (maximum >= 0) property.AddMember("maximum", maximum, alloc);
+    property.AddMember("description", rapidjson::Value(description.c_str(), static_cast<rapidjson::SizeType>(description.size()), alloc), alloc);
     props->value.AddMember(rapidjson::Value(name, alloc), property, alloc);
   };
-  add("approval_ref", "string", "Approval control: the reference that approval_intent gave. Give at most one of approval_ref, lease_s and until, and only when the tool asks for an approval.", -1);
-  add("lease_s", "integer", "Approval control: how many seconds you wait for the approval. Whole number from 1.", 1);
+  // The bounds that the PDP publishes (ProcurAuth 17.5): the agent reads them, so that the PDP never refuses a lease of a plain value.
+  const int64_t lease_min = bounds.lease_min_seconds ? static_cast<int64_t>(std::min<uint64_t>(*bounds.lease_min_seconds, INT64_MAX)) : 1;
+  const int64_t lease_max = bounds.lease_max_seconds ? static_cast<int64_t>(std::min<uint64_t>(*bounds.lease_max_seconds, INT64_MAX)) : -1;
+  const int64_t wait_max = bounds.wait_max_seconds ? static_cast<int64_t>(std::min<uint64_t>(*bounds.wait_max_seconds, INT64_MAX)) : -1;
+  add("approval_ref", "string",
+      "Approval control: the reference that the owner gave with the intent of the agent. Give at most one of approval_ref, lease_s and until, and only when the tool asks for an approval.", -1);
+  add("lease_s", "integer",
+      "Approval control: how many seconds you wait for the approval, a whole number from " + std::to_string(lease_min) +
+          (lease_max >= 0 ? " to " + std::to_string(lease_max) : std::string()) + ".",
+      lease_min, lease_max);
   add("until", "string", "Approval control: the time until which you wait for the approval, as RFC 3339.", -1);
-  add("wait_s", "integer", "The most seconds that this call waits for the verdict after it submitted the request. The server bounds it.", 0);
+  add("wait_s", "integer", "The most seconds that this call waits for the verdict after it submitted the request. The server bounds it.", 0, wait_max);
   add("supersedes", "string", "The id of an earlier request of yours that this call replaces.", -1);
   rapidjson::StringBuffer sb;
   Writer w(sb);
@@ -274,7 +346,8 @@ std::string mcp_with_approval_properties(const std::string& schema_json) {
 
 // ---- the op and the view ---------------------------------------------------------------------------------------------------------------
 
-McpOpView mcp_op_view(const McpToolInfo& tool, const McpApprovalHost* host, const rapidjson::Value& args, std::string_view write_sql) {
+McpOpView mcp_op_view(const McpToolInfo& tool, const McpApprovalHost* host, const rapidjson::Value& args, std::string_view write_sql,
+                      const McpOpCaps& caps) {
   McpOpView out;
   const std::string_view name = tool.name;
   const rapidjson::Value* host_arg = member(args, "host");
@@ -293,6 +366,11 @@ McpOpView mcp_op_view(const McpToolInfo& tool, const McpApprovalHost* host, cons
     put_text(w, "sql", sql);
     const std::string& user = name == kMcpWriteTool ? (host ? host->write_user : std::string()) : (host ? host->read_user : std::string());
     put_text(w, "ch_user", user);
+    // 17.3a: the caps that the PEP applies by default decide what the call returns and how long it runs. They are in the op, so that an approval
+    // never covers a call that runs with other caps. A ceiling of the grant is not here: the effect comes before the answer that holds it.
+    if (name != kMcpWriteTool && caps.max_rows > 0) { w.Key("max_rows"); w.Int64(caps.max_rows); }
+    if (name != kMcpWriteTool && caps.max_result_bytes > 0) { w.Key("max_result_bytes"); w.Int64(caps.max_result_bytes); }
+    if (caps.timeout_seconds > 0) { w.Key("timeout_seconds"); w.Int64(caps.timeout_seconds); }
     // The other arguments (the type of an explain): the owner reads them too.
     rapidjson::Document rest(rapidjson::kObjectType);
     for (const auto& m : args.GetObject()) {
@@ -337,6 +415,14 @@ McpOpView mcp_op_view(const McpToolInfo& tool, const McpApprovalHost* host, cons
       else if (name == "mcp_analysis_all_usage") { default_text("window", "24h"); default_text("group", "key"); default_text("order", "requests"); default_int("limit", 20); default_bool("series", false); }
     }
     put_text(w, "arguments", sorted_text(with_defaults));
+    // 17.3a: the caps of the tool. A tool that reads no ClickHouse and calls no route (the library, the usage and the session) has none.
+    const bool no_caps = name == "list_hosts" || name == "mcp_analysis_my_limits" || name == "mcp_analysis_my_usage" || name == "mcp_analysis_all_usage" ||
+                         name == "query_library" || name == kMcpLibraryWriteTool || name == kMcpStatusTool;
+    if (!no_caps) {
+      if (!tool.api && caps.max_rows > 0) { w.Key("max_rows"); w.Int64(caps.max_rows); }
+      if (caps.max_result_bytes > 0) { w.Key("max_result_bytes"); w.Int64(caps.max_result_bytes); }
+      if (caps.timeout_seconds > 0) { w.Key("timeout_seconds"); w.Int64(caps.timeout_seconds); }
+    }
   }
   w.EndObject();
   out.op_json = std::string(sb.GetString(), sb.GetSize());
@@ -347,12 +433,57 @@ McpOpView mcp_op_view(const McpToolInfo& tool, const McpApprovalHost* host, cons
   return out;
 }
 
+namespace {
+
+// The characters of a UTF-8 text (the bytes that are not continuation bytes).
+size_t utf8_characters(std::string_view text) {
+  return static_cast<size_t>(std::count_if(text.begin(), text.end(), [](char c) { return (static_cast<unsigned char>(c) & 0xC0) != 0x80; }));
+}
+
+constexpr size_t kViewTitleMaxCharacters = 128;
+constexpr size_t kViewFieldMaxCharacters = 256;
+constexpr size_t kViewBodyMaxBytes = 16 * 1024;
+
+}  // namespace
+
+std::string mcp_view_limit_error(const std::string& op_json, const std::string& view_json) {
+  rapidjson::Document op;
+  rapidjson::Document view;
+  op.Parse(op_json.c_str(), op_json.size());
+  view.Parse(view_json.c_str(), view_json.size());
+  if (op.HasParseError() || view.HasParseError() || !view.IsObject()) return {};
+  if (const auto title = view.FindMember("title"); title != view.MemberEnd() && title->value.IsString() &&
+                                                    utf8_characters(std::string_view(title->value.GetString(), title->value.GetStringLength())) > kViewTitleMaxCharacters) {
+    return "the title of the command is longer than 128 characters";
+  }
+  const auto text_at = [&](const std::string& pointer) -> std::string {
+    const rapidjson::Value* value = rapidjson::Pointer(pointer.c_str()).Get(op);
+    if (!value) return {};
+    if (value->IsString()) return std::string(value->GetString(), value->GetStringLength());
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    value->Accept(w);
+    return std::string(sb.GetString(), sb.GetSize());
+  };
+  if (const auto fields = view.FindMember("fields"); fields != view.MemberEnd() && fields->value.IsArray()) {
+    for (const auto& pair : fields->value.GetArray()) {
+      if (!pair.IsArray() || pair.Size() != 2 || !pair[1].IsString()) continue;
+      if (utf8_characters(text_at(text_of(pair[1]))) > kViewFieldMaxCharacters) return "a value that the command shows in a field is longer than 256 characters";
+    }
+  }
+  if (const auto body = view.FindMember("body"); body != view.MemberEnd() && body->value.IsString()) {
+    if (text_at(text_of(body->value)).size() > kViewBodyMaxBytes) return "the text that the command shows as its body is larger than 16 KiB";
+  }
+  return {};
+}
+
 // ---- the results -----------------------------------------------------------------------------------------------------------------------
 
-McpToolOutcome mcp_approval_error(const std::string& code, uint64_t retry_after) {
+McpToolOutcome mcp_approval_error(const std::string& code, uint64_t retry_after, const std::string& message_in) {
   std::string message;
   bool retryable = false;
-  if (code == "approval_denied") message = "The owner declined the action.";
+  if (!message_in.empty()) message = message_in;
+  else if (code == "approval_denied") message = "The owner declined the action.";
   else if (code == "approval_expired") message = "The approval is not valid. Call the tool again.";
   else if (code == "approval_unavailable") {
     message = "The owner has no way to receive the approval request.";
@@ -394,7 +525,7 @@ McpToolOutcome mcp_approval_awaiting(const std::string& request_id, const std::s
   McpToolOutcome out = tool_json(false, "", std::string(sb.GetString(), sb.GetSize()));
   out.extra_text =
       "NOT EXECUTED. The action waits for the approval of its owner. Read the verdict with the tool get_action_status and the id of the "
-      "action, or use the tools get_answer and keepalive of the portal. After the approval, call this tool again with the same arguments.";
+      "action. After the approval, call this tool again with the same arguments.";
   return out;
 }
 
@@ -454,12 +585,37 @@ const McpApprovalHost* McpApprovalGate::host_of(std::string_view id) const {
 
 std::vector<std::string> McpApprovalGate::tool_names() const {
   std::vector<std::string> out;
-  if (std::any_of(config_.hosts.begin(), config_.hosts.end(), [](const McpApprovalHost& host) { return !host.write_user.empty(); })) {
+  if (std::any_of(config_.hosts.begin(), config_.hosts.end(), [](const McpApprovalHost& host) { return mcp_host_can_write(host); })) {
     out.push_back(kMcpWriteTool);
   }
   // export_query is the tool of the action query.export. It needs a host that MCP reaches.
   if (!config_.hosts.empty()) out.push_back(kMcpExportTool);
+  // library_write is the tool of the action library.write. It needs a library that a person can change.
+  if (config_.library_writable) out.push_back(kMcpLibraryWriteTool);
   out.push_back(kMcpStatusTool);
+  return out;
+}
+
+int64_t McpApprovalGate::max_command_bytes() const {
+  int64_t bound = config_.max_command_bytes;
+  if (ports_.limits) {
+    const PdpApprovalLimits published = ports_.limits();
+    // The lower value wins: the PDP refuses a command above its own bound with a 413 (17.4), and the configuration can be lower.
+    if (published.max_command_bytes) bound = std::min<int64_t>(bound, static_cast<int64_t>(std::min<uint64_t>(*published.max_command_bytes, INT64_MAX)));
+  }
+  return bound;
+}
+
+McpApprovalBounds McpApprovalGate::bounds() const {
+  McpApprovalBounds out;
+  uint64_t wait_cap = static_cast<uint64_t>(std::max<int64_t>(0, config_.wait_cap_seconds));
+  if (ports_.limits) {
+    const PdpApprovalLimits published = ports_.limits();
+    out.lease_min_seconds = published.lease_min_seconds;
+    out.lease_max_seconds = published.lease_max_seconds;
+    if (published.wait_max_seconds) wait_cap = std::min(wait_cap, *published.wait_max_seconds);
+  }
+  out.wait_max_seconds = wait_cap;
   return out;
 }
 
@@ -504,7 +660,7 @@ McpGateResult McpApprovalGate::call(const std::string& subject, const McpToolInf
   std::string write_sql;
   if (write_tool) {
     // A host that has no write account, or that MCP does not reach, gets the answer of a tool that the person does not have.
-    if (!host || host->write_user.empty()) return refuse(McpAccess::Denied);
+    if (!host || !mcp_host_can_write(*host)) return refuse(McpAccess::Denied);
     for (const auto& m : stripped.GetObject()) {
       const std::string key = text_of(m.name);
       if (key != "host" && key != "sql") return answer(mcp_tool_error("invalid_argument", "the tool has no argument " + std::string(key.size() <= 64 ? key : key.substr(0, 64))), effect_unknown, "invalid_argument");
@@ -534,7 +690,7 @@ McpGateResult McpApprovalGate::call(const std::string& subject, const McpToolInf
     return answer(mcp_tool_error("invalid_argument", "this call needs an approval: give exactly one of approval_ref, lease_s and until"), effect_unknown,
                   "invalid_argument");
   }
-  const McpOpView opview = mcp_op_view(tool, host, stripped, write_sql);
+  const McpOpView opview = mcp_op_view(tool, host, stripped, write_sql, config_.caps);
   std::string effect;
   std::string canonical_op;
   std::string error;
@@ -543,17 +699,33 @@ McpGateResult McpApprovalGate::call(const std::string& subject, const McpToolInf
                        &canonical_op, &error)) {
     return answer(mcp_approval_error("invalid_argument"), effect_unknown, "invalid_argument");
   }
-  // 17.3a: the command is never cut or hidden. A command that does not fit is refused, and nothing goes to the approval API.
-  if (static_cast<int64_t>(canonical_op.size() + opview.view_json.size()) > config_.max_command_bytes) {
-    return answer(mcp_tool_error("invalid_argument", "the command is larger than " + std::to_string(config_.max_command_bytes) +
-                                                       " bytes, the limit of an approval request (access.approval.max_command_bytes)"),
+  // 17.3a and contract 9.5: the command is never cut or hidden. A command that does not fit is refused, and nothing goes to the approval API.
+  // The bound is the lower of access.approval.max_command_bytes and the bound that the PDP publishes. Each part of the view has its own limit.
+  const int64_t command_bound = max_command_bytes();
+  if (static_cast<int64_t>(canonical_op.size() + opview.view_json.size()) > command_bound) {
+    return answer(mcp_tool_error("invalid_argument", "the command is larger than " + std::to_string(command_bound) +
+                                                       " bytes, the limit of an approval request (access.approval.max_command_bytes, or the limit that the PDP publishes)"),
                   effect, "invalid_argument");
+  }
+  if (const std::string part = mcp_view_limit_error(canonical_op, opview.view_json); !part.empty()) {
+    return answer(mcp_tool_error("invalid_argument", part), effect, "invalid_argument");
   }
   AccessQuestion asked = question;
   asked.approval_effect = effect;
 
-  const uint64_t wait_cap = static_cast<uint64_t>(std::max<int64_t>(0, config_.wait_cap_seconds));
-  // At most two rounds: after a wait that ends with `approved`, the call asks again (17.7).
+  const McpApprovalBounds advertised = bounds();
+  const uint64_t wait_cap = advertised.wait_max_seconds.value_or(0);
+  // A lease outside the bounds of the PDP: the PDP refuses it and never changes it (17.5), so the call says so before it submits.
+  if (controls.present && controls.control == PdpApprovalRequest::Control::LeaseSeconds &&
+      ((advertised.lease_min_seconds && controls.lease_seconds < *advertised.lease_min_seconds) ||
+       (advertised.lease_max_seconds && controls.lease_seconds > *advertised.lease_max_seconds))) {
+    return answer(mcp_approval_error("invalid_argument", 0,
+                                     "lease_s is outside the bounds of the approval service: it must be from " +
+                                         std::to_string(advertised.lease_min_seconds.value_or(1)) +
+                                         (advertised.lease_max_seconds ? " to " + std::to_string(*advertised.lease_max_seconds) : std::string()) + " seconds"),
+                  effect, "invalid_argument");
+  }
+  // At most two rounds: after a wait that ends with `approved`, or after a late evaluation_id, the call asks again (17.7).
   for (int round = 0; round < 2; ++round) {
     // Step 3: the question without usage and with the effect. On `true`, step 6: the question with usage and the effect.
     AccessDecision decision = ports_.ask(subject, asked, false, false);
@@ -597,6 +769,18 @@ McpGateResult McpApprovalGate::call(const std::string& subject, const McpToolInf
       case PdpApprovalReply::Status::RateLimited:
         return answer(mcp_approval_error("approval_rate_limited", submitted.retry_after), effect, "approval_rate_limited");
       case PdpApprovalReply::Status::InvalidArgument: return answer(mcp_approval_error("invalid_argument"), effect, "invalid_argument");
+      // A fault of the agent, not of the service: a tool error, never an HTTP 503 (spec question 47, portal approval API).
+      case PdpApprovalReply::Status::ExplanationRequired:
+        return answer(mcp_approval_error("invalid_argument", 0,
+                                         "The owner asks for the intent of the agent with each request: give approval_ref in place of lease_s and until."),
+                      effect, "invalid_argument");
+      case PdpApprovalReply::Status::CannotSupersede:
+        return answer(mcp_approval_error("invalid_argument", 0, "The request that supersedes names was already used. Call the tool without supersedes."),
+                      effect, "invalid_argument");
+      case PdpApprovalReply::Status::InvalidEvaluation:
+        // The evaluation_id is late or not valid. One more question gives a new one; a second refusal means that the approval is not valid.
+        if (round == 0) continue;
+        return answer(mcp_approval_error("approval_expired"), effect, "approval_expired");
       case PdpApprovalReply::Status::Unavailable: return refuse(McpAccess::Failed);
     }
     const uint64_t wait = std::min<uint64_t>(controls.wait_seconds.value_or(0), wait_cap);
@@ -630,7 +814,10 @@ McpAccess McpApprovalGate::status(const std::string& subject, const rapidjson::V
     case PdpApprovalReply::Status::Ok: return answer(mcp_approval_status(reply.verdict), pdp_verdict_name(reply.verdict));
     case PdpApprovalReply::Status::NoDevice: return answer(mcp_approval_error("approval_unavailable"), "approval_unavailable");
     case PdpApprovalReply::Status::RateLimited: return answer(mcp_approval_error("approval_rate_limited", reply.retry_after), "approval_rate_limited");
-    case PdpApprovalReply::Status::InvalidArgument: return answer(mcp_approval_error("invalid_argument"), "invalid_argument");
+    case PdpApprovalReply::Status::InvalidArgument:
+    case PdpApprovalReply::Status::ExplanationRequired:
+    case PdpApprovalReply::Status::CannotSupersede:
+    case PdpApprovalReply::Status::InvalidEvaluation: return answer(mcp_approval_error("invalid_argument"), "invalid_argument");
     case PdpApprovalReply::Status::Unavailable: return McpAccess::Failed;
   }
   return McpAccess::Failed;

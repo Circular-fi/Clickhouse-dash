@@ -92,6 +92,7 @@ public:
   std::vector<std::string> approval_tool_names() const override {
     return access_.approval() ? access_.approval()->tool_names() : std::vector<std::string>();
   }
+  McpApprovalBounds approval_bounds() const override { return access_.approval() ? access_.approval()->bounds() : McpApprovalBounds{}; }
   McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now) override {
     return inner_.call_tool(key, tool, arguments, now);
   }

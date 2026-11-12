@@ -311,6 +311,9 @@ struct ChMcpLimits {
 
 struct ChMcpSettings {
   std::vector<std::pair<std::string, std::string>> settings;
+  // The profile has readonly = 1: ClickHouse refuses every setting of the statement, so `settings` is empty and no limit reaches the server.
+  // The caller must count what it can itself (the backstop of a ceiling) and refuse what it cannot count (a memory ceiling).
+  bool settings_refused = false;
   // This describes what the statement can return when the profile of the user cuts it earlier than the guard rails.
   // A result that reaches one of the guard rails may have been cut by ClickHouse. The caller cannot see that cut.
   int64_t max_rows = 0;

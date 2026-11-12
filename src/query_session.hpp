@@ -78,6 +78,9 @@ struct QuerySessionOptions {
   // The access of humans (docs/access.md) sets it for a user who has query.run.read and not query.run.write.
   // It is never a value of the file.
   bool read_only_strict = false;
+  // The subject of the identity token that started the run (access.mode = "authzen"), or empty. The stream and the cancel of the run are
+  // capabilities that the run gave to this subject: another subject gets the answer for an unknown query_id (docs/access.md, "Routes with no action").
+  std::string owner;
 };
 
 struct SessionSnapshot {
@@ -181,6 +184,9 @@ public:
   bool should_reap(int abandoned_ttl_ms, int terminal_ttl_ms) const;
 
   SessionSnapshot snapshot() const;
+
+  // The subject that started the run (QuerySessionOptions::owner); empty without the access of humans.
+  const std::string& owner() const { return options_.owner; }
 
   // Move out all buffered high-frequency samples and empty the buffer.
   // To keep the payload size bounded, the backend can drop older points. It returns at most `max_points` points.

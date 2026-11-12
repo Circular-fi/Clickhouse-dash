@@ -745,7 +745,10 @@ ChMcpSettings ch_mcp_settings(const ChMcpLimits& limits, const ChSettingsProfile
     out.bytes_cut_by_profile = true;
   }
   // readonly = 1 in the profile: ClickHouse refuses every setting of the statement.
-  if (profile.known && profile.readonly == 1) return out;
+  if (profile.known && profile.readonly == 1) {
+    out.settings_refused = true;
+    return out;
+  }
 
   const auto add = [&out](const char* name, std::string value) { out.settings.emplace_back(name, std::move(value)); };
   // A guard rail is removed when the profile has no value, or a larger value.

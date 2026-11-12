@@ -165,6 +165,9 @@ const char* mcp_tool_access_action(const McpToolInfo& tool);
 // The database that a call names: the argument `database` of a data tool, or the parameter `database` of the route of an API tool when the
 // access rule of the route reads it. Empty when the call names none. The two modes of MCP use it to find the resource of a call.
 std::string mcp_call_database(const McpToolInfo& tool, const rapidjson::Value& arguments);
+// True when the tool has an argument that names a database (the tools that read one table or one database, the API tools with the parameter
+// `database`). A call of such a tool can name the one database that an approval covers.
+bool mcp_tool_takes_database(const McpToolInfo& tool);
 
 // The questions that the creator of a key must pass for that key (docs/mcp.md, "Keys and the access of humans"). Each tool of the
 // key (mcp_effective_tools, with all the tools that the key is entitled to) gives its action once for each host of the key.

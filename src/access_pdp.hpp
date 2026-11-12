@@ -122,7 +122,7 @@ struct PdpAnswer {
   // The seconds of retry_after of a false decision with budget_exceeded: a whole number from 1. Empty for another answer.
   std::optional<uint64_t> retry_after;
   // context.evaluation_id of a false decision with the reason approval_required or approval_pending (ProcurAuth 17.1): a text that only the PDP
-  // reads. The client gives it back in the submission and never reads it. At most 1024 bytes.
+  // reads. The client gives it back in the submission and never reads it. At most 4096 bytes: a longer one is not kept.
   std::string evaluation_id;
   // context.limits of a true decision. Always empty for a false decision: ChDash ignores the limits of a false answer (7.6).
   PdpLimits limits;
@@ -334,6 +334,21 @@ struct PdpEndpoints {
   std::optional<uint64_t> idle_max_seconds;
   std::optional<uint64_t> evaluations_max_bytes;
   std::optional<uint64_t> evaluations_max_items;
+  // The members procurauth_approval_* (ProcurAuth 17.4, 17.5, 17.3a; a name that the reference PDP uses). A member that is not a whole number
+  // from 1 is ignored: the approval needs none of them, so a bad one never stops ChDash.
+  std::optional<uint64_t> approval_max_command_bytes;
+  std::optional<uint64_t> approval_lease_min_seconds;
+  std::optional<uint64_t> approval_lease_max_seconds;
+  std::optional<uint64_t> approval_wait_max_seconds;
+};
+
+// The bounds of the approval API that the PDP published (the members procurauth_approval_* of its metadata). Nothing is set before a
+// discovery, or when the PDP publishes none.
+struct PdpApprovalLimits {
+  std::optional<uint64_t> max_command_bytes;
+  std::optional<uint64_t> lease_min_seconds;
+  std::optional<uint64_t> lease_max_seconds;
+  std::optional<uint64_t> wait_max_seconds;
 };
 
 enum class PdpDiscoveryState {
@@ -389,7 +404,9 @@ struct PdpApprovalRequest {
 // or lease_required, and 404 for a read (an unknown request, or the request of another subject). Unavailable: any other answer, no answer, an
 // answer that is not valid (fail closed).
 struct PdpApprovalReply {
-  enum class Status { Ok, NoDevice, RateLimited, InvalidArgument, Unavailable } status = Status::Unavailable;
+  // ExplanationRequired: 422 explanation_required (the PDP asks for the intent of the agent: approval_ref). CannotSupersede: 409 cannot_supersede
+  // (the request to replace was used). InvalidEvaluation: 422 invalid_evaluation (the evaluation_id is late or not valid: ask again).
+  enum class Status { Ok, NoDevice, RateLimited, InvalidArgument, ExplanationRequired, CannotSupersede, InvalidEvaluation, Unavailable } status = Status::Unavailable;
   std::string request_id;
   std::string code;
   PdpVerdict verdict = PdpVerdict::Void;
@@ -451,6 +468,8 @@ public:
   PdpDiscoveryResult discover(const PdpCallContext& context);
   // The endpoints that apply now (the defaults before a discovery).
   PdpEndpoints endpoints();
+  // The bounds of the approval API that the metadata published (ProcurAuth 17.4, 17.5).
+  PdpApprovalLimits approval_limits();
   // The wait for a question with context.usage (ProcurAuth 6.9, 10.6): procurauth_usage_max_seconds plus one second when the PDP publishes
   // it, never shorter than the timeout. The published value is never above PdpOptions::usage_max_seconds (discover), so nothing lowers it.
   std::chrono::milliseconds usage_timeout();

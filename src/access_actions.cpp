@@ -91,10 +91,33 @@ const AccessAction* access_action(std::string_view name) {
   return nullptr;
 }
 
+AccessFeatures access_features_for(const AccessFeatureInputs& in) {
+  AccessFeatures out;
+  out.query_library = in.query_library;
+  out.query_library_writable = in.query_library && in.query_library_writable;
+  out.explorer = in.explorer;
+  out.system = in.system;
+  out.observability = in.observability;
+  out.mcp = in.mcp;
+  out.mcp_keys_write = in.mcp && in.mcp_keys_write;
+  out.mcp_session = in.mcp && in.mcp_identity;
+  const bool identity = out.mcp_session;
+  out.mcp_write_tool = identity && in.any_mcp_host && in.any_mcp_write_host;
+  out.mcp_export_tool = identity && in.any_mcp_host;
+  out.mcp_library_write_tool = identity && out.query_library_writable;
+  out.mcp_usage = in.usage;
+  out.mcp_usage_tool = in.usage && in.usage_all_keys;
+  return out;
+}
+
 bool access_action_published(const AccessAction& action, const AccessFeatures& features) {
   const std::string_view name = action.name;
   if (name == "library.read") return features.query_library;
-  if (name == "library.write") return features.query_library && features.query_library_writable;
+  // A write of the library, a write of SQL and an export are published only when a tool serves them (the identity mode offers the tools
+  // library_write, run_write_query and export_query). Without MCP, no tool exists and the pages publish what they serve.
+  if (name == "library.write") return features.query_library && features.query_library_writable && (!features.mcp || features.mcp_library_write_tool);
+  if (name == "query.run.write") return !features.mcp || features.mcp_write_tool;
+  if (name == "query.export") return !features.mcp || features.mcp_export_tool;
   if (name == "explorer.read") return features.explorer;
   if (starts_with(name, "system.")) return features.system;
   if (name == "observability.read") return features.observability;
@@ -102,7 +125,9 @@ bool access_action_published(const AccessAction& action, const AccessFeatures& f
   // read or to write, so these two actions are not published there (docs/access.md, "Approval of an action").
   if (name == "mcp.keys.read") return features.mcp && !features.mcp_session;
   if (name == "mcp.keys.write") return features.mcp && features.mcp_keys_write && !features.mcp_session;
-  if (name == "mcp.usage.read") return features.mcp;
+  // The usage is counted only when mcp.usage.enabled is true. In the identity mode the only function of the action is the tool
+  // mcp_analysis_all_usage, which needs mcp.usage.all_keys too. The pages of the keys mode read the usage of the keys of their creator.
+  if (name == "mcp.usage.read") return features.mcp && features.mcp_usage && (!features.mcp_session || features.mcp_usage_tool);
   if (name == "mcp.session") return features.mcp && features.mcp_session;
   return true;
 }

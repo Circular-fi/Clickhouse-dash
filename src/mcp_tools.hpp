@@ -32,6 +32,9 @@ struct McpDbLimits {
   std::string agent_caller;
   // Run with the system user of the host, not with the MCP user. The OpenTelemetry tools read their tables as the pages do.
   bool as_system = false;
+  // The ceilings of the call that the identity mode gives (ProcurAuth 7.4). They bound the statement when the settings profile of the MCP user has
+  // readonly = 1 and ClickHouse takes no setting: the client counts the rows and bytes read and the time itself (access_ceilings.hpp, CeilingMeter).
+  McpCeilings ceilings;
   // Run with the write account of the host (mcp_write_uri), without readonly = 1. Only the tool run_write_query sets it, with a statement that
   // the PDP approved (docs/mcp.md, "The write tool").
   bool write = false;

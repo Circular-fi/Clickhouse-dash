@@ -117,6 +117,8 @@ std::optional<std::vector<std::string>> McpSubjectAccess::list(const std::string
   for (size_t i = 0; i < tools.size(); ++i) {
     if (always[i] || (!action_of[i].empty() && allowed.count(action_of[i]))) out.push_back(tools[i]);
   }
+  // Binding 5.7b: tools/list names get_action_status when it names at least one other tool.
+  if (out.size() == 1 && out.front() == kMcpStatusTool) out.clear();
   return out;
 }
 
@@ -164,18 +166,30 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
   // and the route asks the PDP nothing: a call takes one unit at most.
   const bool use = decide_use_ && question->match == AccessMatch::Node && access_action_has_budget(question->action, features_);
   // export_query needs two permissions (ProcurAuth 5.5a, 10.1a): the export and the run of the statement. The other permission is asked first,
-  // without usage and without effect. A `false` answer, also with a reason of 17.1, refuses the call before the use takes a unit (17.7).
-  if (std::string_view(tool.name) == kMcpExportTool && question->match == AccessMatch::Node) {
+  // without usage and without effect, and only after the check of the arguments and of the control arguments (contract 9.4, step 1 and 2: a
+  // call with a bad argument asks the PDP nothing). A `false` answer, also with a reason of 17.1, refuses the call before the use takes a unit (17.7).
+  // The ceilings of that permission lower the ceilings of the call, as the ceilings of its own action do (ProcurAuth 5.5a).
+  const bool needs_other = std::string_view(tool.name) == kMcpExportTool && question->match == AccessMatch::Node;
+  PdpLimits other_limits;
+  const auto other_stop = [&]() -> std::optional<AccessDecision> {
+    if (!needs_other) return std::nullopt;
     std::vector<AccessDecision> other = decide_(subject, {AccessQuestion{"query.run.read", question->resource}});
     other.resize(1);
-    if (other.front().failed) return McpAccess::Failed;
-    if (!other.front().allowed) return McpAccess::Denied;
-  }
+    if (other.front().failed) return other.front();
+    if (!other.front().allowed) {
+      AccessDecision denied;
+      denied.source = "pdp";
+      return denied;
+    }
+    other_limits = other.front().limits;
+    return std::nullopt;
+  };
   AccessDecision decision;
   if (approval_ && question->match == AccessMatch::Node) {
     // The approval of a person for any action (ProcurAuth 17.7). The question of 10.1 comes first, with no effect: the PDP decides which grant
     // needs an approval. Only a reason of 17.1 starts the flow of the gate.
     const auto first = [&]() {
+      if (const auto stop = other_stop()) return *stop;
       if (use) return decide_use_(subject, *question);
       std::vector<AccessDecision> decisions = decide_(subject, {*question});
       decisions.resize(1);
@@ -184,6 +198,8 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
     const McpGateResult gated = approval_->call(subject, tool, *question, use, arguments, info, first);
     if (!gated.run && !gated.pass) return gated.access;
     decision = gated.decision;
+  } else if (const auto stop = other_stop()) {
+    decision = *stop;
   } else if (use) {
     decision = decide_use_(subject, *question);
   } else {
@@ -214,6 +230,19 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
     const auto visible = visible_hosts(subject);
     if (!visible) return McpAccess::Failed;
     if (info) info->visible_hosts = *visible;
+  }
+  // The ceilings of the other permission (export_query: query.run.read) apply too, and the lowest value wins. A ceiling that its action does not
+  // declare, or that MCP cannot apply, makes the answer false (ProcurAuth 7.5).
+  if (!other_limits.empty()) {
+    McpCeilings other_ceilings;
+    std::string other_refused;
+    if (!access_ceilings_enforceable(other_limits, "query.run.read", features_, &other_refused) ||
+        !mcp_ceilings_of(other_limits, &other_ceilings, &other_refused)) {
+      log_event(LogLevel::Warn, "access.ceiling_unenforceable",
+                {{"action", "query.run.read"}, {"resource", access_resource_path(question->resource)}, {"ceiling", other_refused.substr(0, 128)}});
+      return McpAccess::Denied;
+    }
+    ceilings.lower(other_ceilings);
   }
   if (info) info->ceilings.lower(ceilings);
   return McpAccess::Allowed;

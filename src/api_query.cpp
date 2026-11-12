@@ -108,6 +108,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   // The ceilings of the grant (docs/access.md, "Limits of a grant"): a person with query.run.read and query.run.write gets the ceilings of
   // the action that fits the SQL (access_use_run classified it). The session lowers its bounds with them and keeps the backstops of the client.
   run_options.ceilings = access_ceilings();
+  run_options.owner = cfg_.access.enforced() ? access_subject() : std::string();
   auto session = std::make_shared<QuerySession>(
       qid,
       host_id,
@@ -203,6 +204,10 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
     // The value `killed` is the number of ClickHouse queries that KILL QUERY found. Zero means that nothing was running any more.
     // The value `kill_error` means that the KILL could not run.
   KillOutcome kill;
+  // The cancel token is a capability that the run gave to the subject that started it. Another subject gets the answer for an unknown run.
+  if (session && cfg_.access.enforced() && session->owner() != access_subject()) {
+    return json_error(res, 404, "not_found", "Unknown query_id.");
+  }
   if (session) {
     session->request_cancel();
         // Compatibility retries use distinct native ids. The public browser id stays stable.

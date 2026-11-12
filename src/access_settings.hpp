@@ -44,6 +44,9 @@ struct AccessSettings {
   // https only. An empty file is the store of the system.
   std::string pdp_ca_file;
   bool pdp_verify = true;
+  // access.pdp.insecure_link: the file accepts a link to the PDP in clear text (http to a host that is not this machine) or an https link with no
+  // check of the certificate (verify = false). Default false: such a link stops the start.
+  bool pdp_insecure_link = false;
   // true: use the Resource Search of the PDP to list databases (docs/access.md, "Resource Search"). Default false.
   bool pdp_search = false;
   std::string pdp_token;

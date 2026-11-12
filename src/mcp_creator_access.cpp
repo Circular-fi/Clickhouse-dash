@@ -251,7 +251,14 @@ McpCreatorCall McpCreatorAccess::call(const McpKey& key, const McpToolInfo& tool
       candidates.push_back(i);
     }
     if (candidates.size() > 1) {
-      out.action = questions[candidates.front()].action;
+      // Several databases need an approval and the call names no one of them: no effect can name the operation. The agent gets a tool error that
+      // tells what to change, never the answer for an unknown tool (docs/access.md, "The keys of the page").
+      const std::string message =
+          mcp_tool_takes_database(tool)
+              ? "The key reaches several databases, and each one needs the approval of the owner. Name one database in the argument database, so that the approval covers it."
+              : "The key reaches several databases, and each one needs the approval of the owner. This tool names no database, so no approval can cover it. Use a tool that names one database, for example list_tables.";
+      info->answered = approval_answer(mcp_tool_error("invalid_argument", message), "invalid_argument");
+      out.access = McpAccess::Allowed;
       return out;
     }
     if (candidates.size() == 1) {

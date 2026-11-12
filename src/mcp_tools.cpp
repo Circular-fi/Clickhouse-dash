@@ -52,7 +52,10 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
   ctx.visible_hosts = info.visible_hosts;
   ctx.ceilings = info.ceilings;
   // The agent of the call goes into the log_comment of each statement (api_mcp.cpp, ClickHouseMcpDatabase).
-  for (McpDbLimits* limits : {&ctx.user_limits, &ctx.schema_limits, &ctx.system_limits, &ctx.system_schema_limits}) limits->agent_caller = info.agent_caller;
+  for (McpDbLimits* limits : {&ctx.user_limits, &ctx.schema_limits, &ctx.system_limits, &ctx.system_schema_limits}) {
+    limits->agent_caller = info.agent_caller;
+    limits->ceilings = info.ceilings;
+  }
   ctx.api = api_;
   ctx.analysis = analysis_;
   ctx.now = now;
@@ -76,6 +79,7 @@ McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& too
     else if (tool == "explain_query") json = tool_explain_query(ctx, arguments);
     else if (tool == "export_query") json = tool_export_query(ctx, arguments);
     else if (tool == "run_write_query") json = tool_run_write_query(ctx, arguments, info.approved_sql);
+    else if (tool == "library_write") json = tool_library_write(ctx, arguments);
     else if (tool == "mcp_analysis_my_limits") json = tool_analysis_my_limits(ctx, arguments);
     else if (tool == "mcp_analysis_my_usage") json = tool_analysis_my_usage(ctx, arguments);
     else if (tool == "mcp_analysis_all_usage") json = tool_analysis_all_usage(ctx, arguments);

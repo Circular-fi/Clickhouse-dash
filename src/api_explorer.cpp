@@ -93,6 +93,8 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   if (failed) return access_unavailable(res, "explorer.read");
   if (readable) {
     if (!database_filter.empty() && readable->count(database_filter) == 0) return access_forbidden(res, "explorer.read");
+    // The host answer is only `subtree`: with no database that a `node` decision allows, the route has nothing to show (ProcurAuth 4.4).
+    if (readable->empty() && access_list_filtered()) return access_forbidden(res, "explorer.read");
     return send_json(res, explorer::catalog_json(route.host_id, database_filter, explorer::keep_catalog_databases(catalog, *readable),
                                                  answer.value->stale));
   }
@@ -113,6 +115,7 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
   const auto readable = access_readable_databases({"explorer.read"}, route.host_id, databases, &failed);
   if (failed) return access_unavailable(res, "explorer.read");
   if (readable) {
+    if (readable->empty() && access_list_filtered()) return access_forbidden(res, "explorer.read");
     return send_json(res, explorer::storage_json(route.host_id, explorer::keep_storage_databases(map, *readable), answer.value->stale));
   }
   send_json(res, explorer::storage_json(route.host_id, map, answer.value->stale));
@@ -202,6 +205,7 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   const auto readable = access_readable_databases({"explorer.read"}, route.host_id, explorer::graph_databases(graph.scoped), &failed);
   if (failed) return access_unavailable(res, "explorer.read");
   if (readable) {
+    if (readable->empty() && access_list_filtered()) return access_forbidden(res, "explorer.read");
     return send_json(res, explorer::graph_json(route.host_id, *graph.graph, explorer::keep_graph_databases(graph.scoped, *readable), scope,
                                                graph.scope_has_more, graph.storage_available, graph.stale, cfg_.explorer.live_refresh_ms));
   }

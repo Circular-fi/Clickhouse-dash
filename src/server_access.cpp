@@ -51,6 +51,9 @@ struct AccessRequestState {
   // A route that runs SQL and takes a unit of a budget (AccessRule::spend): the handler has not yet called access_use_run. Until it does,
   // the statements run with readonly = 1 and with the lowest value of each ceiling: a handler that forgets the call runs nothing useful.
   bool use_pending = false;
+  // A route that lists the databases of a host (AccessRule::list_filter) found `node` false and `subtree` true on the host: it shows only the
+  // databases that a decision `node` allows (access_readable_databases), and it answers 403 when it has none.
+  bool list_filtered = false;
 };
 
 AccessRequestState& access_state() {
@@ -154,18 +157,24 @@ void Server::reset_access_state() { access_state() = AccessRequestState{}; }
 
 std::string Server::access_subject() { return access_state().subject; }
 
+bool Server::access_list_filtered() { return access_state().list_filtered; }
+
 AccessFeatures Server::access_features() const {
-  AccessFeatures features;
-  features.query_library = !cfg_.query_libraries.empty();
-  features.query_library_writable =
+  AccessFeatureInputs in;
+  in.query_library = !cfg_.query_libraries.empty();
+  in.query_library_writable =
       std::any_of(cfg_.query_libraries.begin(), cfg_.query_libraries.end(), [](const QueryLibrarySettings& library) { return library.writable; });
-  features.explorer = cfg_.explorer.enabled();
-  features.system = cfg_.system.enabled;
-  features.observability = cfg_.traces_on() || cfg_.logs_on() || cfg_.metrics_on();
-  features.mcp = cfg_.mcp.enabled;
-  features.mcp_keys_write = cfg_.mcp.enabled && cfg_.mcp.keys_mode != McpKeysMode::Static;
-  features.mcp_session = cfg_.mcp.enabled && cfg_.mcp.identity_auth();
-  return features;
+  in.explorer = cfg_.explorer.enabled();
+  in.system = cfg_.system.enabled;
+  in.observability = cfg_.traces_on() || cfg_.logs_on() || cfg_.metrics_on();
+  in.mcp = cfg_.mcp.enabled;
+  in.mcp_identity = cfg_.mcp.identity_auth();
+  in.mcp_keys_write = cfg_.mcp.keys_mode != McpKeysMode::Static;
+  in.any_mcp_host = std::any_of(cfg_.hosts.begin(), cfg_.hosts.end(), [](const auto& host) { return !host.mcp_uri.empty(); });
+  in.any_mcp_write_host = std::any_of(cfg_.hosts.begin(), cfg_.hosts.end(), [](const auto& host) { return !host.mcp_write_uri.empty(); });
+  in.usage = cfg_.mcp.usage.enabled;
+  in.usage_all_keys = cfg_.mcp.usage.all_keys;
+  return access_features_for(in);
 }
 
 std::string Server::access_server_name() const { return cfg_.access.enforced() ? cfg_.access.audience : std::string("chdash"); }
@@ -308,13 +317,19 @@ void Server::init_access() {
     approval.max_command_bytes = settings.approval_max_command_bytes;
     approval.wait_cap_seconds = settings.approval_wait_ms / 1000;
     approval.max_sql_bytes = cfg_.mcp.max_sql_bytes;
+    // 17.3a: the caps that decide what a call returns and how long it runs are in the op of each approval.
+    approval.caps.max_rows = cfg_.mcp.max_rows;
+    approval.caps.max_result_bytes = cfg_.mcp.max_result_bytes;
+    approval.caps.timeout_seconds = cfg_.mcp.query_timeout_seconds;
+    approval.library_writable = access_features().query_library_writable;
     const auto user_of_uri = [](const std::string& uri) {
       const auto parsed = parse_clickhouse_uri(uri, nullptr);
       return parsed ? parsed->user : std::string();
     };
     for (const auto& host : cfg_.hosts) {
       if (host.mcp_uri.empty()) continue;
-      approval.hosts.push_back(McpApprovalHost{host.id, user_of_uri(host.mcp_uri), host.mcp_write_uri.empty() ? std::string() : user_of_uri(host.mcp_write_uri)});
+      approval.hosts.push_back(McpApprovalHost{host.id, user_of_uri(host.mcp_uri), host.mcp_write_uri.empty() ? std::string() : user_of_uri(host.mcp_write_uri),
+                                               !host.mcp_write_uri.empty()});
     }
     McpApprovalPorts ports;
     const auto call_context = [] {
@@ -325,6 +340,7 @@ void Server::init_access() {
     ports.ask = [this, call_context](const std::string& subject, const AccessQuestion& question, bool usage, bool units_optional) {
       return pdp_->decide_approval(subject, question, usage, units_optional, call_context());
     };
+    ports.limits = [this] { return pdp_->approval_limits(); };
     ports.submit = [this, call_context](const PdpApprovalRequest& request) { return pdp_->approval_submit(request, call_context()); };
     ports.verdict = [this, call_context](const std::string& request_id, const std::string& subject, uint64_t wait, bool renew) {
       return pdp_->approval_verdict(request_id, subject, wait, renew, call_context());
@@ -349,8 +365,27 @@ std::vector<AccessDecision> Server::access_decide(const std::vector<AccessQuesti
   const AccessRequestState& state = access_state();
   // Without a PDP or a subject, no decision is valid: each one fails (fail closed).
   if (!pdp_ || !state.enforced || state.subject.empty()) return std::vector<AccessDecision>(questions.size(), access_refusal_of({}));
-  std::vector<AccessDecision> decisions = pdp_->decide(state.subject, questions, state.call);
-  if (operation) access_enforce_ceilings(state.call.request_id, questions, &decisions, access_features(), true);
+  // An action that the document does not publish (a feature that is off, or an action that no tool serves: access_actions.hpp) is a plain denial: the PDP
+  // never gets a question about it, and no grant can give it.
+  const AccessFeatures features = access_features();
+  std::vector<AccessDecision> decisions(questions.size());
+  std::vector<AccessQuestion> asked;
+  std::vector<size_t> positions;
+  for (size_t i = 0; i < questions.size(); ++i) {
+    const AccessAction* action = access_action(questions[i].action);
+    if (action && !access_action_published(*action, features)) {
+      decisions[i].source = "local";
+      continue;
+    }
+    asked.push_back(questions[i]);
+    positions.push_back(i);
+  }
+  if (!asked.empty()) {
+    std::vector<AccessDecision> answered = pdp_->decide(state.subject, asked, state.call);
+    answered.resize(asked.size());
+    for (size_t n = 0; n < asked.size(); ++n) decisions[positions[n]] = std::move(answered[n]);
+  }
+  if (operation) access_enforce_ceilings(state.call.request_id, questions, &decisions, features, true);
   return decisions;
 }
 
@@ -496,17 +531,34 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
 
   switch (rule.kind) {
     case AccessRuleKind::Action: {
-      // A listing of the databases of a host that names no database: any grant on the host or below it lets the route run, and the route
-      // keeps the databases that the human may read (access_readable_databases). It never runs for a host that the human cannot see.
-      const AccessMatch match = rule.list_filter && resource.type == "host" ? AccessMatch::Subtree : AccessMatch::Node;
-      auto decisions = access_decide({AccessQuestion{rule.action, resource, match}});
-      if (!decisions.front().allowed) return deny(rule.action, decisions);
-      if (match == AccessMatch::Subtree && !decisions.front().limits.empty()) {
-        // The route runs data statements with the ceilings of this answer, so a ceiling that ChDash cannot apply makes it false
-        // (ProcurAuth 7.5). access_decide checks only the questions with the match "node".
-        access_enforce_ceilings(state.call.request_id, {AccessQuestion{rule.action, resource}}, &decisions, access_features(), true);
-        if (!decisions.front().allowed) return deny(rule.action, decisions);
+      // A listing of the databases of a host that names no database (the catalog, the storage map, the graph). ProcurAuth 4.4 and contract 11.5: a
+      // `subtree` answer is for the display only, and no operation runs because of it. So the route asks `node` on the host first, with the
+      // `subtree` question of the display in the same batch. A `true` answer for `node` lets the route run for the host. When only the `subtree`
+      // answer is `true` (the person holds a grant on one database of the host), the route shows the host and runs in the mode "filtered": it
+      // returns only the databases that a `node` decision of their own allows, and it answers 403 when it has none (access_list_filtered).
+      if (rule.list_filter && resource.type == "host") {
+        auto decisions = access_decide({AccessQuestion{rule.action, resource, AccessMatch::Node}, AccessQuestion{rule.action, resource, AccessMatch::Subtree}}, false);
+        if (decisions[0].allowed) {
+          access_enforce_ceilings(state.call.request_id, {AccessQuestion{rule.action, resource}}, &decisions, access_features(), true);
+          if (!decisions[0].allowed) return deny(rule.action, {decisions[0]});
+          state.ceilings = AccessRunCeilings{};
+          state.ceilings.base = access_ceilings_of(decisions[0].limits);
+          return false;
+        }
+        if (decisions[0].failed || !decisions[1].allowed) return deny(rule.action, decisions[0].failed ? std::vector<AccessDecision>{decisions[0]} : std::vector<AccessDecision>{decisions[1]});
+        if (!decisions[1].limits.empty()) {
+          // The route runs data statements with the ceilings of this answer, so a ceiling that ChDash cannot apply makes it false (ProcurAuth 7.5).
+          std::vector<AccessDecision> shown = {decisions[1]};
+          access_enforce_ceilings(state.call.request_id, {AccessQuestion{rule.action, resource}}, &shown, access_features(), true);
+          if (!shown.front().allowed) return deny(rule.action, shown);
+        }
+        state.list_filtered = true;
+        state.ceilings = AccessRunCeilings{};
+        state.ceilings.base = access_ceilings_of(decisions[1].limits);
+        return false;
       }
+      auto decisions = access_decide({AccessQuestion{rule.action, resource, AccessMatch::Node}});
+      if (!decisions.front().allowed) return deny(rule.action, decisions);
       // The ceilings of the action apply to each query that the route sends (ProcurAuth 7.4).
       state.ceilings = AccessRunCeilings{};
       state.ceilings.base = access_ceilings_of(decisions.front().limits);
@@ -836,6 +888,11 @@ AccessDecision Server::access_decide_use(const AccessQuestion& question, bool* p
     AccessDecision decision = access_decide({question}).front();
     if (pdp_true) *pdp_true = decision.allowed;
     return decision;
+  }
+  if (const AccessAction* action = access_action(question.action); action && !access_action_published(*action, access_features())) {
+    AccessDecision denied;
+    denied.source = "local";
+    return denied;
   }
   AccessDecision decision = pdp_->decide_use(state.subject, question, state.call);
   if (pdp_true) *pdp_true = decision.allowed;

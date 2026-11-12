@@ -18,6 +18,8 @@ namespace mcp_tools {
 
 namespace {
 
+constexpr const char* kLibraryWriteToolName = "library_write";
+
 bool plain_name(const std::string& name, size_t max) {
   return !name.empty() && name.size() <= max && std::all_of(name.begin(), name.end(), [](char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
@@ -243,6 +245,99 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   doc.Accept(w);
   w.EndObject();
   return in_untrusted(finish(sb));
+}
+
+// library_write (mcp_approval.hpp): one change of the server query library, through the same route as the Query page. The tool runs after the
+// approval of the call (ProcurAuth 17.7), so it checks nothing about the right of the subject. The library has no ClickHouse user.
+std::string tool_library_write(Ctx& ctx, const rapidjson::Value& args) {
+  reject_unknown(args, {"host", "operation", "id", "library", "recursive", "body"});
+  resolve_host(ctx, args);
+  if (!ctx.api) fail("api_unavailable", "this server cannot call its own API");
+  const std::string operation = req_string(args, "operation", 32);
+  struct Operation {
+    const char* name;
+    const char* method;
+    const char* path;
+    bool id;
+    bool body;
+  };
+  static const Operation operations[] = {
+      {"folder_create", "POST", "/api/query-library/folders", false, true},
+      {"folder_update", "PATCH", "/api/query-library/folders/{id}", true, true},
+      {"folder_delete", "DELETE", "/api/query-library/folders/{id}", true, false},
+      {"query_create", "POST", "/api/query-library/queries", false, true},
+      {"query_update", "PATCH", "/api/query-library/queries/{id}", true, true},
+      {"query_delete", "DELETE", "/api/query-library/queries/{id}", true, false},
+      {"import", "POST", "/api/query-library/import", false, true},
+  };
+  const Operation* chosen = nullptr;
+  for (const auto& candidate : operations) {
+    if (operation == candidate.name) chosen = &candidate;
+  }
+  if (!chosen) fail("invalid_argument", "operation must be folder_create, folder_update, folder_delete, query_create, query_update, query_delete or import");
+
+  McpApiRequest request;
+  request.method = chosen->method;
+  request.path = chosen->path;
+  if (chosen->id) {
+    const std::string id = req_string(args, "id", 128);
+    if (!plain_name(id, 128)) fail("invalid_argument", "id must be one plain value");
+    request.path.replace(request.path.find("{id}"), 4, id);
+  } else if (args.HasMember("id") && !args["id"].IsNull()) {
+    fail("invalid_argument", "this operation takes no id");
+  }
+  if (const auto library = opt_string(args, "library", 64); library && !library->empty()) request.query.emplace_back("library", *library);
+  if (const auto recursive = opt_bool(args, "recursive")) {
+    if (std::string_view(chosen->name) != "folder_delete") fail("invalid_argument", "recursive is only for folder_delete");
+    if (*recursive) request.query.emplace_back("recursive", "1");
+  }
+  request.timeout_seconds = ctx.user_limits.timeout_seconds;
+  request.max_bytes = ctx.config.max_result_bytes;
+  request.key_id = ctx.key.id;
+  request.tool = kLibraryWriteToolName;
+  request.agent_caller = ctx.user_limits.agent_caller;
+  const std::string api_host = mcp_api_host(ctx.host, McpIdentity::Page);
+  if (chosen->body) {
+    rapidjson::Document body;
+    body.SetObject();
+    if (const auto it = args.FindMember("body"); it != args.MemberEnd() && !it->value.IsNull()) {
+      if (!it->value.IsObject()) fail("invalid_argument", "body must be a JSON object");
+      body.CopyFrom(it->value, body.GetAllocator());
+    }
+    body.RemoveMember("host_id");
+    body.AddMember("host_id", rapidjson::Value(api_host.c_str(), static_cast<rapidjson::SizeType>(api_host.size()), body.GetAllocator()), body.GetAllocator());
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    body.Accept(w);
+    request.body = finish(sb);
+  } else if (args.HasMember("body") && !args["body"].IsNull()) {
+    fail("invalid_argument", "this operation takes no body");
+  }
+
+  McpApiResponse response = ctx.api->call(request);
+  if (response.status == 0) fail("api_unavailable", response.error.empty() ? "the API of ChDash did not answer" : response.error);
+  if (response.too_large) fail("result_too_large", "the answer is larger than " + std::to_string(ctx.config.max_result_bytes) + " bytes");
+  rapidjson::Document doc;
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, response.body);
+  const bool json = !doc.HasParseError() && doc.IsObject();
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status == 404 && !json) fail("not_enabled", "the configuration has no writable query_library");
+    std::string code;
+    std::string message;
+    if (json) {
+      for (const char* key : {"error_code", "error"}) {
+        if (const auto it = doc.FindMember(key); it != doc.MemberEnd() && it->value.IsString() && code.empty()) code = it->value.GetString();
+      }
+      if (const auto it = doc.FindMember("message"); it != doc.MemberEnd() && it->value.IsString()) message = it->value.GetString();
+    }
+    if (code.empty()) code = "api_error";
+    if (code.size() > 64) code.resize(64);
+    const std::string summary = "the API answered " + std::to_string(response.status) + (message.empty() ? std::string() : "; its message is in error.untrusted.detail");
+    if (message.empty()) fail(code, summary);
+    fail_untrusted(code, summary, message);
+  }
+  if (!json) fail("api_error", "the API did not answer JSON");
+  return in_untrusted(response.body);
 }
 
 }  // namespace mcp_tools

@@ -37,6 +37,8 @@ std::string tool_list_metrics(Ctx& ctx, const rapidjson::Value& args);
 std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args);
 // The API tools of the table in mcp_api_tools.cpp. One wrapper serves all of them.
 std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& args);
+// library_write (mcp_approval.hpp): one change of the query library of the host, through the route of the Query page.
+std::string tool_library_write(Ctx& ctx, const rapidjson::Value& args);
 // The analysis of the keys (mcp_tools_analysis.cpp).
 std::string tool_analysis_my_limits(Ctx& ctx, const rapidjson::Value& args);
 std::string tool_analysis_my_usage(Ctx& ctx, const rapidjson::Value& args);

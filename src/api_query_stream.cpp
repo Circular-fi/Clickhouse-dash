@@ -232,6 +232,10 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
     }
     session = it->second;
   }
+  // The stream is a capability that the run gave to the subject that started it (the other subjects get the answer for an unknown query_id).
+  if (cfg_.access.enforced() && session->owner() != access_subject()) {
+    return json_error(res, 404, "not_found", "Unknown query_id.");
+  }
 
   if (!session->attach_stream()) {
     return json_error(

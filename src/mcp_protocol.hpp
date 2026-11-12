@@ -134,9 +134,19 @@ bool mcp_error_retryable(const std::string& code);
 // The message is fixed. The result copies no value of the request.
 McpToolOutcome mcp_budget_exceeded_error(uint64_t retry_after);
 
+// The bounds of the approval API that the schema of each tool shows to the agent (ProcurAuth 17.4, 17.5): the values that the PDP publishes in
+// its metadata, and the limits of the configuration. A member that is not set is a bound that nobody published.
+struct McpApprovalBounds {
+  std::optional<uint64_t> lease_min_seconds;
+  std::optional<uint64_t> lease_max_seconds;
+  std::optional<uint64_t> wait_max_seconds;
+};
+
 class McpToolBackend {
 public:
   virtual ~McpToolBackend() = default;
+// The bounds of the approval controls that tools/list shows. The default publishes none.
+  virtual McpApprovalBounds approval_bounds() const { return {}; }
 // The configuration enables the tools that need one of its values, such as the usage of the keys.
 // The reading of all of it is another example. A tool whose needs are not met is not listed.
 // A call to such a tool gives `not_enabled`. No tool is enabled by default.

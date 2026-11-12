@@ -1107,7 +1107,7 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
   // pdp { }
   validate_object(*pdp, "access.pdp",
                   {"url", "url_env", "url_file", "token", "token_env", "token_file", "timeout", "cache_ttl", "ca_file", "verify", "search", "batch_timeout",
-                   "usage_max_seconds"},
+                   "usage_max_seconds", "insecure_link"},
                   {});
   const auto url = read_value_forms(*pdp, "url", "access.pdp");
   if (!url) throw std::runtime_error("access.pdp needs the address of the PDP: give one of url, url_env and url_file");
@@ -1140,6 +1140,12 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
     out.pdp_ca_file = *ca_file;
     cfg.value_sources["access.pdp.ca_file"] = "file";
   }
+  // The link to the PDP carries the token of this server, every decision and the command of each approval (ProcurAuth 10.0, step 4: it MUST be
+  // secured). A link in clear text, or an https link with no check of the certificate, stops the start unless the file says so with this key.
+  if (const auto insecure = bool_attr(*pdp, "insecure_link", "access.pdp")) {
+    out.pdp_insecure_link = *insecure;
+    cfg.value_sources["access.pdp.insecure_link"] = "file";
+  }
   if (!out.pdp_https) {
     // The two keys act on TLS only: with http they would look like a protection and would give none.
     for (const char* key : {"ca_file", "verify"}) {
@@ -1149,9 +1155,16 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
       }
     }
     if (!pdp_host_is_loopback(out.pdp_endpoint.host)) {
-      cfg.warnings.push_back("access.pdp.url (" + url->source + ") is http and the host \"" + out.pdp_endpoint.host +
-                             "\" is not this machine: the token of this server and every decision go in clear text. Use an https URL, "
-                             "or a network that only this server and the PDP reach (docs/access.md, \"Transport\")");
+      const std::string problem = "access.pdp.url (" + url->source + ") is http and the host \"" + out.pdp_endpoint.host +
+                                  "\" is not this machine: the token of this server and every decision go in clear text";
+      if (!out.pdp_insecure_link) {
+        throw std::runtime_error(problem + ". Use an https URL. To accept a clear link on a network that only this server and the PDP reach, set "
+                                           "access.pdp.insecure_link = true (docs/access.md, \"Transport\")");
+      }
+      cfg.warnings.push_back(problem + ", and access.pdp.insecure_link = true accepts it. Use a network that only this server and the PDP reach (docs/access.md, \"Transport\")");
+    } else if (out.pdp_insecure_link) {
+      throw std::runtime_error("access.pdp.insecure_link = true and access.pdp.url (" + url->source + ") contradict each other: the host \"" + out.pdp_endpoint.host +
+                               "\" is this machine, so the link is not in clear text. Remove access.pdp.insecure_link");
     }
   } else {
     if (!out.pdp_verify && pdp->attrs.count("ca_file") != 0) {
@@ -1164,8 +1177,16 @@ void load_access(AppConfig& cfg, const HclObject& root, std::string_view source)
       if (!problem.empty()) throw std::runtime_error("access.pdp.ca_file must name a readable file of PEM certificates; the value is \"" + out.pdp_ca_file + "\": " + problem);
     }
     if (!out.pdp_verify) {
+      if (!out.pdp_insecure_link) {
+        throw std::runtime_error("access.pdp.verify = false: ChDash would not verify the certificate of the PDP, so anyone on the network could read the token of this "
+                                 "server and the decisions, and answer in place of the PDP. Remove access.pdp.verify, or set access.pdp.insecure_link = true to accept it "
+                                 "(docs/access.md, \"Transport\")");
+      }
       cfg.warnings.push_back("access.pdp.verify = false: ChDash does not verify the certificate of the PDP, so anyone on the network can read the token of this "
-                             "server and the decisions, and can answer in place of the PDP. Use it only to test");
+                             "server and the decisions, and can answer in place of the PDP. access.pdp.insecure_link = true accepts it. Use it only to test");
+    } else if (out.pdp_insecure_link) {
+      throw std::runtime_error("access.pdp.insecure_link = true and access.pdp.url (" + url->source + ") contradict each other: the link is https and the certificate is "
+                               "verified, so it is secure. Remove access.pdp.insecure_link");
     }
   }
   const auto token_ref = find_secret_ref(*pdp, "token", "access.pdp");

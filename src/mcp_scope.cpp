@@ -357,6 +357,12 @@ std::string mcp_call_database(const McpToolInfo& tool, const rapidjson::Value& a
   return std::string_view(tool.group) == "data" ? text_member(arguments, "database") : std::string();
 }
 
+bool mcp_tool_takes_database(const McpToolInfo& tool) {
+  if (tool.api) return access_rule(tool.api->method, tool.api->path).database_param;
+  const std::string_view name = tool.name;
+  return std::string_view(tool.group) == "data" && (name == "list_tables" || name == "describe_table" || name == "query_table");
+}
+
 const char* mcp_tool_access_action(const McpToolInfo& tool) {
   if (tool.api) {
     const AccessRule rule = access_rule(tool.api->method, tool.api->path);
@@ -381,6 +387,7 @@ const char* mcp_tool_access_action(const McpToolInfo& tool) {
   // The tools of the approval flow (mcp_approval.hpp). get_action_status asks the PDP nothing: it has no action (binding 5.7b).
   if (name == "run_write_query") return "query.run.write";
   if (name == "export_query") return "query.export";
+  if (name == "library_write") return "library.write";
   if (name == "get_action_status") return nullptr;
   if (name == "mcp_analysis_all_usage") return "mcp.usage.read";
   if (group == "data") return "explorer.read";

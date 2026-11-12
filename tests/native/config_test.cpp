@@ -647,7 +647,7 @@ void test_access_block() {
     return "access {\n mode = \"authzen\"\n identity {\n" + identity + "\n }\n pdp {\n" + pdp + "\n }\n}\n";
   };
   const std::string identity = " issuer = \"https://issuer\"\n audience = \"db\"\n public_keys_file = \"" + dir + "/identity.pem\"";
-  const std::string pdp = " url = \"http://pdp:4182/base\"\n token_file = \"" + dir + "/pdp-token\"";
+  const std::string pdp = " url = \"http://pdp:4182/base\"\n insecure_link = true\n token_file = \"" + dir + "/pdp-token\"";
   const AppConfig full = load(authzen(identity + "\n max_age = \"2m\"\n header = \"X-Id\"", pdp + "\n timeout = \"250ms\"\n cache_ttl = \"0s\""));
   CHECK(full.access.enforced());
   CHECK_EQ(full.access.issuer, std::string("https://issuer"));
@@ -745,7 +745,7 @@ void test_access_block() {
   ::setenv("CHDASH_TEST_PDP_TOKEN", "env-token", 1);
   ::setenv("CHDASH_TEST_PDP_URL", "http://pdp-env:80", 1);
   const AppConfig env = load(authzen(" issuer = \"i\"\n audience = \"db\"\n public_keys_env = \"CHDASH_TEST_IDENTITY_KEYS\"",
-                                     " url_env = \"CHDASH_TEST_PDP_URL\"\n token_env = \"CHDASH_TEST_PDP_TOKEN\""));
+                                     " url_env = \"CHDASH_TEST_PDP_URL\"\n insecure_link = true\n token_env = \"CHDASH_TEST_PDP_TOKEN\""));
   CHECK_EQ(env.access.pdp_token, std::string("env-token"));
   CHECK_EQ(source(env, "access.pdp.token"), std::string("env:CHDASH_TEST_PDP_TOKEN|<hidden>"));
   CHECK_EQ(source(env, "access.pdp.url"), std::string("env:CHDASH_TEST_PDP_URL|http://pdp-env:80"));
@@ -795,13 +795,16 @@ void test_access_block() {
       // No warning for a verified https link.
       for (const auto& warning : tls.warnings) CHECK(!contains(warning, "access.pdp"));
       // verify = false is the value of the file, with a warning.
-      const AppConfig unverified = load(authzen(identity, https_url + token_line + "\n verify = false"));
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = false")), "access.pdp.verify = false"));
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = false")), "access.pdp.insecure_link = true"));
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n insecure_link = true")), "access.pdp.insecure_link = true and access.pdp.url (file) contradict each other"));
+      const AppConfig unverified = load(authzen(identity, https_url + token_line + "\n verify = false\n insecure_link = true"));
       CHECK(!unverified.access.pdp_verify);
       CHECK_EQ(source(unverified, "access.pdp.verify"), std::string("file|false"));
       CHECK(std::any_of(unverified.warnings.begin(), unverified.warnings.end(), [](const std::string& w) { return contains(w, "access.pdp.verify = false"); }));
       CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = \"no\"")), "access.pdp.verify must be a boolean"));
       // verify = false with a ca_file: the two keys contradict each other (the CA would never be used).
-      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = false\n ca_file = \"/etc/hostname\"")),
+      CHECK(contains(error_of(authzen(identity, https_url + token_line + "\n verify = false\n insecure_link = true\n ca_file = \"/etc/hostname\"")),
                      "access.pdp.ca_file and access.pdp.verify = false contradict each other"));
       // ca_file: a readable file with a certificate. An empty text, a missing file, a file without a certificate and a bad value stop the start.
       write_file(dir + "/pdp-ca.pem",
@@ -823,32 +826,50 @@ void test_access_block() {
     // ca_file and verify act on TLS only: with http they contradict the URL.
     CHECK(contains(error_of(authzen(identity, pdp + "\n verify = true")), "access.pdp.verify and access.pdp.url (file) contradict each other"));
     CHECK(contains(error_of(authzen(identity, pdp + "\n ca_file = \"/x\"")), "access.pdp.ca_file and access.pdp.url (file) contradict each other"));
-    // A http link to a host that is not this machine sends the token in clear text: a warning. The loopback has none.
+    // A http link to a host that is not this machine sends the token in clear text: the start stops, unless the file sets insecure_link = true
+    // (then it writes a warning). The loopback is not in clear text on a network: no key, no warning.
     const auto pdp_warnings = [&](const std::string& url) {
       size_t count = 0;
-      for (const auto& warning : load(authzen(identity, " url = \"" + url + "\"" + token_line)).warnings) {
+      for (const auto& warning : load(authzen(identity, " url = \"" + url + "\"\n insecure_link = true" + token_line)).warnings) {
         if (contains(warning, "clear text")) ++count;
       }
       return count;
     };
     CHECK_EQ(pdp_warnings("http://pdp:4182"), size_t(1));
-    CHECK_EQ(pdp_warnings("http://localhost:4182"), size_t(0));
-    CHECK_EQ(pdp_warnings("http://127.0.0.1:4182/base"), size_t(0));
-    CHECK_EQ(pdp_warnings("http://127.1.2.3"), size_t(0));
-    CHECK_EQ(pdp_warnings("http://[::1]:4182"), size_t(0));
     CHECK_EQ(pdp_warnings("http://10.0.0.5:4182"), size_t(1));
     CHECK_EQ(pdp_warnings("http://127.0.0.1.example.org"), size_t(1));
+    const auto refused_link = [&](const std::string& url) { return error_of(authzen(identity, " url = \"" + url + "\"" + token_line)); };
+    for (const char* url : {"http://pdp:4182", "http://10.0.0.5:4182", "http://127.0.0.1.example.org"}) {
+      const std::string refused = refused_link(url);
+      CHECK(contains(refused, "access.pdp.url (file) is http and the host"));
+      CHECK(contains(refused, "access.pdp.insecure_link = true"));
+    }
+    for (const char* url : {"http://localhost:4182", "http://127.0.0.1:4182/base", "http://127.1.2.3", "http://[::1]:4182"}) {
+      CHECK(refused_link(url).empty());
+      size_t clear_text = 0;
+      for (const auto& warning : load(authzen(identity, " url = \"" + std::string(url) + "\"" + token_line)).warnings) clear_text += contains(warning, "clear text") ? 1 : 0;
+      CHECK_EQ(clear_text, size_t(0));
+      // insecure_link = true for a link that is not in clear text is a contradiction.
+      CHECK(contains(error_of(authzen(identity, " url = \"" + std::string(url) + "\"\n insecure_link = true" + token_line)),
+                     "access.pdp.insecure_link = true and access.pdp.url (file) contradict each other"));
+    }
+    CHECK(contains(error_of(authzen(identity, pdp + "\n insecure_link = false")), "duplicate attribute 'insecure_link'"));
+    CHECK(contains(error_of(authzen(identity, " url = \"http://pdp:4182\"\n insecure_link = \"yes\"" + token_line)), "access.pdp.insecure_link must be a boolean"));
+    CHECK(contains(error_of(authzen(identity, " url = \"http://pdp:4182\"\n insecure_link = false" + token_line)), "is http and the host"));
+    const AppConfig accepted = load(authzen(identity, pdp));
+    CHECK(accepted.access.pdp_insecure_link);
+    CHECK_EQ(source(accepted, "access.pdp.insecure_link"), std::string("file|true"));
   }
-  CHECK(contains(error_of(authzen(identity, " url = \"http://pdp\"")), "access.pdp needs the token"));
-  const std::string clear = error_of(authzen(identity, " url = \"http://pdp\"\n token = \"in-clear\""));
+  CHECK(contains(error_of(authzen(identity, " url = \"http://pdp\"\n insecure_link = true")), "access.pdp needs the token"));
+  const std::string clear = error_of(authzen(identity, " url = \"http://pdp\"\n insecure_link = true\n token = \"in-clear\""));
   CHECK(contains(clear, "access.pdp.token: a secret is never written in the file"));
   CHECK(!contains(clear, "in-clear"));
   ::unsetenv("CHDASH_TEST_PDP_UNSET");
-  CHECK(contains(error_of(authzen(identity, " url = \"http://pdp\"\n token_env = \"CHDASH_TEST_PDP_UNSET\"")), "CHDASH_TEST_PDP_UNSET is not set"));
+  CHECK(contains(error_of(authzen(identity, " url = \"http://pdp\"\n insecure_link = true\n token_env = \"CHDASH_TEST_PDP_UNSET\"")), "CHDASH_TEST_PDP_UNSET is not set"));
   CHECK(contains(error_of(authzen(identity, pdp + "\n timeout = \"5ms\"")), "access.pdp.timeout must be between 10ms and 1m, not \"5ms\""));
   CHECK(contains(error_of(authzen(identity, pdp + "\n cache_ttl = \"2h\"")), "access.pdp.cache_ttl must be between 0ms and 1h, not \"2h\""));
   write_file(dir + "/pdp-token-space", "two words\n");
-  const std::string spaced = error_of(authzen(identity, " url = \"http://pdp\"\n token_file = \"" + dir + "/pdp-token-space\""));
+  const std::string spaced = error_of(authzen(identity, " url = \"http://pdp\"\n insecure_link = true\n token_file = \"" + dir + "/pdp-token-space\""));
   CHECK(contains(spaced, "access.pdp.token (file:" + dir + "/pdp-token-space) must be 1 to 4096 visible ASCII characters"));
   CHECK(!contains(spaced, "two words"));
   CHECK(contains(error_of("access { mode = \"open\" }\naccess { mode = \"open\" }"), "block access must appear exactly once"));
@@ -878,7 +899,7 @@ void test_mcp_auth_mode() {
              "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n-----END PUBLIC KEY-----\n");
   write_file(dir + "/mode-pdp-token", "pdp-secret\n");
   const std::string authzen = "access {\n mode = \"authzen\"\n identity {\n issuer = \"https://issuer\"\n audience = \"db\"\n public_keys_file = \"" + dir +
-                              "/mode-identity.pem\"\n }\n pdp {\n url = \"http://pdp:4182\"\n token_file = \"" + dir + "/mode-pdp-token\"\n }\n}\n";
+                              "/mode-identity.pem\"\n }\n pdp {\n url = \"http://pdp:4182\"\n insecure_link = true\n token_file = \"" + dir + "/mode-pdp-token\"\n }\n}\n";
   const std::string hosts =
       "clickhouse {\n host {\n name = \"h\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\"\n }\n}\n";
   const auto source = [&](const AppConfig& cfg, const std::string& name) {
@@ -933,7 +954,7 @@ void test_access_identity_extras() {
              "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n-----END PUBLIC KEY-----\n");
   write_file(dir + "/skew-pdp-token", "pdp-secret\n");
   const auto authzen = [&](const std::string& identity, const std::string& server = "") {
-    return server + "access {\n mode = \"authzen\"\n identity {\n" + identity + "\n }\n pdp {\n url = \"http://pdp:4182\"\n token_file = \"" + dir +
+    return server + "access {\n mode = \"authzen\"\n identity {\n" + identity + "\n }\n pdp {\n url = \"http://pdp:4182\"\n insecure_link = true\n token_file = \"" + dir +
            "/skew-pdp-token\"\n }\n}\n";
   };
   const std::string identity = " issuer = \"https://issuer\"\n audience = \"db\"\n public_keys_file = \"" + dir + "/skew-identity.pem\"";

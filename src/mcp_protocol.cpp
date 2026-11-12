@@ -171,6 +171,7 @@ std::optional<std::string> tools_list_result(const McpKey& key, McpToolBackend& 
   std::vector<std::string> names = mcp_effective_tools(key.tools, key.databases, backend.availability());
   // The tools of the approval flow (mcp_approval.hpp): the backend offers them (the identity mode, and the keys of the page that have a creator).
   const bool approval = backend.availability().approval;
+  const McpApprovalBounds bounds = approval ? backend.approval_bounds() : McpApprovalBounds{};
   if (approval) {
     for (auto& name : backend.approval_tool_names()) names.push_back(std::move(name));
   }
@@ -184,14 +185,23 @@ std::optional<std::string> tools_list_result(const McpKey& key, McpToolBackend& 
                               : identity    ? identity_schema(mcp_tool_input_schema(name))
                                             : std::string(mcp_tool_input_schema(name));
     // Each tool of the identity mode can need an approval (the PDP decides): it accepts the control arguments.
-    if (approval && std::string_view(name) != kMcpStatusTool) schema_text = mcp_with_approval_properties(schema_text);
+    if (approval && std::string_view(name) != kMcpStatusTool) schema_text = mcp_with_approval_properties(schema_text, bounds);
     const char* schema = schema_text.c_str();
     w.StartObject();
     w.Key("name"); put(w, info->name);
     w.Key("title"); put(w, info->title);
-    w.Key("description"); put(w, info->description);
+    // Contract 4.4: the description of each tool tells the four facts about the approval.
+    w.Key("description");
+    put(w, approval && std::string_view(name) != kMcpStatusTool ? std::string(info->description) + mcp_approval_description_suffix()
+                                                                  : std::string(info->description));
     w.Key("inputSchema");
     w.RawValue(schema, std::char_traits<char>::length(schema), rapidjson::kObjectType);
+    // Contract 4.5: a tool that follows section 9 has an outputSchema with the action object of 9.4.
+    if (approval) {
+      const char* output = mcp_output_schema(mcp_output_schema_kind(*info));
+      w.Key("outputSchema");
+      w.RawValue(output, std::char_traits<char>::length(output), rapidjson::kObjectType);
+    }
     // Each tool reads and changes nothing (contract 4.3).
     // It reads only the database of ChDash and of the host.
     // destructiveHint is absent. It has a meaning only when readOnlyHint is false.
@@ -367,6 +377,7 @@ std::string mcp_error_message(const std::string& code) {
   else if (code == "readonly") text = "ClickHouse refused the statement: the MCP user only reads";
   else if (code == "memory_limit") text = "the statement used more memory than its limit";
   else if (code == "read_limit") text = "the statement read more rows or bytes than its limit";
+  else if (code == "ceiling_unenforceable") text = "a limit of the grant cannot be applied to the statement, so it did not run";
   else if (code == "not_found") text = "a database, a table, a column or a function of the statement does not exist or is not visible";
   else if (code == "syntax_error") text = "ClickHouse could not parse the statement";
   else if (code == "cancelled") text = "the statement was stopped";

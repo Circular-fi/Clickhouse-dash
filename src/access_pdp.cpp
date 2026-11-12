@@ -126,8 +126,10 @@ PdpReason reason_of(const rapidjson::Value& value) {
   return PdpReason::Other;
 }
 
-// The longest evaluation_id that the client accepts and sends back (ProcurAuth 17.1: a text that only the PDP reads).
-constexpr size_t kMaxEvaluationIdBytes = 1024;
+// The longest evaluation_id that the client accepts and sends back (ProcurAuth 17.1: a text that only the PDP reads). The portal seals the facts of
+// the question in it (the encoded path of the resource: up to about 3 KiB), and the protocol states no bound (spec question 41). The same value
+// is the bound of the answer and of the submission, because the client sends back what it accepted.
+constexpr size_t kMaxEvaluationIdBytes = 4096;
 
 // context.limits of a true decision (ProcurAuth 7.3): an object of whole numbers from 0, with no name two times.
 bool limits_of(const rapidjson::Value& value, PdpLimits* limits) {
@@ -170,11 +172,12 @@ bool decision_of(const rapidjson::Value& value, PdpAnswer* answer) {
   error_of(members, answer);
   if (!answer->decision) {
     // A false decision: its reason, and retry_after of budget_exceeded. ChDash ignores its limits and its usage (ProcurAuth 7.6).
-    // The evaluation_id (ProcurAuth 17.1) is a text. The client keeps it for the submission and never reads it. A text of another type, or
-    // a text that is too long, makes the answer not valid: the client could not send it back.
+    // The evaluation_id (ProcurAuth 17.1) is a text. The client keeps it for the submission and never reads it. A text of another type makes the
+    // answer not valid. A text above kMaxEvaluationIdBytes is not kept: the client could not send it back, so the false answer stays a denial
+    // that cannot start an approval (the call is refused, never an outage of the whole answer).
     if (const auto id = members.FindMember("evaluation_id"); id != members.MemberEnd()) {
-      if (!id->value.IsString() || id->value.GetStringLength() == 0 || id->value.GetStringLength() > kMaxEvaluationIdBytes) return false;
-      answer->evaluation_id.assign(id->value.GetString(), id->value.GetStringLength());
+      if (!id->value.IsString() || id->value.GetStringLength() == 0) return false;
+      if (id->value.GetStringLength() <= kMaxEvaluationIdBytes) answer->evaluation_id.assign(id->value.GetString(), id->value.GetStringLength());
     }
     const auto reason = members.FindMember("reason");
     if (reason == members.MemberEnd()) return true;
@@ -616,8 +619,28 @@ bool PdpClient::parse_metadata(const std::string& body, const std::string& ident
   if (!metadata_number(doc, "procurauth_idle_max_seconds", &endpoints.idle_max_seconds, error)) return false;
   if (!metadata_number(doc, "procurauth_evaluations_max_bytes", &endpoints.evaluations_max_bytes, error)) return false;
   if (!metadata_number(doc, "procurauth_evaluations_max_items", &endpoints.evaluations_max_items, error)) return false;
+  // The bounds of the approval API: only a help for the agent and for the size of a command. A member of another form is ignored.
+  const auto tolerant = [&](const char* name, std::optional<uint64_t>* value) {
+    std::string ignored;
+    std::optional<uint64_t> read;
+    if (metadata_number(doc, name, &read, &ignored)) *value = read;
+  };
+  tolerant("procurauth_approval_max_command_bytes", &endpoints.approval_max_command_bytes);
+  tolerant("procurauth_approval_lease_min_seconds", &endpoints.approval_lease_min_seconds);
+  tolerant("procurauth_approval_lease_max_seconds", &endpoints.approval_lease_max_seconds);
+  tolerant("procurauth_approval_wait_max_seconds", &endpoints.approval_wait_max_seconds);
   *out = std::move(endpoints);
   return true;
+}
+
+PdpApprovalLimits PdpClient::approval_limits() {
+  const PdpEndpoints known = endpoints();
+  PdpApprovalLimits out;
+  out.max_command_bytes = known.approval_max_command_bytes;
+  out.lease_min_seconds = known.approval_lease_min_seconds;
+  out.lease_max_seconds = known.approval_lease_max_seconds;
+  out.wait_max_seconds = known.approval_wait_max_seconds;
+  return out;
 }
 
 PdpEndpoints PdpClient::endpoints() {
@@ -1208,6 +1231,9 @@ const char* approval_status_word(PdpApprovalReply::Status status) {
     case PdpApprovalReply::Status::NoDevice: return "no_device";
     case PdpApprovalReply::Status::RateLimited: return "rate_limited";
     case PdpApprovalReply::Status::InvalidArgument: return "invalid_argument";
+    case PdpApprovalReply::Status::ExplanationRequired: return "explanation_required";
+    case PdpApprovalReply::Status::CannotSupersede: return "cannot_supersede";
+    case PdpApprovalReply::Status::InvalidEvaluation: return "invalid_evaluation";
     case PdpApprovalReply::Status::Unavailable: return "unavailable";
   }
   return "unavailable";
@@ -1306,8 +1332,15 @@ PdpApprovalReply PdpClient::parse_approval_reply(int status, const std::string& 
     if (seconds < 1 && retry_after_header) seconds = *retry_after_header;
     out.retry_after = seconds >= 1 ? seconds : 1;
     out.status = PdpApprovalReply::Status::RateLimited;
-  } else if (status == 409 && (code == "no_device" || code == "no_phone")) {
+  } else if (status == 409 && code == "no_device") {
     out.status = PdpApprovalReply::Status::NoDevice;
+  } else if (status == 409 && code == "cannot_supersede" && submission) {
+    // A fault of the agent (it named a request that was used), not of the service (portal approval API, 17.4).
+    out.status = PdpApprovalReply::Status::CannotSupersede;
+  } else if (status == 422 && code == "explanation_required" && submission) {
+    out.status = PdpApprovalReply::Status::ExplanationRequired;
+  } else if (status == 422 && code == "invalid_evaluation" && submission) {
+    out.status = PdpApprovalReply::Status::InvalidEvaluation;
   } else if ((status == 413 && code == "command_too_large") ||
              (status == 422 && (code == "invalid_argument" || code == "invalid_lease" || code == "lease_required"))) {
     out.status = PdpApprovalReply::Status::InvalidArgument;

@@ -46,12 +46,22 @@ inline constexpr const char* kMcpWriteTool = "run_write_query";
 inline constexpr const char* kMcpStatusTool = "get_action_status";
 inline constexpr const char* kMcpExportTool = "export_query";
 inline constexpr const char* kMcpWriteAction = "query.run.write";
+inline constexpr const char* kMcpLibraryWriteTool = "library_write";
+inline constexpr const char* kMcpLibraryWriteAction = "library.write";
 
-// The two tools, in the order of tools/list. A tool is found only in the identity mode, and only when the server offers the approvals.
+// The tools of the flow, in the order of tools/list. A tool is found only in the identity mode, and only when the server offers the approvals.
 const std::vector<McpToolInfo>& mcp_approval_tools();
 const McpToolInfo* mcp_find_approval_tool(std::string_view name);
 // The JSON Schema of the arguments of an approval tool, with the host as a required argument (the identity mode).
 const char* mcp_approval_tool_schema(std::string_view tool);
+// The text that the description of each tool of the approval flow ends with (contract 4.4): the four facts about the approval.
+const char* mcp_approval_description_suffix();
+// The outputSchema of a tool (contract 4.5). One schema for each kind of tool: every one has the member `action` of contract 9.4 and the error
+// object, so a result that waits and a tool error both follow it. `kind` is "status" (get_action_status), "sql" (the tools that return rows)
+// or anything else (a generic tool). The text is a JSON object.
+const char* mcp_output_schema(std::string_view kind);
+// The kind of outputSchema of a tool of the catalog or of the flow.
+const char* mcp_output_schema_kind(const McpToolInfo& tool);
 // The annotations of tools/list for an approval tool (the title and the hints of binding 5.7b and of the plan).
 std::string mcp_approval_tool_annotations(const McpToolInfo& tool);
 
@@ -74,15 +84,24 @@ bool mcp_is_approval_control(std::string_view name);
 // The arguments of a call without the control arguments, as a JSON object. For a tool that runs the call, so that its own check of the
 // arguments does not see them.
 std::string mcp_arguments_without_controls(const rapidjson::Value& arguments);
-// The control properties that tools/list adds to the schema of each tool of the identity mode.
-std::string mcp_with_approval_properties(const std::string& schema_json);
+// The control properties that tools/list adds to the schema of each tool of the identity mode. `bounds` gives the minimum and the maximum of
+// lease_s and the maximum of wait_s when the PDP or the configuration publishes them.
+std::string mcp_with_approval_properties(const std::string& schema_json, const McpApprovalBounds& bounds = McpApprovalBounds{});
 
 // The op and the view of a call (ProcurAuth 17.3, 17.9). `ok` false: the arguments cannot be an op (a text that is not UTF-8). The view holds
 // only JSON Pointers to values of the op and fixed texts of the service.
-//   run_write_query   op {tool, host, sql, ch_user}; view title "ClickHouse write", fields Host and Runs as, body /sql labelled SQL.
-//   run_query, explain_query   op {tool, host, sql, ch_user} and options (the text of the other arguments), view body /sql.
+//   run_write_query   op {tool, host, sql, ch_user, timeout_seconds}; view title "ClickHouse write", fields Host and Runs as, body /sql labelled SQL.
+//   run_query, explain_query, export_query   op {tool, host, sql, ch_user, max_rows, max_result_bytes, timeout_seconds} and options (the text of
+//                     the other arguments), view body /sql.
 //   any other tool    op {tool, host (when the call has one), arguments}: `arguments` is the compact text of the arguments, with the members
-//                     in sorted order; view body /arguments labelled Arguments.
+//                     in sorted order; view body /arguments labelled Arguments. A tool that reads ClickHouse or calls a route of the API
+//                     adds max_result_bytes and timeout_seconds; a tool that reads rows adds max_rows (17.3a: a value that the PEP sets by default).
+// A cap that is 0 in `caps` is not in the op.
+struct McpOpCaps {
+  int64_t max_rows = 0;
+  int64_t max_result_bytes = 0;
+  int64_t timeout_seconds = 0;
+};
 struct McpOpView {
   bool ok = false;
   std::string op_json;
@@ -91,13 +110,20 @@ struct McpOpView {
 struct McpApprovalHost {
   std::string id;
   std::string read_user;   // the user of mcp_uri
-  std::string write_user;  // the user of mcp_write_uri; empty: the host has no write tool
+  std::string write_user;  // the user of mcp_write_uri
+  bool write = false;      // the host has a write account (mcp_write_uri), also when its URI names no user
 };
+// True when the host has the write account that run_write_query needs.
+inline bool mcp_host_can_write(const McpApprovalHost& host) { return host.write || !host.write_user.empty(); }
 McpOpView mcp_op_view(const McpToolInfo& tool, const McpApprovalHost* host, const rapidjson::Value& arguments_without_controls,
-                      std::string_view write_sql);
+                      std::string_view write_sql, const McpOpCaps& caps = McpOpCaps{});
+// The limits of the view (contract 9.5): the title 128 characters, a field value 256 characters, the body 16 KiB. The result is empty when
+// `view_json` follows them for `op_json`. Otherwise it is a fixed sentence that names the part. The command is never cut: the caller refuses it.
+std::string mcp_view_limit_error(const std::string& op_json, const std::string& view_json);
 
-// The tool errors of the approval (binding 5.7a). The message is fixed: it holds no value of the request and no text of the PDP.
-McpToolOutcome mcp_approval_error(const std::string& code, uint64_t retry_after = 0);
+// The tool errors of the approval (binding 5.7a). The message is fixed: it holds no value of the request and no text of the PDP. A `message`
+// replaces the default text of the code with another fixed text.
+McpToolOutcome mcp_approval_error(const std::string& code, uint64_t retry_after = 0, const std::string& message = std::string());
 // The result "the action waits" (binding 5.7): not an error. content[0] and structuredContent have {"action": {...}}, content[1] starts with
 // NOT EXECUTED.
 McpToolOutcome mcp_approval_awaiting(const std::string& request_id, const std::string& code);
@@ -127,12 +153,18 @@ struct McpApprovalConfig {
   int64_t wait_cap_seconds = 15;
   // mcp.max_sql_bytes.
   int64_t max_sql_bytes = 65536;
+  // The caps of a call (mcp.max_rows, mcp.max_result_bytes and mcp.query_timeout_seconds): they are in the op (17.3a). 0: not in the op.
+  McpOpCaps caps;
+  // The query library has a library that a person can change: the tool library_write exists (the action library.write).
+  bool library_writable = false;
 };
 
 // What the PDP gives to the flow. Each function keeps the rules of PdpClient (no cache for a question with an effect, no second try of a use).
 struct McpApprovalPorts {
   // PdpClient::decide_approval.
   std::function<AccessDecision(const std::string& subject, const AccessQuestion& question, bool usage, bool units_optional)> ask;
+  // The bounds that the PDP published in its metadata (procurauth_approval_*), read at each call. Empty or no member: nothing published.
+  std::function<PdpApprovalLimits()> limits;
   // PdpClient::approval_submit and approval_verdict.
   std::function<PdpApprovalReply(const PdpApprovalRequest& request)> submit;
   std::function<PdpApprovalReply(const std::string& request_id, const std::string& subject, uint64_t wait_seconds, bool renew)> verdict;
@@ -155,9 +187,13 @@ class McpApprovalGate {
 public:
   McpApprovalGate(McpApprovalConfig config, McpApprovalPorts ports);
 
-  // The tools of the flow that the server offers, in the order of tools/list: run_write_query when a host has a write account, then
-  // get_action_status.
+  // The tools of the flow that the server offers, in the order of tools/list: run_write_query when a host has a write account, export_query
+  // when a host exists, library_write when a library is writable, then get_action_status.
   std::vector<std::string> tool_names() const;
+  // The bound of op and view (access.approval.max_command_bytes, or the lower value that the PDP publishes), and the bounds that the schema of
+  // each tool shows: lease_s from the PDP, wait_s the lower of access.approval.wait and the wait that the PDP publishes.
+  int64_t max_command_bytes() const;
+  McpApprovalBounds bounds() const;
   const McpApprovalHost* host_of(std::string_view id) const;
 
   // One call of `tool` whose question is `question` (the match "node"). `budget`: the action lists a budget. For run_write_query the gate

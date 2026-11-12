@@ -155,6 +155,8 @@ struct McpSettings {
   int64_t max_rows_to_read = 0;
   // This limit applies to each key. The value 0 means no limit.
   int64_t rate_limit_per_minute = 600;
+  // The requests with no valid key that one client address may send in one minute (contract 3.9). 0 means no limit.
+  int64_t unauthenticated_rate_limit_per_minute = 10;
   // Origins (scheme://host[:port]) that may call from a browser.
   // A request without an Origin header is always accepted. A request with an Origin that is not listed gets a 403.
   std::vector<std::string> allowed_origins;
@@ -563,6 +565,9 @@ private:
   // The subject is empty in the open mode and before the check.
   static std::string access_subject();
   static std::string access_subject_or_dash();
+  // True when the route of this request lists the databases of a host, and the host decision `node` is false while its `subtree` decision is
+  // true (ProcurAuth 4.4): the route then shows only the databases that a `node` decision allows.
+  static bool access_list_filtered();
 
   void handle_livez(const httplib::Request& req, httplib::Response& res);
   void handle_readyz(const httplib::Request& req, httplib::Response& res);
@@ -813,6 +818,8 @@ private:
   std::unique_ptr<McpAnalysis> mcp_analysis_;
   std::unique_ptr<McpTools> mcp_tools_;
   McpRateLimiter mcp_rate_;
+  // The requests with no valid key, one bucket for each client address (contract 3.9).
+  McpRateLimiter mcp_unauthenticated_rate_;
 
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;

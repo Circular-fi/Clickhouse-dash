@@ -16,6 +16,7 @@
 #include "mcp_approval.hpp"
 #include "mcp_creator_access.hpp"
 #include "mcp_protocol.hpp"
+#include "mcp_scope.hpp"
 #include "mcp_subject_access.hpp"
 #include "mcp_telemetry.hpp"
 
@@ -31,8 +32,10 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace chdash;
@@ -336,6 +339,16 @@ void test_client_question_and_answers() {
     d = client.decide_approval("key:k1", effect_question(), false, false, context);
     CHECK(d.reason == reason && !d.failed);
   }
+  // The bound of the evaluation_id is 4096 bytes. A longer id is not kept: the answer stays a denial that cannot start an approval, and the
+  // answers of the other questions of the batch stay valid.
+  transport->script = {{"POST /access/v1/evaluation",
+                        http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":")" + std::string(4096, 'e') + R"("}})")}};
+  d = client.decide_approval("key:k1", effect_question(), false, false, context);
+  CHECK(!d.allowed && !d.failed && d.reason == PdpReason::ApprovalRequired && d.evaluation_id.size() == 4096);
+  transport->script = {{"POST /access/v1/evaluation",
+                        http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":")" + std::string(4097, 'e') + R"("}})")}};
+  d = client.decide_approval("key:k1", effect_question(), false, false, context);
+  CHECK(!d.allowed && !d.failed && d.reason == PdpReason::ApprovalRequired && d.evaluation_id.empty());
   // A malformed answer fails closed: a bad evaluation_id, a bad status, no answer.
   transport->script = {{"POST /access/v1/evaluation", http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":7}})")}};
   CHECK(client.decide_approval("key:k1", effect_question(), false, false, context).failed);
@@ -423,8 +436,13 @@ void test_approval_api() {
   CHECK(PdpClient::parse_approval_reply(201, R"({"request_id":"apr 1","code":"K7QF"})", std::nullopt, true).status == Status::Unavailable);
   CHECK(PdpClient::parse_approval_reply(201, "not json", std::nullopt, true).status == Status::Unavailable);
   CHECK(PdpClient::parse_approval_reply(409, R"({"error":"no_device"})", std::nullopt, true).status == Status::NoDevice);
-  CHECK(PdpClient::parse_approval_reply(409, R"({"error":"no_phone"})", std::nullopt, true).status == Status::NoDevice);
-  CHECK(PdpClient::parse_approval_reply(409, R"({"error":"cannot_supersede"})", std::nullopt, true).status == Status::Unavailable);
+  // The old alias is gone. The faults of the agent are tool errors, not an outage (portal approval API, 17.4).
+  CHECK(PdpClient::parse_approval_reply(409, R"({"error":"no_phone"})", std::nullopt, true).status == Status::Unavailable);
+  CHECK(PdpClient::parse_approval_reply(409, R"({"error":"cannot_supersede"})", std::nullopt, true).status == Status::CannotSupersede);
+  CHECK(PdpClient::parse_approval_reply(422, R"({"error":"explanation_required"})", std::nullopt, true).status == Status::ExplanationRequired);
+  CHECK(PdpClient::parse_approval_reply(422, R"({"error":"invalid_evaluation"})", std::nullopt, true).status == Status::InvalidEvaluation);
+  // The three codes mean something only for a submission: a read maps no such answer.
+  CHECK(PdpClient::parse_approval_reply(422, R"({"error":"invalid_evaluation"})", std::nullopt, false).status == Status::Unavailable);
   r = PdpClient::parse_approval_reply(429, R"({"error":"rate_limited","retry_after":42})", std::nullopt, true);
   CHECK(r.status == Status::RateLimited && r.retry_after == 42);
   CHECK(PdpClient::parse_approval_reply(429, "", std::nullopt, true).retry_after == 1);
@@ -1536,6 +1554,33 @@ void test_keys_mode_approval() {
     CHECK_EQ(rig.inner.run.size(), size_t(1));
   }
 
+  // F02: a key that reaches two databases that each need an approval. A call that names no database has two candidates and no effect can name it:
+  // the agent gets a tool error that tells what to change, never the answer for an unknown tool (-32602).
+  {
+    KeysRig rig;
+    McpKey scoped = key;
+    scoped.databases = {"a.*", "b.*"};
+    scoped.tools = {"list_databases", "list_tables", "list_hosts"};
+    rig.pdp.by_action["explorer.read"] = no(PdpReason::ApprovalRequired);
+    rig.script.answers = {no(PdpReason::ApprovalRequired, "ev-db")};
+    McpCreatorTools backend(rig.inner, rig.creators, rig.creators.state(scoped));
+    McpRpcResult called = send(backend, scoped, "tools/call",
+                               std::string(R"({"name":"list_tables","arguments":{"host":"prod","lease_s":900},)") + kMeta + "}", "list_tables");
+    CHECK(called.rpc_error == 0 && called.outcome.is_error && code_of(called.outcome) == "invalid_argument");
+    CHECK(called.outcome.json.find("argument database") != std::string::npos);
+    CHECK(rig.script.submitted.empty() && rig.inner.run.empty());
+    // The call that names one database is the operation: the approval flow runs for it.
+    called = send(backend, scoped, "tools/call",
+                  std::string(R"({"name":"list_tables","arguments":{"host":"prod","database":"a","lease_s":900},)") + kMeta + "}", "list_tables");
+    CHECK_EQ(called.outcome.approval, std::string("awaiting"));
+    CHECK_EQ(rig.script.asked.back().resource, std::string("service:db/host:prod/database:a"));
+    // A tool that names no database cannot be covered by one approval: its message says so.
+    called = send(backend, scoped, "tools/call", std::string(R"({"name":"list_databases","arguments":{"host":"prod","lease_s":900},)") + kMeta + "}",
+                  "list_databases");
+    CHECK(called.rpc_error == 0 && code_of(called.outcome) == "invalid_argument");
+    CHECK(called.outcome.json.find("names no database") != std::string::npos);
+  }
+
   // A tool that uses no action asks the PDP nothing, and takes the controls without a result of the approval.
   {
     KeysRig rig;
@@ -1564,6 +1609,455 @@ void test_keys_mode_approval() {
 
 } // namespace
 
+
+// ---- the alignment of 1.5.0 --------------------------------------------------------------------------------------------------------------
+
+// The metadata members procurauth_approval_* (ProcurAuth 17.4, 17.5): read when they are whole numbers, ignored otherwise, never needed.
+void test_pdp_metadata_approval_limits() {
+  const std::string base = R"({"policy_decision_point":"http://pdp.test","access_evaluation_endpoint":"http://pdp.test/access/v1/evaluation",)"
+                           R"("access_evaluations_endpoint":"http://pdp.test/access/v1/evaluations")";
+  PdpEndpoints none;
+  std::string error;
+  CHECK(PdpClient::parse_metadata(base + "}", "http://pdp.test", &none, &error));
+  CHECK(!none.approval_max_command_bytes && !none.approval_lease_min_seconds && !none.approval_lease_max_seconds && !none.approval_wait_max_seconds);
+  PdpEndpoints all;
+  CHECK(PdpClient::parse_metadata(base + R"(,"procurauth_approval_max_command_bytes":8192,"procurauth_approval_lease_min_seconds":30,)"
+                                         R"("procurauth_approval_lease_max_seconds":3600,"procurauth_approval_wait_max_seconds":25,"procurauth_approval_grace_seconds":120})",
+                                  "http://pdp.test", &all, &error));
+  CHECK(all.approval_max_command_bytes == 8192u && all.approval_lease_min_seconds == 30u && all.approval_lease_max_seconds == 3600u &&
+        all.approval_wait_max_seconds == 25u);
+  // A member of another form is ignored: the approval never stops ChDash.
+  PdpEndpoints bad;
+  CHECK(PdpClient::parse_metadata(base + R"(,"procurauth_approval_max_command_bytes":"big","procurauth_approval_lease_min_seconds":0,"procurauth_approval_lease_max_seconds":-1})",
+                                  "http://pdp.test", &bad, &error));
+  CHECK(!bad.approval_max_command_bytes && !bad.approval_lease_min_seconds && !bad.approval_lease_max_seconds);
+}
+
+McpApprovalPorts ports_with_limits(Script& script, PdpApprovalLimits limits) {
+  McpApprovalPorts ports = script.ports();
+  ports.limits = [limits] { return limits; };
+  return ports;
+}
+
+void test_gate_published_bounds() {
+  const std::string base_call = std::string(R"({"host":"prod","sql":")") + kCreate + R"(","lease_s":)";
+  const AccessQuestion q{"query.run.write", access_host_resource("db", "prod")};
+  {
+    // The bound of the PDP is lower than the configuration: the command that fits the configuration is refused before it goes out.
+    Script script;
+    script.answers = {no(PdpReason::ApprovalRequired, "ev")};
+    PdpApprovalLimits limits;
+    limits.max_command_bytes = 120;
+    McpApprovalGate gate(make_config(), ports_with_limits(script, limits));
+    CHECK_EQ(gate.max_command_bytes(), int64_t(120));
+    McpCallInfo info;
+    gate.call("key:k1", write_tool(), q, true, args_of(base_call + "900}"), &info, approval_first());
+    CHECK(info.answered && info.answered->is_error && code_of(*info.answered) == "invalid_argument");
+    CHECK_EQ(script.submitted.size(), size_t(0));
+    // The configuration is the lower one: the bound of the PDP does not raise it.
+    PdpApprovalLimits high;
+    high.max_command_bytes = 1048576;
+    Script other;
+    McpApprovalGate gate2(make_config(), ports_with_limits(other, high));
+    CHECK_EQ(gate2.max_command_bytes(), int64_t(16384));
+  }
+  {
+    // A lease outside the bounds of the PDP: a tool error that names the bounds, and nothing goes to the approval API.
+    Script script;
+    script.answers = {no(PdpReason::ApprovalRequired, "ev")};
+    PdpApprovalLimits limits;
+    limits.lease_min_seconds = 30;
+    limits.lease_max_seconds = 3600;
+    limits.wait_max_seconds = 5;
+    McpApprovalGate gate(make_config(), ports_with_limits(script, limits));
+    const McpApprovalBounds bounds = gate.bounds();
+    CHECK(bounds.lease_min_seconds == 30u && bounds.lease_max_seconds == 3600u);
+    CHECK_EQ(bounds.wait_max_seconds.value_or(0), uint64_t(5));  // the lower of access.approval.wait (15) and the PDP (5)
+    for (const char* lease : {"10}", "7200}"}) {
+      McpCallInfo info;
+      gate.call("key:k1", write_tool(), q, true, args_of(base_call + lease), &info, approval_first());
+      CHECK(info.answered && info.answered->is_error && code_of(*info.answered) == "invalid_argument");
+      CHECK(info.answered->json.find("30 to 3600") != std::string::npos);
+    }
+    CHECK_EQ(script.submitted.size(), size_t(0));
+    McpCallInfo ok;
+    gate.call("key:k1", write_tool(), q, true, args_of(base_call + "60}"), &ok, approval_first());
+    CHECK(ok.answered && !ok.answered->is_error);
+    CHECK_EQ(script.submitted.size(), size_t(1));
+  }
+  {
+    // The schema of each tool shows the bounds to the agent.
+    const std::string schema = mcp_with_approval_properties(R"({"type":"object","properties":{}})", McpApprovalBounds{30, 3600, 15});
+    const rapidjson::Document doc = args_of(schema);
+    CHECK(doc["properties"]["lease_s"]["minimum"].GetInt64() == 30 && doc["properties"]["lease_s"]["maximum"].GetInt64() == 3600);
+    CHECK(doc["properties"]["wait_s"]["maximum"].GetInt64() == 15);
+    const rapidjson::Document plain = args_of(mcp_with_approval_properties(R"({"type":"object","properties":{}})"));
+    CHECK(plain["properties"]["lease_s"]["minimum"].GetInt64() == 1 && !plain["properties"]["lease_s"].HasMember("maximum"));
+  }
+}
+
+void test_gate_approval_api_faults() {
+  const std::string call_text = std::string(R"({"host":"prod","sql":")") + kCreate + R"(","lease_s":900})";
+  const AccessQuestion q{"query.run.write", access_host_resource("db", "prod")};
+  const auto run = [&](PdpApprovalReply::Status status, std::vector<AccessDecision> answers) {
+    Script script;
+    script.answers = std::move(answers);
+    script.submit_reply.status = status;
+    McpApprovalGate gate(make_config(), script.ports());
+    McpCallInfo info;
+    const McpGateResult r = gate.call("key:k1", write_tool(), q, true, args_of(call_text), &info, approval_first());
+    return std::make_tuple(r.access, info.answered ? code_of(*info.answered) : std::string("-"), script.submitted.size(), script.asked.size());
+  };
+  // The faults of the agent are tool errors with a fixed text, never an outage (HTTP 503).
+  for (const auto status : {PdpApprovalReply::Status::ExplanationRequired, PdpApprovalReply::Status::CannotSupersede}) {
+    const auto [access, code, submitted, asked] = run(status, {no(PdpReason::ApprovalRequired, "ev")});
+    CHECK(access == McpAccess::Allowed && code == "invalid_argument" && submitted == 1u);
+    (void)asked;
+  }
+  {
+    Script script;
+    script.answers = {no(PdpReason::ApprovalRequired, "ev")};
+    script.submit_reply.status = PdpApprovalReply::Status::ExplanationRequired;
+    McpApprovalGate gate(make_config(), script.ports());
+    McpCallInfo info;
+    gate.call("key:k1", write_tool(), q, true, args_of(call_text), &info, approval_first());
+    CHECK(info.answered && info.answered->json.find("approval_ref") != std::string::npos);
+  }
+  // A late evaluation_id: the call asks once more, and a second refusal is approval_expired (a tool error, not an outage).
+  {
+    const auto [access, code, submitted, asked] = run(PdpApprovalReply::Status::InvalidEvaluation, {no(PdpReason::ApprovalRequired, "ev")});
+    CHECK(access == McpAccess::Allowed && code == "approval_expired");
+    CHECK_EQ(submitted, size_t(2));
+    CHECK_EQ(asked, size_t(2));
+  }
+}
+
+void test_view_limits_and_caps() {
+  const McpToolInfo& run_query = *mcp_find_tool("run_query");
+  const McpApprovalHost host{"prod", "reader", "writer", true};
+  // 17.3a: the caps are in the op of a tool that runs SQL, and an op with no caps has none.
+  const rapidjson::Document args = args_of(R"({"host":"prod","sql":"SELECT 1"})");
+  const McpOpView plain = mcp_op_view(run_query, &host, args, "");
+  CHECK(plain.op_json.find("max_rows") == std::string::npos);
+  const McpOpView capped = mcp_op_view(run_query, &host, args, "", McpOpCaps{1000, 1048576, 30});
+  rapidjson::Document op = args_of(capped.op_json);
+  CHECK(op["max_rows"].GetInt64() == 1000 && op["max_result_bytes"].GetInt64() == 1048576 && op["timeout_seconds"].GetInt64() == 30);
+  // The write tool has a time limit and no row cap. A tool that runs no SQL has none of the three.
+  const McpOpView written = mcp_op_view(write_tool(), &host, args_of(R"({"host":"prod","sql":"x"})"), kCreate, McpOpCaps{1000, 1048576, 30});
+  op = args_of(written.op_json);
+  CHECK(!op.HasMember("max_rows") && !op.HasMember("max_result_bytes") && op["timeout_seconds"].GetInt64() == 30);
+  const McpOpView hosts = mcp_op_view(*mcp_find_tool("list_hosts"), nullptr, args_of("{}"), "", McpOpCaps{1000, 1048576, 30});
+  CHECK(hosts.op_json.find("max_rows") == std::string::npos && hosts.op_json.find("timeout_seconds") == std::string::npos);
+  const McpOpView tables = mcp_op_view(*mcp_find_tool("list_tables"), &host, args_of(R"({"host":"prod"})"), "", McpOpCaps{1000, 1048576, 30});
+  op = args_of(tables.op_json);
+  CHECK(op["max_rows"].GetInt64() == 1000 && op["timeout_seconds"].GetInt64() == 30);
+  const McpOpView api = mcp_op_view(*mcp_find_tool("system_overview"), &host, args_of(R"({"host":"prod"})"), "", McpOpCaps{1000, 1048576, 30});
+  op = args_of(api.op_json);
+  CHECK(!op.HasMember("max_rows") && op["max_result_bytes"].GetInt64() == 1048576);
+
+  // Contract 9.5: the title 128 characters, a field value 256 characters, the body 16 KiB. A part that is too large is refused, never cut.
+  CHECK(mcp_view_limit_error(capped.op_json, capped.view_json).empty());
+  const std::string big_sql(16 * 1024, 'x');
+  const McpOpView big = mcp_op_view(run_query, &host, args_of("{\"host\":\"prod\",\"sql\":\"" + big_sql + "\"}"), "");
+  CHECK(mcp_view_limit_error(big.op_json, big.view_json).empty());  // exactly 16 KiB fits
+  const McpOpView over = mcp_op_view(run_query, &host, args_of("{\"host\":\"prod\",\"sql\":\"" + big_sql + "x\"}"), "");
+  CHECK(mcp_view_limit_error(over.op_json, over.view_json).find("16 KiB") != std::string::npos);
+  const McpOpView long_option = mcp_op_view(*mcp_find_tool("explain_query"), &host, args_of("{\"host\":\"prod\",\"sql\":\"SELECT 1\",\"type\":\"" + std::string(300, 'a') + "\"}"), "");
+  CHECK(mcp_view_limit_error(long_option.op_json, long_option.view_json).find("256 characters") != std::string::npos);
+  CHECK(mcp_view_limit_error(R"({"tool":"t"})", R"({"title":")" + std::string(129, 'a') + R"("})").find("128 characters") != std::string::npos);
+  CHECK(mcp_view_limit_error(R"({"tool":"t"})", R"({"title":")" + std::string(128, 'a') + R"("})").empty());
+  // A character is not a byte: 128 two-byte characters fit in the title.
+  std::string accents;
+  for (int i = 0; i < 128; ++i) accents += "\xC3\xA9";
+  CHECK(mcp_view_limit_error(R"({"tool":"t"})", R"({"title":")" + accents + R"("})").empty());
+
+  // The gate refuses a body that is above 16 KiB even when max_command_bytes is higher.
+  Script script;
+  script.answers = {no(PdpReason::ApprovalRequired, "ev")};
+  McpApprovalConfig config = make_config();
+  config.max_command_bytes = 1048576;
+  config.max_sql_bytes = 1048576;
+  McpApprovalGate gate(config, script.ports());
+  McpCallInfo info;
+  gate.call("key:k1", *mcp_find_tool("run_query"), {"query.run.read", access_host_resource("db", "prod")}, true,
+            args_of("{\"host\":\"prod\",\"sql\":\"" + big_sql + "x\",\"lease_s\":900}"), &info, approval_first());
+  CHECK(info.answered && info.answered->is_error && code_of(*info.answered) == "invalid_argument" && script.submitted.empty());
+  CHECK(info.answered->json.find("16 KiB") != std::string::npos);
+}
+
+void test_library_write_tool() {
+  const McpToolInfo* library = mcp_find_approval_tool("library_write");
+  CHECK(library != nullptr);
+  CHECK_EQ(std::string(mcp_tool_access_action(*library)), std::string("library.write"));
+  CHECK_EQ(std::string(mcp_tool_identity_action(*library)), std::string("library.write"));
+  Script script;
+  McpApprovalConfig config = make_config();
+  McpApprovalGate without(config, script.ports());
+  const auto names = without.tool_names();
+  CHECK(std::find(names.begin(), names.end(), std::string(kMcpLibraryWriteTool)) == names.end());
+  config.library_writable = true;
+  McpApprovalGate with(config, script.ports());
+  const auto offered = with.tool_names();
+  CHECK(std::find(offered.begin(), offered.end(), std::string(kMcpLibraryWriteTool)) != offered.end());
+  // The approval: the op holds the whole call (the operation and the body), so the owner reads what will change.
+  script.answers = {no(PdpReason::ApprovalRequired, "ev")};
+  McpCallInfo info;
+  with.call("key:k1", *library, {"library.write", access_service_resource("db")}, false,
+            args_of(R"({"host":"prod","operation":"query_create","body":{"name":"q","sql":"SELECT 1"},"lease_s":900})"), &info, approval_first());
+  CHECK(info.answered && !info.answered->is_error);
+  CHECK_EQ(script.submitted.size(), size_t(1));
+  const rapidjson::Document op = args_of(script.submitted[0].op_json);
+  CHECK_EQ(std::string(op["tool"].GetString()), std::string("library_write"));
+  CHECK(std::string(op["arguments"].GetString()).find("\"operation\":\"query_create\"") != std::string::npos);
+  CHECK(std::string(op["arguments"].GetString()).find("SELECT 1") != std::string::npos && !op.HasMember("max_rows"));
+  // The schema asks for the host and the operation, and the annotations are those of a tool with an effect.
+  const rapidjson::Document schema = args_of(mcp_approval_tool_schema("library_write"));
+  CHECK(schema["required"].Size() == 2 && schema["properties"]["operation"]["enum"].Size() == 7);
+  const rapidjson::Document annotations = args_of(mcp_approval_tool_annotations(*library));
+  CHECK(!annotations["readOnlyHint"].GetBool() && annotations["openWorldHint"].GetBool() && annotations["destructiveHint"].GetBool());
+}
+
+// Contract 4.4 and 4.5: the description of each tool tells the four facts, and each tool has an outputSchema with the action object of 9.4.
+void test_descriptions_and_output_schemas() {
+  InnerBackend inner;
+  Script script;
+  McpApprovalConfig config = make_config();
+  config.library_writable = true;
+  PdpApprovalLimits limits;
+  limits.lease_min_seconds = 30;
+  limits.lease_max_seconds = 600;
+  McpApprovalGate gate(config, ports_with_limits(script, limits));
+  McpSubjectAccess access("db", {"prod", "ro"}, AccessFeatures{}, [](const std::string&, const std::vector<AccessQuestion>& questions) {
+    std::vector<AccessDecision> out;
+    for (size_t i = 0; i < questions.size(); ++i) out.push_back(yes(0));
+    return out;
+  });
+  access.set_approval(&gate);
+  McpSubjectTools backend(inner, access);
+  const McpKey key = mcp_identity_key("key:k1");
+  const McpRpcResult listed = send(backend, key, "tools/list", std::string("{") + kMeta + "}");
+  const rapidjson::Document doc = args_of(listed.body);
+  size_t checked = 0;
+  for (const auto& tool : doc["result"]["tools"].GetArray()) {
+    const std::string name = tool["name"].GetString();
+    CHECK(tool.HasMember("outputSchema"));
+    const rapidjson::Value& properties = tool["outputSchema"]["properties"];
+    CHECK(properties.HasMember("action") && properties["action"]["properties"]["status"]["enum"][0].GetString() == std::string("awaiting_approval"));
+    CHECK(properties.HasMember("error"));
+    if (name == "get_action_status") {
+      CHECK(properties.HasMember("status") && properties["status"]["enum"].Size() == 4);
+      continue;
+    }
+    const std::string description = tool["description"].GetString();
+    for (const char* fact : {"can need to approve", "awaiting_approval", "executed false", "same arguments", "get_action_status"}) CHECK(description.find(fact) != std::string::npos);
+    CHECK(tool["inputSchema"]["properties"]["lease_s"]["minimum"].GetInt64() == 30 && tool["inputSchema"]["properties"]["lease_s"]["maximum"].GetInt64() == 600);
+    ++checked;
+  }
+  CHECK(checked > 20);
+  // The text of the result that waits names no tool of another party.
+  CHECK(mcp_approval_awaiting("apr_1", "K7QF").extra_text.find("portal") == std::string::npos);
+  CHECK(listed.body.find("approval_intent") == std::string::npos);
+}
+
+// Binding 5.7b: tools/list names get_action_status only when it names at least one other tool.
+void test_status_tool_needs_another_tool() {
+  InnerBackend inner;
+  Script script;
+  McpApprovalGate gate(make_config(), script.ports());
+  McpSubjectAccess access("db", {"prod"}, AccessFeatures{}, [](const std::string&, const std::vector<AccessQuestion>& questions) {
+    std::vector<AccessDecision> out(questions.size());  // every answer is false
+    return out;
+  });
+  access.set_approval(&gate);
+  McpSubjectTools backend(inner, access);
+  const McpKey key = mcp_identity_key("key:k1");
+  const McpRpcResult listed = send(backend, key, "tools/list", std::string("{") + kMeta + "}");
+  CHECK(args_of(listed.body)["result"]["tools"].Size() == 0u);
+}
+
+// export_query needs a second permission (5.5a): the arguments and the controls come first (contract 9.4, step 1 and 2), and the ceilings of
+// the other permission lower the ceilings of the call.
+void test_export_other_permission_order_and_ceilings() {
+  Script script;
+  McpApprovalGate gate(make_config(), script.ports());
+  std::vector<std::string> asked;
+  AccessDecision other = yes(0);
+  other.limits["max_rows_read"] = 500;
+  other.limits["max_duration"] = 7;
+  AccessDecision own = yes(1);
+  own.limits["max_rows_read"] = 900;
+  own.limits["max_rows"] = 50;
+  McpSubjectAccess access(
+      "db", {"prod"}, AccessFeatures{},
+      [&](const std::string&, const std::vector<AccessQuestion>& questions) {
+        std::vector<AccessDecision> out;
+        for (const auto& q : questions) {
+          asked.push_back(q.action);
+          out.push_back(q.action == "query.run.read" ? other : yes(0));
+        }
+        return out;
+      },
+      [&](const std::string&, const AccessQuestion& q) {
+        asked.push_back(q.action + "+usage");
+        return own;
+      });
+  access.set_approval(&gate);
+  const McpToolInfo& exporter = *mcp_find_approval_tool("export_query");
+  {
+    // A bad control argument asks the PDP nothing, not even the other permission.
+    McpCallInfo info;
+    const McpAccess access_result = access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1","lease_s":0})"), &info);
+    CHECK(access_result == McpAccess::Allowed && info.answered && code_of(*info.answered) == "invalid_argument");
+    CHECK(asked.empty());
+  }
+  {
+    // A good call: the other permission first, then the use. The lowest value of each ceiling applies.
+    McpCallInfo info;
+    const McpAccess access_result = access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1"})"), &info);
+    CHECK(access_result == McpAccess::Allowed && !info.answered);
+    CHECK_EQ(asked.size(), size_t(2));
+    CHECK(asked.size() == 2 && asked[0] == "query.run.read" && asked[1] == "query.export+usage");
+    CHECK(info.ceilings.max_rows_read == 500 && info.ceilings.max_duration_seconds == 7 && info.ceilings.max_rows == 50);
+  }
+  {
+    // A ceiling that the other action does not declare makes its answer false (ProcurAuth 7.5).
+    asked.clear();
+    other.limits["max_nothing"] = 1;
+    McpCallInfo info;
+    CHECK(access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1"})"), &info) == McpAccess::Denied);
+  }
+}
+
+// The keys of the action document and the tools of the endpoint agree in each mode (contract 4.4 and ProcurAuth 5.2b: each published action is
+// approvable, so a tool serves it). A feature, a write account or a library that the configuration does not give has no tool and no action.
+void test_actions_and_tools_agree() {
+  size_t configurations = 0;
+  // 3 states of the library, 2 of the Explorer, 2 of the System page, 2 of the observability, 3 of the hosts, 3 of the usage.
+  for (int library = 0; library < 3; ++library) {
+    for (int explorer = 0; explorer < 2; ++explorer) {
+      for (int system = 0; system < 2; ++system) {
+        for (int observability = 0; observability < 2; ++observability) {
+          for (int hosts = 0; hosts < 3; ++hosts) {  // none, a host that reads, a host that also has a write account
+            for (int usage = 0; usage < 3; ++usage) {  // off, on, on with all_keys
+              AccessFeatureInputs in;
+              in.query_library = library > 0;
+              in.query_library_writable = library == 2;
+              in.explorer = explorer == 1;
+              in.system = system == 1;
+              in.observability = observability == 1;
+              in.mcp = true;
+              in.mcp_identity = true;
+              in.any_mcp_host = hosts > 0;
+              in.any_mcp_write_host = hosts == 2;
+              in.usage = usage > 0;
+              in.usage_all_keys = usage == 2;
+              const AccessFeatures features = access_features_for(in);
+              std::set<std::string> declared;
+              for (const auto& action : access_published_actions(features)) declared.insert(action.name);
+
+              struct Backend : InnerBackend {
+                McpToolAvailability availability_value;
+                McpToolAvailability availability() const override { return availability_value; }
+              } available;
+              available.availability_value.usage = in.usage;
+              available.availability_value.all_keys = in.usage_all_keys;
+              Script script;
+              McpApprovalConfig config = make_config();
+              config.hosts.clear();
+              if (hosts > 0) config.hosts.push_back(McpApprovalHost{"prod", "reader", hosts == 2 ? "writer" : "", hosts == 2});
+              config.library_writable = features.query_library_writable;
+              McpApprovalGate gate(config, script.ports());
+              McpSubjectAccess access(
+                  "db", {"prod"}, features,
+                  [](const std::string&, const std::vector<AccessQuestion>& questions) {
+                    std::vector<AccessDecision> out;
+                    for (size_t i = 0; i < questions.size(); ++i) out.push_back(yes(0));
+                    return out;
+                  });
+              access.set_approval(&gate);
+              McpSubjectTools backend(available, access);
+              const McpRpcResult listed = send(backend, mcp_identity_key("alice"), "tools/list", std::string("{") + kMeta + "}");
+              const rapidjson::Document doc = args_of(listed.body);
+              std::set<std::string> served;
+              for (const auto& tool : doc["result"]["tools"].GetArray()) {
+                const std::string name = tool["name"].GetString();
+                if (name == kMcpStatusTool) continue;
+                const McpToolInfo* info = mcp_find_tool(name);
+                if (!info) info = mcp_find_approval_tool(name);
+                CHECK(info != nullptr);
+                if (!info) continue;
+                const std::string action = mcp_tool_identity_action(*info);
+                // Every tool names a declared action (or mcp.session).
+                CHECK(declared.count(action) == 1);
+                if (declared.count(action) == 0) std::fprintf(stderr, "tool %s names the action %s that the document does not declare\n", name.c_str(), action.c_str());
+                served.insert(action);
+              }
+              // Every declared action has a tool. The identity mode has no action without one.
+              for (const auto& action : declared) {
+                CHECK(served.count(action) == 1);
+                if (served.count(action) == 0) std::fprintf(stderr, "the action %s has no tool (library %d explorer %d system %d observability %d hosts %d usage %d)\n", action.c_str(), library, explorer, system, observability, hosts, usage);
+              }
+              // The actions that no tool can serve are not declared.
+              CHECK((declared.count("library.write") == 1) == (library == 2));
+              CHECK((declared.count("query.run.write") == 1) == (hosts == 2));
+              CHECK((declared.count("query.export") == 1) == (hosts > 0));
+              CHECK((declared.count("mcp.usage.read") == 1) == (usage == 2));
+              CHECK(declared.count("mcp.keys.read") == 0 && declared.count("mcp.keys.write") == 0);
+              ++configurations;
+            }
+          }
+        }
+      }
+    }
+  }
+  CHECK_EQ(configurations, size_t(3 * 2 * 2 * 2 * 3 * 3));
+
+  // The mode keys: a key of the page has the tools of the catalog and get_action_status. The actions of the page of the keys (mcp.keys.read,
+  // mcp.keys.write) and the page of the usage have no tool: they are routes of the page, and a route of a page cannot wait (ProcurAuth 17.7a).
+  // A write, an export and a library write are not declared: no tool of the mode serves them.
+  for (int usage = 0; usage < 3; ++usage) {
+    AccessFeatureInputs in;
+    in.query_library = true;
+    in.query_library_writable = true;
+    in.mcp = true;
+    in.mcp_identity = false;
+    in.any_mcp_host = true;
+    in.any_mcp_write_host = true;
+    in.usage = usage > 0;
+    in.usage_all_keys = usage == 2;
+    const AccessFeatures features = access_features_for(in);
+    std::set<std::string> declared;
+    for (const auto& action : access_published_actions(features)) declared.insert(action.name);
+    CHECK(declared.count("query.run.write") == 0 && declared.count("query.export") == 0 && declared.count("library.write") == 0 && declared.count("mcp.session") == 0);
+    McpToolAvailability availability;
+    availability.usage = in.usage;
+    availability.all_keys = in.usage_all_keys;
+    std::set<std::string> served;
+    for (const auto& name : mcp_effective_tools({"*", "mcp_analysis_all_usage"}, {"*"}, availability)) {
+      if (const McpToolInfo* info = mcp_find_tool(name)) {
+        const char* action = mcp_tool_access_action(*info);
+        if (action) served.insert(action);
+      }
+    }
+    const std::set<std::string> page_only = {"mcp.keys.read", "mcp.keys.write", "mcp.usage.read"};
+    for (const auto& action : declared) {
+      if (page_only.count(action)) continue;
+      CHECK(served.count(action) == 1);
+      if (served.count(action) == 0) std::fprintf(stderr, "mode keys: the action %s has no tool\n", action.c_str());
+    }
+    CHECK((declared.count("mcp.usage.read") == 1) == (usage > 0));
+  }
+  // MCP off: no tool exists, and the pages publish what they serve (they cannot wait, ProcurAuth 17.7a).
+  AccessFeatureInputs off;
+  off.query_library = true;
+  off.query_library_writable = true;
+  const AccessFeatures no_mcp = access_features_for(off);
+  std::set<std::string> pages;
+  for (const auto& action : access_published_actions(no_mcp)) pages.insert(action.name);
+  CHECK(pages.count("query.run.write") == 1 && pages.count("query.export") == 1 && pages.count("library.write") == 1);
+  CHECK(pages.count("mcp.keys.read") == 0 && pages.count("mcp.usage.read") == 0 && pages.count("mcp.session") == 0);
+}
+
 int main(int argc, char** argv) {
   const std::string vectors = argc > 1 ? argv[1] : "/work/tests/conformance/effect-vectors.json";
   test_effect_vectors(vectors);
@@ -1584,6 +2078,15 @@ int main(int argc, char** argv) {
   RUN(test_protocol_with_the_gate);
   RUN(test_protocol_without_the_gate);
   RUN(test_keys_mode_approval);
+  RUN(test_pdp_metadata_approval_limits);
+  RUN(test_gate_published_bounds);
+  RUN(test_gate_approval_api_faults);
+  RUN(test_view_limits_and_caps);
+  RUN(test_library_write_tool);
+  RUN(test_descriptions_and_output_schemas);
+  RUN(test_status_tool_needs_another_tool);
+  RUN(test_export_other_permission_order_and_ceilings);
+  RUN(test_actions_and_tools_agree);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

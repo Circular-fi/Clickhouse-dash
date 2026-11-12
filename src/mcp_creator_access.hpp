@@ -97,6 +97,7 @@ public:
   // Without one (the tests of the state), a reason of 17.1 is a plain refusal as before.
   void set_approval(McpApprovalGate* approval) { approval_ = approval; }
   bool has_approval() const { return approval_ != nullptr; }
+  McpApprovalBounds approval_bounds() const { return approval_ ? approval_->bounds() : McpApprovalBounds{}; }
   // get_action_status for a key: the verdict of a request of the creator. It asks the PDP no question.
   McpAccess status(const McpKey& key, const rapidjson::Value& arguments, McpCallInfo* info);
 
@@ -159,6 +160,7 @@ public:
   std::vector<std::string> approval_tool_names() const override {
     return gate_.has_approval() ? std::vector<std::string>{kMcpStatusTool} : std::vector<std::string>();
   }
+  McpApprovalBounds approval_bounds() const override { return gate_.approval_bounds(); }
   McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now) override {
     return inner_.call_tool(key, tool, arguments, now);
   }
@@ -179,6 +181,8 @@ public:
                                  return std::find(state_.tools.begin(), state_.tools.end(), name) == state_.tools.end();
                                }),
                 tools.end());
+    // Binding 5.7b: get_action_status is named only with at least one other tool.
+    if (tools.size() == 1 && tools.front() == kMcpStatusTool) tools.clear();
     return tools;
   }
   // A failure of the PDP for any question of the call gives Failed: HTTP 503 with -32603, as on the routes and in the identity mode

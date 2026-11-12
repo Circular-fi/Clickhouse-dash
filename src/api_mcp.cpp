@@ -340,9 +340,37 @@ public:
       throw McpDbError("query_failed", error.what());
     }
 
+    // A profile with readonly = 1 takes no setting, so a ceiling of the grant (ProcurAuth 7.4, 10.0 step 6) never reaches ClickHouse. The client then
+    // bounds the statement itself, as the pages do (CeilingMeter): the progress packets give the rows and the bytes read, and each packet looks at
+    // the clock. A ceiling on the memory of a statement cannot be counted on this side, so a call with such a ceiling is refused: ChDash never runs
+    // a statement with a ceiling that it cannot apply (ProcurAuth 7.5).
+    std::shared_ptr<CeilingMeter> meter;
+    if (plan.settings_refused) {
+      const McpCeilings& grant = limits.ceilings;
+      if (grant.max_memory_bytes) {
+        throw McpDbError("ceiling_unenforceable",
+                         "a limit of your grant (max_memory) cannot be applied: the settings profile of the ClickHouse user of MCP has readonly = 1, and ClickHouse "
+                         "then takes no limit of memory for a statement. The statement did not run");
+      }
+      AccessCeilings backstop;
+      if (grant.max_rows_read && *grant.max_rows_read > 0) backstop.max_rows_read = static_cast<uint64_t>(*grant.max_rows_read);
+      if (grant.max_bytes_read && *grant.max_bytes_read > 0) backstop.max_read_size = static_cast<uint64_t>(*grant.max_bytes_read);
+      if (grant.max_duration_seconds && *grant.max_duration_seconds > 0) backstop.max_duration = static_cast<uint64_t>(*grant.max_duration_seconds);
+      if (backstop.any()) meter = std::make_shared<CeilingMeter>(backstop, std::chrono::steady_clock::now());
+    }
+
     // The cost is named for the key and the tool (mcp_cost.hpp). The cost of the statement is found in system.query_log.
     // This is true whatever the profile lets ChDash send, and whatever the SQL says.
     clickhouse::Query query(sql, mcp_query_id(limits.key_id, limits.tool));
+    if (meter) {
+      query.OnProgress([meter](const clickhouse::Progress& progress) {
+        auto breach = meter->on_progress(progress.rows, progress.bytes);
+        if (!breach) breach = meter->on_clock(std::chrono::steady_clock::now());
+        if (!breach) return;
+        const int code = breach->ceiling == "max_duration" ? 159 : (breach->ceiling == "max_read_size" ? 307 : 158);
+        throw ChCeilingExceeded(code, "a limit of your grant (" + breach->ceiling + ") was passed");
+      });
+    }
     for (const auto& [name, value] : plan.settings) {
       clickhouse::QuerySettingsField field;
       field.value = value;
@@ -405,6 +433,10 @@ public:
       if (!(done && error.GetCode() == 394)) {
         throw McpDbError(error_code_of(classify_clickhouse_error(error)), error.what());
       }
+    } catch (const ChCeilingExceeded& error) {
+      // The statement did not end: the connection is closed. The tool error names the kind of limit, never its value.
+      pool_->invalidate(client);
+      throw McpDbError(error.code() == 159 ? "timeout" : "read_limit", error.what());
     } catch (const std::system_error& error) {
       pool_->invalidate(client);
       const auto waited = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started).count();
@@ -748,6 +780,22 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   // In the mode "identity": the identity token only, and the own keys are ignored (binding 3.3, 3.3a, 7.3). The 401 comes before the
   // body is read, so its body is empty.
   const bool standard_header = lower_ascii(cfg_.mcp.auth_header) == "authorization";
+  // A request that has no valid key is counted for each client address (contract 3.9): over the limit, it gets 429 with Retry-After and no body
+  // (binding 7.4), and nothing else changes. A request with a valid key never uses this bucket. Behind a reverse proxy the address is the one of the
+  // proxy: the bucket then counts the requests with no valid key of all the clients of the proxy (docs/mcp.md, "The rate limit").
+  const auto refuse_no_key = [&](const std::string& challenge) {
+    int retry_after = 1;
+    const int64_t per_minute = cfg_.mcp.unauthenticated_rate_limit_per_minute;
+    if (per_minute > 0 && !mcp_unauthenticated_rate_.allow(req.remote_addr, steady_ms(), per_minute, &retry_after)) {
+      res.set_header("Retry-After", std::to_string(retry_after));
+      refuse_empty(429);
+      log_call("429_unauthenticated");
+      return;
+    }
+    if (!challenge.empty()) res.set_header("WWW-Authenticate", challenge);
+    refuse_empty(401);
+    log_call("401");
+  };
   McpKeyStore::AuthResult auth;
   McpKey identity_key;
   const McpKey* caller = nullptr;
@@ -760,9 +808,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     if (!identity.ok) {
       log_event(LogLevel::Info, "access.unauthenticated",
                 {{"request_id", req.get_header_value("X-Request-Id")}, {"method", req.method}, {"path", req.path.substr(0, 512)}, {"reason", identity.reason}});
-      res.set_header("WWW-Authenticate", copies == 0 ? "Bearer realm=\"chdash\"" : "Bearer realm=\"chdash\", error=\"invalid_token\"");
-      refuse_empty(401);
-      log_call("401");
+      refuse_no_key(copies == 0 ? "Bearer realm=\"chdash\"" : "Bearer realm=\"chdash\", error=\"invalid_token\"");
       return;
     }
     identity_key = mcp_identity_key(identity.subject);
@@ -771,9 +817,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     const std::string token = bearer_token(req, cfg_.mcp.auth_header);
     auth = mcp_keys_->authenticate(token, now);
     if (auth.status != McpKeyStore::AuthStatus::Ok) {
-      if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
-      refuse_empty(401);
-      log_call("401");
+      refuse_no_key(standard_header ? "Bearer realm=\"chdash\"" : std::string());
       return;
     }
     caller = &auth.key;
@@ -789,9 +833,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
       log_event(LogLevel::Warn, "mcp.key_refused",
                 {{"key", key.id}, {"creator", key.creator.empty() ? std::string("-") : key.creator},
                  {"reason", mcp_creator_status_name(creator_state->status)}});
-      if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
-      refuse_empty(401);
-      log_call("401");
+      refuse_no_key(standard_header ? "Bearer realm=\"chdash\"" : std::string());
       return;
     }
   }

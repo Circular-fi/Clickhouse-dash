@@ -46,7 +46,34 @@ struct AccessFeatures {
   bool mcp = true;                     // the MCP endpoint is on: mcp.keys.read and mcp.usage.read
   bool mcp_keys_write = true;          // MCP is on and the page may make keys (mcp.keys.mode is not "static"): mcp.keys.write
   bool mcp_session = true;             // MCP is on and takes the identity token (mcp.auth_mode = "identity"): mcp.session
+  // The tools that serve an action (ProcurAuth 5.2b: each published action must be approvable, so each one needs a tool). While MCP is on, a
+  // service publishes an action only when a tool serves it. While MCP is off, the pages are the only way to use the service and no action has
+  // a tool: the pages publish what they serve (the use of a page cannot wait, ProcurAuth 17.7a).
+  bool mcp_write_tool = true;          // run_write_query exists: the identity mode and a host with mcp_write_uri: query.run.write
+  bool mcp_export_tool = true;         // export_query exists: the identity mode and a host with mcp_uri: query.export
+  bool mcp_library_write_tool = true;  // library_write exists: the identity mode: library.write
+  bool mcp_usage = true;               // mcp.usage.enabled: the usage is counted
+  bool mcp_usage_tool = true;          // mcp_analysis_all_usage is offered: mcp.usage.enabled and mcp.usage.all_keys: mcp.usage.read
 };
+
+// What the configuration says about the features (Server::access_features gives it from the file; the tests give it directly).
+struct AccessFeatureInputs {
+  bool query_library = false;           // at least one library is enabled
+  bool query_library_writable = false;  // at least one enabled library is writable
+  bool explorer = true;
+  bool system = true;
+  bool observability = true;
+  bool mcp = false;                     // mcp.enabled
+  bool mcp_identity = false;            // mcp.auth_mode = "identity"
+  bool mcp_keys_write = true;           // mcp.keys.mode is not "static"
+  bool any_mcp_host = false;            // a host has mcp_uri
+  bool any_mcp_write_host = false;      // a host has mcp_uri and mcp_write_uri
+  bool usage = false;                   // mcp.usage.enabled
+  bool usage_all_keys = false;          // mcp.usage.all_keys
+};
+// The features that the inputs give. The identity mode offers the tools run_write_query (a host with a write account), export_query (a host
+// that MCP reaches) and library_write (a writable library), and the tool mcp_analysis_all_usage needs the usage and all_keys.
+AccessFeatures access_features_for(const AccessFeatureInputs& inputs);
 
 // True when the action is published with these features. The actions of the query, the run and the export are always published.
 bool access_action_published(const AccessAction& action, const AccessFeatures& features);
