@@ -269,6 +269,41 @@ def test_the_declared_ceilings_of_the_action_of_a_tool_bound_the_call():
     assert response.status_code == 200 and response.json()["error"]["code"] == -32602, response.text
 
 
+@needs_identity
+def test_the_ceilings_apply_on_the_client_side_when_the_profile_has_readonly_1():
+    # The host ro1 has an MCP user whose profile has readonly = 1: ClickHouse takes no setting (docs/mcp.md, "The settings profile of the user").
+    # ChDash counts the rows and bytes read and the time of a statement itself, and it refuses a ceiling on the memory that it cannot count.
+    answer(default=True, limits={"query.run.read": {"max_rows_read": 100}})
+    response = call_tool("run_query", {"host": "ro1", "sql": "SELECT sum(number) FROM numbers(100000000)"})
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["isError"] is True and result["structuredContent"]["error"]["code"] == "read_limit", result
+    answer(default=True, limits={"query.run.read": {"max_read_size": 1}})
+    result = call_tool("run_query", {"host": "ro1", "sql": "SELECT sum(number) FROM numbers(100000000)"}).json()["result"]
+    assert result["isError"] is True and result["structuredContent"]["error"]["code"] == "read_limit", result
+    answer(default=True, limits={"query.run.read": {"max_memory": 100_000_000}})
+    result = call_tool("run_query", {"host": "ro1", "sql": "SELECT 1"}).json()["result"]
+    assert result["isError"] is True and result["structuredContent"]["error"]["code"] == "ceiling_unenforceable", result
+    # A ceiling that is not breached lets the statement run.
+    answer(default=True, limits={"query.run.read": {"max_rows_read": 1_000_000_000, "max_duration": 60}})
+    result = call_tool("run_query", {"host": "ro1", "sql": "SELECT 1 AS one"}).json()["result"]
+    assert not result.get("isError") and result["structuredContent"]["untrusted"]["rows"] == [[1]], result
+
+
+@needs_identity
+def test_the_export_applies_the_ceilings_of_the_other_permission():
+    # export_query needs query.export and query.run.read (ProcurAuth 5.5a). The ceilings of the other permission lower the ceilings of the call.
+    answer(default=True, limits={"query.run.read": {"max_rows": 3}})
+    result = call_tool("export_query", {"host": "local", "sql": "SELECT number FROM numbers(10)"}).json()["result"]
+    assert not result.get("isError"), result
+    assert result["structuredContent"]["row_count"] == 3 and result["structuredContent"]["truncated"] is True, result
+    # A bad argument asks the PDP nothing, not even the other permission (contract 9.4, step 1).
+    before = len(evaluations())
+    result = call_tool("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 0}).json()["result"]
+    assert result["isError"] is True and result["structuredContent"]["error"]["code"] == "invalid_argument", result
+    assert len(evaluations()) == before
+
+
 # ---- the budgets: binding 3.4, 3.6a, 5.3, 5.4 (cases U18, U23, U92, U93, U95) --------------------------------------------------
 
 

@@ -9,7 +9,7 @@
 #   2. https, ca_file = another CA                503 (the chain is not trusted)
 #   3. https, the name pdp-alias                  503 (the name is not in the certificate)
 #   4. https, no ca_file                          503 (the store of the system does not know the CA)
-#   5. https, verify = false                      200 (and a warning at start)
+#   5. https, verify = false                      the start stops; with insecure_link = true: 200 (and a warning at start)
 #   6. http to the https port                     503 (the PDP does not answer HTTP; fail closed)
 #   7. a metadata document of another PDP         the start stops with a message that names access.pdp.url
 #   8. ca_file or verify with an http URL         the start stops with a message that names the two keys
@@ -221,9 +221,14 @@ expect_status "2 another CA" '    url     = "https://pdp-tls:8443"
 expect_status "3 name not in the certificate" '    url     = "https://pdp-alias:8443"
     ca_file = "/certs/ca.crt"' 503 'certificate'
 expect_status "4 CA unknown to the system" '    url = "https://pdp-tls:8443"' 503 'certificate'
-expect_status "5 verify = false" '    url    = "https://pdp-tls:8443"
-    verify = false' 200 'access.pdp.verify = false'
-expect_status "6 http to the https port" '    url = "http://pdp-tls:8443"' 503 'clear text'
+expect_start_error "5a verify = false without insecure_link" '    url    = "https://pdp-tls:8443"
+    verify = false' 'access.pdp.insecure_link = true'
+expect_status "5b verify = false with insecure_link" '    url    = "https://pdp-tls:8443"
+    verify = false
+    insecure_link = true' 200 'access.pdp.verify = false'
+expect_start_error "6a http to another host without insecure_link" '    url = "http://pdp-tls:8443"' 'access.pdp.insecure_link = true'
+expect_status "6b http to the https port" '    url = "http://pdp-tls:8443"
+    insecure_link = true' 503 'clear text'
 expect_start_error "7 the metadata names another PDP" '    url     = "https://pdp-wrongmeta:8443"
     ca_file = "/certs/ca.crt"' 'access.pdp.url (https://pdp-wrongmeta:8443)'
 expect_start_error "8a ca_file with an http URL" '    url     = "http://pdp-tls:8443"

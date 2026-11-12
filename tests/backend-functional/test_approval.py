@@ -168,7 +168,8 @@ def test_a_write_waits_for_the_approval_runs_once_and_asks_again_for_the_next():
     # The service sent what the person reads: the statement, the host, the user. It sent no text of the agent.
     submission = received()["submissions"][0]["body"]
     assert set(submission) == {"evaluation_id", "effect", "op", "view", "lease_s"} and submission["lease_s"] == 900
-    assert submission["op"] == {"tool": "run_write_query", "host": "local", "sql": create_sql(name), "ch_user": "chdash_mcp_write"}
+    # ProcurAuth 17.3a: the time limit that the call runs with is in the op (mcp.query_timeout_seconds, 30 by default).
+    assert submission["op"] == {"tool": "run_write_query", "host": "local", "sql": create_sql(name), "ch_user": "chdash_mcp_write", "timeout_seconds": 30}
     assert submission["view"] == {"title": "ClickHouse write", "fields": [["Host", "/host"], ["Runs as", "/ch_user"]], "body": "/sql", "body_label": "SQL"}
     assert submission["effect"].startswith("sha256:") and len(submission["effect"]) == 71
     # The first question of a call has no effect and has usage (a use of query.run.write). Only after approval_required comes the question with the
@@ -247,6 +248,16 @@ def test_the_errors_of_the_approval_api_are_mapped():
         assert response.status_code == 503 and response.json()["error"]["code"] == -32603
     gate("query.run.write", submit={"status": 422, "error": "invalid_lease"})
     assert error_of(write(create_sql(name)))["code"] == "invalid_argument"
+    # The faults of the agent are tool errors, never an outage (HTTP 503): the portal asks for the intent of the agent, or the request to replace was used.
+    gate("query.run.write", submit={"status": 422, "error": "explanation_required"})
+    error = error_of(write(create_sql(name)))
+    assert error["code"] == "invalid_argument" and "approval_ref" in error["message"]
+    gate("query.run.write", submit={"status": 409, "error": "cannot_supersede"})
+    error = error_of(write(create_sql(name)))
+    assert error["code"] == "invalid_argument" and "supersedes" in error["message"]
+    # A late evaluation_id: ChDash asks the PDP once more and submits again. A second refusal is approval_expired.
+    gate("query.run.write", submit={"status": 422, "error": "invalid_evaluation"})
+    assert error_of(write(create_sql(name)))["code"] == "approval_expired"
     # Nothing ran: the table does not exist, so the first approved run creates it.
     gate()
     assert structured(write(create_sql(name)))["executed"] is True
@@ -421,7 +432,8 @@ def test_the_export_action_asks_for_an_approval_like_any_other_action():
     gate("query.export")
     action = awaiting(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))
     submission = received()["submissions"][-1]["body"]
-    assert submission["op"] == {"tool": "export_query", "host": "local", "sql": "SELECT 1", "ch_user": "chdash_mcp", "options": '{"format":"csv"}'}
+    assert submission["op"] == {"tool": "export_query", "host": "local", "sql": "SELECT 1", "ch_user": "chdash_mcp", "options": '{"format":"csv"}',
+                                "max_rows": 1000, "max_result_bytes": 1048576, "timeout_seconds": 30}
     assert submission["view"]["title"] == "ClickHouse export" and submission["view"]["body"] == "/sql"
     decide(action["id"], "approve")
     assert structured(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))["row_count"] == 1

@@ -2,7 +2,8 @@
 # API needs an identity token signed by one of the two test keys (secrets/access-identity-keys.pem: Ed25519 and P-256), and the
 # fake PDP of the compose service access_pdp (tests/otel-fixture/fake_pdp.py) decides each action. The cache of the decisions is
 # short, so that a change of the answers of the PDP applies soon. The CLIENT spans of the calls to the PDP go to a fake OTLP
-# receiver of their own (access_otlp_receiver). The MCP endpoint keeps its key: no identity token. Two hosts on the same ClickHouse
+# receiver of their own (access_otlp_receiver). MCP is off here: with MCP on, the document publishes only the actions that a tool serves (the keys of
+# the page are tested on config/access.mcp.hcl). Two hosts on the same ClickHouse
 # (local and other) let the tests prove the grants of one host and of one database of one host (docs/access.md, "Hosts").
 # Used by tests/backend-functional/test_access.py (ACCESS_BASE_URL, ACCESS_PDP_URL, ACCESS_OTLP_URL).
 server {
@@ -25,27 +26,11 @@ access {
   }
   pdp {
     url        = "http://access_pdp:8181"
+    # The test network is closed: the PDP is in the same Docker network, without TLS.
+    insecure_link = true
     token_file = "/run/secrets/chdash-test/access-pdp-token"
     timeout    = "500ms"
     cache_ttl  = "1s"
-  }
-}
-
-mcp {
-  enabled = true
-  # The page makes keys too: test_access.py checks that a key never has more than its creator.
-  storage_file = "/tmp/chdash-access-mcp-keys.json"
-  keys {
-    mode = "hybrid"
-  }
-  mcp_key "access" {
-    token_file = "/run/secrets/chdash-test/mcp-key-second-host"
-    subject    = "access-team"
-    tools      = ["list_hosts", "list_databases"]
-    scope {
-      hosts     = ["local"]
-      databases = ["*"]
-    }
   }
 }
 

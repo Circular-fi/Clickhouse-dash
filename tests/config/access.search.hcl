@@ -22,6 +22,8 @@ access {
   }
   pdp {
     url        = "http://access_pdp_search:8181"
+    # The test network is closed: the PDP is in the same Docker network, without TLS.
+    insecure_link = true
     token_file = "/run/secrets/chdash-test/access-pdp-token"
     timeout    = "500ms"
     cache_ttl  = "1s"

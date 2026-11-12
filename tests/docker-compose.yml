@@ -326,6 +326,39 @@ services:
       retries: 60
       start_period: 1s
 
+  # The access of humans with MCP in the mode keys (config/access.mcp.hcl): the keys of the page and their creators. It uses the fake PDP access_pdp.
+  chdash_access_mcp:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-access-mcp
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+      access_pdp:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/access.mcp.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/livez | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 1s
+
   chdash_access:
     profiles: ["test"]
     image: chdash-tests-source:local
@@ -685,6 +718,27 @@ services:
       - mcp_profile_data:/data
     healthcheck: *instance_health
 
+  # The limit of the requests with no valid key for each client address (contract 3.9, config/mcp.unauth.hcl).
+  chdash_mcp_unauth:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-mcp-unauth
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: *instance_depends
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/mcp.unauth.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
+    healthcheck: *instance_health
+
   chdash_system_disabled:
     profiles: ["test"]
     image: chdash-tests-source:local
@@ -800,6 +854,8 @@ services:
         condition: service_healthy
       chdash_access:
         condition: service_healthy
+      chdash_access_mcp:
+        condition: service_healthy
       chdash_access_search:
         condition: service_healthy
       access_pdp_search:
@@ -828,6 +884,8 @@ services:
         condition: service_healthy
       chdash_mcp_profile:
         condition: service_healthy
+      chdash_mcp_unauth:
+        condition: service_healthy
       chdash_system_disabled:
         condition: service_healthy
       chdash_system_limits:
@@ -848,9 +906,11 @@ services:
       TRACES_ALLOWLIST_BASE_URL: http://chdash_traces_allowlist:8080
       PRIVILEGES_BASE_URL: http://chdash_privileges:8080
       MCP_PROFILE_BASE_URL: http://chdash_mcp_profile:8080
+      MCP_UNAUTH_BASE_URL: http://chdash_mcp_unauth:8080
       TELEMETRY_BASE_URL: http://chdash_mcp_telemetry:8080
       OTLP_RECEIVER_URL: http://otlp_receiver:4318
       ACCESS_BASE_URL: http://chdash_access:8080
+      ACCESS_MCP_BASE_URL: http://chdash_access_mcp:8080
       MCP_IDENTITY_BASE_URL: http://chdash_mcp_identity:8080
       APPROVAL_BASE_URL: http://chdash_approval:8080
       APPROVAL_PDP_URL: http://approval_pdp:8181

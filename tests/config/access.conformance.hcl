@@ -26,6 +26,8 @@ access {
   }
   pdp {
     url        = "http://conformance-pdp:8181"
+    # The test network is closed: the PDP is in the same Docker network, without TLS.
+    insecure_link = true
     token_file = "/conformance/pdp-token"
     timeout    = "2s"
     cache_ttl  = "0s"
@@ -43,6 +45,8 @@ query_library {
 # the host conf: the action explorer.read on that host.
 mcp {
   enabled   = true
+  # The tests send many requests with no valid key from one address: the limit of contract 3.9 is tested in mcp.unauth.hcl.
+  unauthenticated_rate_limit_per_minute = 0
   auth_mode = "identity"
   usage {
     enabled  = true

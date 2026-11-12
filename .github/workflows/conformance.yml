@@ -4,7 +4,7 @@ name: Conformance
 # The job builds the binary as the release does, and runs tests/conformance/run.sh. The script fails only for a failed case that
 # tests/conformance/expected.txt does not list.
 # The ProcurAuth repository is public: the job checks it out without a secret.
-# The expected result (2026-11-11): 117 cases, 112 passed, 0 failed, 5 skipped. tests/conformance/expected.txt is empty.
+# The expected result (2026-11-12), for each of the three variants: 117 cases, 114 passed, 0 failed, 3 skipped. tests/conformance/expected.txt is empty.
 # The job checks out one fixed commit of ProcurAuth (the `ref` below), so a change of the runner never changes the result alone.
 # To bump it: run tests/conformance/run.sh with PROCURAUTH_DIR on the new commit and CONFORMANCE_STRICT=1, update expected.txt, then put the
 # full SHA of the new commit in `ref` and in docs/conformance.md ("The commit of the runner").
@@ -23,7 +23,7 @@ on:
       - "src/pdp_transport.cpp"
       - "src/config_keys.def"
       - "tests/conformance/**"
-      - "tests/config/access.conformance.hcl"
+      - "tests/config/access.conformance*.hcl"
       - ".github/workflows/conformance.yml"
 
 permissions:
@@ -63,4 +63,19 @@ jobs:
       - name: Run the conformance cases
         env:
           PROCURAUTH_DIR: ${{ github.workspace }}/procurauth
+        run: tests/conformance/run.sh conformance-out/chdash
+
+      # The document of the actions depends on the configuration: the run of the variants checks that each published action has a call in the profile.
+      - name: Run the conformance cases, variant full (a writable library, the traces on)
+        env:
+          PROCURAUTH_DIR: ${{ github.workspace }}/procurauth
+          CONFORMANCE_CONFIG: ${{ github.workspace }}/tests/config/access.conformance-full.hcl
+          CONFORMANCE_PROFILE: ${{ github.workspace }}/tests/conformance/profile-full.json
+        run: tests/conformance/run.sh conformance-out/chdash
+
+      - name: Run the conformance cases, variant lean (no write account, no usage)
+        env:
+          PROCURAUTH_DIR: ${{ github.workspace }}/procurauth
+          CONFORMANCE_CONFIG: ${{ github.workspace }}/tests/config/access.conformance-lean.hcl
+          CONFORMANCE_PROFILE: ${{ github.workspace }}/tests/conformance/profile-lean.json
         run: tests/conformance/run.sh conformance-out/chdash

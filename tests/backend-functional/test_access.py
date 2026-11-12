@@ -43,6 +43,9 @@ STARTUP_CMD = os.environ.get("MCP_STARTUP_CMD", "")
 STARTUP_CONFIG_DIR = os.environ.get("MCP_STARTUP_CONFIG_DIR", "/cfg")
 
 needs_access = pytest.mark.skipif(not (BASE_URL and PDP_URL), reason="ACCESS_BASE_URL is not set")
+# The instance with MCP in the mode keys (tests/config/access.mcp.hcl): the keys of the page and their creators.
+MCP_URL = os.environ.get("ACCESS_MCP_BASE_URL", "").rstrip("/")
+needs_mcp = pytest.mark.skipif(not (MCP_URL and PDP_URL), reason="ACCESS_MCP_BASE_URL is not set")
 
 # The test keys: their public keys are in tests/config/secrets/access-identity-keys.pem.
 ED25519 = Ed25519Key(bytes(range(1, 33)))
@@ -73,6 +76,16 @@ def call(method: str, path: str, *, tok: str | None = "default", headers: dict |
     if tok is not None:
         hdrs[HEADER] = tok
     return SESSION.request(method, f"{BASE_URL}{path}", headers=hdrs, timeout=kwargs.pop("timeout", 30), **kwargs)
+
+
+def mcall(method: str, path: str, *, tok: str | None = "default", headers: dict | None = None, **kwargs) -> requests.Response:
+    """call() for the instance with MCP in the mode keys."""
+    hdrs = dict(headers or {})
+    if tok == "default":
+        tok = token()
+    if tok is not None:
+        hdrs[HEADER] = tok
+    return SESSION.request(method, f"{MCP_URL}{path}", headers=hdrs, timeout=kwargs.pop("timeout", 30), **kwargs)
 
 
 def pdp(path: str, body: dict | None = None) -> dict:
@@ -110,11 +123,11 @@ def asked(action: str, since: int = 0) -> list[dict]:
 
 @pytest.fixture(autouse=True)
 def fresh_pdp():
-    if BASE_URL and PDP_URL:
+    if (BASE_URL or MCP_URL) and PDP_URL:
         pdp("/control/reset", {})
         time.sleep(CACHE_TTL + 0.2)
     yield
-    if BASE_URL and PDP_URL:
+    if (BASE_URL or MCP_URL) and PDP_URL:
         pdp("/control/reset", {})
 
 
@@ -214,13 +227,11 @@ def test_the_actions_are_published_without_a_token():
     assert doc["server"] == AUDIENCE
     actions = {a["name"]: a for a in doc["actions"]}
     assert "access" not in actions
-    # The document lists the published actions only (ProcurAuth 5.2a). The configuration of this test turns on the Explorer, the System
-    # page and MCP with its keys in the hybrid mode. It has no library and no OpenTelemetry signal: their actions are absent.
-    assert set(actions) == {
-        "query.run.read", "query.run.write", "query.export", "explorer.read", "system.read",
-        "mcp.keys.read", "mcp.keys.write", "mcp.usage.read",
-    }
-    for name in ("library.read", "library.write", "observability.read", "system.kill_query"):
+    # The document lists the published actions only (ProcurAuth 5.2a). The configuration of this test turns on the Explorer and the System
+    # page. MCP is off, so the pages publish the write and the export (no tool serves an action then). It has no library and no
+    # OpenTelemetry signal: their actions are absent. The actions of MCP are absent too.
+    assert set(actions) == {"query.run.read", "query.run.write", "query.export", "explorer.read", "system.read"}
+    for name in ("library.read", "library.write", "observability.read", "system.kill_query", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read", "mcp.session"):
         assert name not in actions, name
     # The tree under the service: host, then database (contract 11.4).
     assert doc["resource_types"] == [
@@ -231,8 +242,6 @@ def test_the_actions_are_published_without_a_token():
         assert actions[name]["resource_types"] == ["service", "host", "database"], name
     for name in ("query.export", "system.read"):
         assert actions[name]["resource_types"] == ["service", "host"], name
-    for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
-        assert actions[name]["resource_types"] == ["service"], name
     assert all(a["description"] for a in actions.values())
     # The six ceilings (ProcurAuth 6.1): declared once, listed by the actions that apply them (docs/access.md, "Limits of a grant").
     # The member limits also declares the budgets (test_the_document_declares_the_budgets_and_the_actions_list_them): this test keeps the ceilings.
@@ -251,8 +260,6 @@ def test_the_actions_are_published_without_a_token():
         assert ceilings_of(name) == every, name
     assert ceilings_of("explorer.read") == ["max_rows", "max_rows_read", "max_duration", "max_memory"]
     assert ceilings_of("system.read") == ["max_rows_read", "max_rows", "max_duration"]
-    for name in ("mcp.keys.read", "mcp.keys.write", "mcp.usage.read"):
-        assert "limits" not in actions[name], name
     # The member resources names the hosts: one node for each, with no actions (ProcurAuth 5.2).
     assert [r["path"] for r in doc["resources"]] == ["host:local", "host:other"], doc["resources"]
     assert all(set(r) <= {"path", "label"} and 0 < len(r["label"]) <= 60 for r in doc["resources"])
@@ -369,7 +376,6 @@ def test_a_failure_of_the_pdp_gives_the_503_page_and_no_host_list():
     assert_pdp_unavailable(call("GET", "/api/hosts"), "hosts")
     # The routes that filter a list with the decisions answer 503 too, never an empty list or false decisions.
     assert_pdp_unavailable(call("GET", "/api/version"), "access")
-    assert_pdp_unavailable(call("GET", "/api/mcp/meta"), "hosts")
     assert_pdp_unavailable(call("GET", "/api/explorer/catalog?host_id=local"), "explorer.read")
     assert_pdp_unavailable(call("GET", "/.well-known/procurauth/resources?type=host"), "resources")
     # A body that is not a valid answer is a failure: a ceiling with a negative value.
@@ -886,8 +892,6 @@ def test_a_grant_on_one_host_shows_and_allows_that_host_only():
     hosts = call("GET", "/api/hosts", tok=tok)
     assert hosts.status_code == 200 and [h["id"] for h in hosts.json()["hosts"]] == ["local"], hosts.text[:300]
     assert [h["id"] for h in first_hosts_event(tok)["hosts"]] == ["local"]
-    meta = call("GET", "/api/mcp/meta", tok=tok).json()
-    assert [h["name"] for h in meta["hosts"]] == ["local"], meta["hosts"]
     # The page of the actions: one batch with the hosts, and the decisions of the visible host only.
     access = call("GET", "/api/version", tok=tok).json()["features"]["access"]
     assert set(access["hosts"]) == {"local"} and access["hosts"]["local"]["system.read"] is True, access
@@ -903,10 +907,6 @@ def test_a_grant_on_one_host_shows_and_allows_that_host_only():
     # The pages: System and Explorer, not Query.
     assert call("GET", "/system", tok=tok).status_code == 200
     assert call("GET", "/query", tok=tok).status_code == 403
-    # An MCP key on the hidden host is refused, as on a host that does not exist.
-    for host in ("other", "nosuch"):
-        refused = make_mcp_key(tok, f"hidden-{uuid.uuid4().hex[:8]}", ["system_overview"], ["*"], host=host)
-        assert refused.status_code == 403 and refused.json()["action"] == "system.read", (host, refused.text)
 
 
 @needs_access
@@ -932,6 +932,20 @@ def test_a_grant_on_one_database_of_one_host_allows_that_database_only():
     # The question named the database under its host.
     resources = [e["resource"] for e in asked("explorer.read")]
     assert database_resource("other", "chdash_ui") in resources and database_resource("local", "chdash_ui") in resources
+    # ProcurAuth 4.4: the route asked `node` on the host first, with the `subtree` question of the display in the same batch.
+    host_questions = [e for e in asked("explorer.read") if e["resource"] == host_resource("other")]
+    assert {e["context"].get("match", "node") for e in host_questions} >= {"node", "subtree"}, host_questions
+
+
+@needs_access
+def test_the_catalog_with_only_a_subtree_answer_returns_what_a_node_decision_allows_or_403():
+    # A grant on a database that the host does not have: the host shows (subtree true) and no database of the catalog is allowed (node false).
+    # The route has nothing to show and answers 403 (docs/access.md, "Databases in the Explorer"), never an empty catalog.
+    answer(default=False, allow=["explorer.read@host:other/database:chdash_nosuchdatabase"])
+    tok = token("empty-tenant")
+    for path in ("/api/explorer/catalog?host_id=other", "/api/explorer/storage?host_id=other"):
+        response = call("GET", path, tok=tok)
+        assert response.status_code == 403 and response.json()["action"] == "explorer.read", (path, response.text[:300])
 
 
 @needs_access
@@ -1114,16 +1128,16 @@ def test_a_grant_on_one_database_hides_the_targets_in_other_databases():
 
 def make_mcp_key(tok: str, name: str, tools: list[str], databases: list[str], host: str = "local") -> requests.Response:
     body = {"name": name, "hosts": [host], "tools": tools, "databases": databases}
-    return call("POST", "/api/mcp/keys", tok=tok, headers={"Sec-Fetch-Site": "same-origin"}, json=body)
+    return mcall("POST", "/api/mcp/keys", tok=tok, headers={"Sec-Fetch-Site": "same-origin"}, json=body)
 
 
 def mcp_call(secret: str, tool: str, arguments: dict | None = None) -> requests.Response:
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments or {}}}
-    return SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
+    return SESSION.post(f"{MCP_URL}/mcp", data=json.dumps(body), timeout=30,
                         headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"})
 
 
-@needs_access
+@needs_mcp
 def test_an_mcp_key_never_has_more_than_its_creator():
     # mcp.keys.write alone does not give a key the read actions that the PDP refuses to its creator.
     answer(default=False, allow=["mcp.keys.read", "mcp.keys.write"])
@@ -1143,7 +1157,7 @@ def test_an_mcp_key_never_has_more_than_its_creator():
     key, secret = made.json()["key"], made.json()["secret"]
     try:
         assert key["creator"] == "integrator" and key["source"] == "ui"
-        listed = call("GET", "/api/mcp/keys", tok=tok).json()["keys"]
+        listed = mcall("GET", "/api/mcp/keys", tok=tok).json()["keys"]
         assert [k["creator"] for k in listed if k["id"] == key["id"]] == ["integrator"]
         time.sleep(CACHE_TTL + 0.2)  # the decisions of the creation are in the cache: let them expire
         before = len(received())
@@ -1160,18 +1174,18 @@ def test_an_mcp_key_never_has_more_than_its_creator():
         stopped = mcp_call(secret, "list_databases")
         assert stopped.status_code == 200 and stopped.json()["error"]["code"] == -32602, stopped.text
         assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
-        listed = [k for k in call("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
+        listed = [k for k in mcall("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
         assert listed[0]["orphan"] is None and listed[0]["creator"] == "integrator", listed
         # The key of the configuration has no creator and keeps working.
         assert mcp_call(MCP_TOKEN, "list_hosts").status_code == 200
     finally:
         answer(default=True)
-        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
+        mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 def mcp_rpc(secret: str, method: str, params: dict | None = None) -> requests.Response:
     body = {"jsonrpc": "2.0", "id": 1, "method": method, **({"params": params} if params is not None else {})}
-    return SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
+    return SESSION.post(f"{MCP_URL}/mcp", data=json.dumps(body), timeout=30,
                         headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"})
 
 
@@ -1181,7 +1195,7 @@ def listed_tools(secret: str) -> list[str]:
     return [tool["name"] for tool in response.json()["result"]["tools"]]
 
 
-@needs_access
+@needs_mcp
 def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
     # User decision 2026-10-18: tools/call checks the called tool only; tools/list shows the tools whose action the creator holds.
     answer(default=False, allow=["mcp.keys.read", "mcp.keys.write", "explorer.read", "system.read"])
@@ -1200,7 +1214,7 @@ def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
         working = mcp_call(secret, "list_databases")
         assert working.status_code == 200 and working.json()["result"]["isError"] is False, working.text
         # The key is not an orphan: the list has no warning for it.
-        listed = [k for k in call("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
+        listed = [k for k in mcall("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
         assert listed and listed[0]["orphan"] is None, listed
         # The PDP fails: HTTP 503 with -32603 for a tool that uses an action and for tools/list (owner decision of 2026-11-07), and the key
         # is not called an orphan. A tool that uses no action asks no question.
@@ -1211,10 +1225,10 @@ def test_an_mcp_key_loses_only_the_tools_whose_action_its_creator_lost():
         assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
     finally:
         answer(default=True)
-        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
+        mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
 
 
-@needs_access
+@needs_mcp
 def test_a_creator_without_permissions_keeps_the_key():
     # User decision 2026-10-18 (contract 11.5): a false decision with no reason means "no permission". The creator still
     # exists: the key is not an orphan, nobody can adopt it, and each tool of a refused action is refused one by one.
@@ -1229,16 +1243,16 @@ def test_a_creator_without_permissions_keeps_the_key():
         refused = mcp_call(secret, "list_databases")
         assert refused.status_code == 200 and refused.json()["error"]["code"] == -32602, refused.text
         assert "list_databases" not in listed_tools(secret)
-        listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
+        listed = [k for k in mcall("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
         assert listed[0]["orphan"] is None and listed[0]["creator"] == "stayer", listed
-        adopt = call("POST", f"/api/mcp/keys/{key['id']}/adopt", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
+        adopt = mcall("POST", f"/api/mcp/keys/{key['id']}/adopt", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
         assert adopt.status_code == 409 and adopt.json()["error_code"] == "not_adoptable", adopt.text
     finally:
         answer(default=True)
-        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
+        mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
 
 
-@needs_access
+@needs_mcp
 def test_a_query_tool_of_an_mcp_key_takes_a_unit_of_the_budget_of_its_creator():
     # Owner decision 2026-11-07: a key of the mode keys spends the budget `queries` of its creator. Each call of a tool of query.run.read
     # (run_query, explain_query, format_sql, explorer_names, query_execution) sends one question with usage for the creator, on the host of
@@ -1278,10 +1292,10 @@ def test_a_query_tool_of_an_mcp_key_takes_a_unit_of_the_budget_of_its_creator():
         assert failed.status_code == 503 and failed.json()["error"]["code"] == -32603, failed.text
     finally:
         answer(default=True)
-        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
+        mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
 
 
-@needs_access
+@needs_mcp
 def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
     # User decision 2026-10-18: a key whose creator the PDP does not know (false with "context": {"reason": "unknown_subject"}) is
     # refused (401) and listed as an orphan. A person with mcp.keys.write and every action of its tools adopts it: the person becomes
@@ -1291,7 +1305,7 @@ def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
     assert made.status_code == 201, made.text
     key, secret = made.json()["key"], made.json()["secret"]
     heir = token("heir")
-    adopt = lambda tok: call("POST", f"/api/mcp/keys/{key['id']}/adopt", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})  # noqa: E731
+    adopt = lambda tok: mcall("POST", f"/api/mcp/keys/{key['id']}/adopt", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})  # noqa: E731
     try:
         assert mcp_call(secret, "list_hosts").status_code == 200
         # The creator still holds the actions: nobody can adopt the key.
@@ -1300,7 +1314,7 @@ def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
         answer(unknown_subjects=["leaver"])
         stopped = mcp_call(secret, "list_hosts")
         assert stopped.status_code == 401, stopped.text
-        listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
+        listed = [k for k in mcall("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
         assert listed[0]["orphan"] == "creator_gone" and listed[0]["creator"] == "leaver", listed
         # A person without an action of the key cannot adopt it: the key would have more than its creator.
         answer(unknown_subjects=["leaver"], deny=["explorer.read"])
@@ -1323,7 +1337,7 @@ def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
         # The same secret works again, for the new creator.
         working = mcp_call(secret, "list_databases")
         assert working.status_code == 200 and working.json()["result"]["isError"] is False, working.text
-        listed = [k for k in call("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
+        listed = [k for k in mcall("GET", "/api/mcp/keys", tok=heir).json()["keys"] if k["id"] == key["id"]]
         assert listed[0]["orphan"] is None and listed[0]["creator"] == "heir", listed
         if LOGS_CMD:
             logs = subprocess.run(shlex.split(LOGS_CMD), capture_output=True, text=True, timeout=30).stdout
@@ -1332,48 +1346,83 @@ def test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it():
             assert '"event":"mcp.key_adopted"' in logs
     finally:
         answer(default=True)
-        call("DELETE", f"/api/mcp/keys/{key['id']}", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
+        mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=heir, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 @needs_access
 def test_one_batch_for_the_page_hides_what_is_denied():
-    answer(deny=["system.read", "mcp.keys.write"])
+    answer(deny=["system.read", "query.export"])
     before = len(received())
     response = call("GET", "/api/version", tok=token("erin"))
     assert response.status_code == 200
     access = response.json()["features"]["access"]
     assert access["mode"] == "authzen" and access["subject"] == "erin"
-    assert access["actions"]["system.read"] is False and access["actions"]["mcp.keys.write"] is False
-    # The eight published actions of this configuration (system.kill_query is not an action since 1.3.0).
-    assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 8
+    assert access["actions"]["system.read"] is False and access["actions"]["query.export"] is False
+    # The five published actions of this configuration (MCP is off; system.kill_query is not an action since 1.3.0).
+    assert access["actions"]["query.run.read"] is True and len(access["actions"]) == 5
     # The decisions of each visible host: the published actions that take a host (five), on local and on other.
     assert set(access["hosts"]) == {"local", "other"}, access
     assert access["hosts"]["local"]["system.read"] is False and access["hosts"]["other"]["explorer.read"] is True
     assert len(access["hosts"]["local"]) == 5
     batches = received()[before:]
     assert len(batches) == 1 and batches[0]["path"] == "/access/v1/evaluations", batches
-    # One batch: the three published actions without a host on the service (the MCP keys and usage), the five others on each of the two hosts.
+    # One batch: the five published actions on each of the two hosts.
     asked_ = evaluations(batches[0])
-    assert len(asked_) == 3 + 5 * 2
-    assert {e["resource"]["type"] for e in asked_} == {"service", "host"}
+    assert len(asked_) == 5 * 2
+    assert {e["resource"]["type"] for e in asked_} == {"host"}
     # The batch of the page only shows or hides the navigation: each item has the match "subtree".
     assert {e["context"].get("match") for e in asked_} == {"subtree"}
 
 
-@needs_access
+@needs_mcp
 def test_the_mcp_endpoint_keeps_its_keys_and_needs_no_identity_token():
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_hosts", "arguments": {}}}
-    response = SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
+    response = SESSION.post(f"{MCP_URL}/mcp", data=json.dumps(body), timeout=30,
                             headers={"Content-Type": "application/json", "Authorization": f"Bearer {MCP_TOKEN}"})
     assert response.status_code == 200, response.text
     assert "error" not in response.json(), response.text
     # The API tool ran in the process without a token, and the PDP was not asked.
     assert not received()
     # A wrong key is refused by MCP, not by the access of humans.
-    response = SESSION.post(f"{BASE_URL}/mcp", data=json.dumps(body), timeout=30,
+    response = SESSION.post(f"{MCP_URL}/mcp", data=json.dumps(body), timeout=30,
                             headers={"Content-Type": "application/json", "Authorization": "Bearer mcp_wrong"})
     # The 401 of the MCP endpoint has an empty body (MCP binding 5.2): the refusal of the access of humans has a JSON body.
     assert response.status_code == 401 and response.text == "", response.text
+
+
+@needs_mcp
+def test_the_actions_of_the_mode_keys_have_no_write_no_export_and_no_library_write():
+    # The mode keys has no tool with an effect and no export tool: the document publishes the actions that its tools and its pages serve
+    # (docs/access.md, "Actions and tools"). The pages of the keys and of the usage are routes: their actions have no tool and cannot wait.
+    doc = SESSION.get(f"{MCP_URL}/.well-known/procurauth/actions", timeout=30).json()
+    actions = {a["name"] for a in doc["actions"]}
+    assert actions == {"query.run.read", "explorer.read", "system.read", "mcp.keys.read", "mcp.keys.write", "mcp.usage.read"}, actions
+    assert "mcp.session" not in actions
+
+
+@needs_mcp
+def test_the_mcp_page_lists_the_visible_hosts_and_fails_closed():
+    answer(default=False, allow=["system.read@host:local", "explorer.read@host:local", "mcp.keys.read", "mcp.keys.write"])
+    tok = token("host-tenant")
+    meta = mcall("GET", "/api/mcp/meta", tok=tok).json()
+    assert [h["name"] for h in meta["hosts"]] == ["local"], meta["hosts"]
+    # An MCP key on the hidden host is refused, as on a host that does not exist.
+    for host in ("other", "nosuch"):
+        refused = make_mcp_key(tok, f"hidden-{uuid.uuid4().hex[:8]}", ["system_overview"], ["*"], host=host)
+        assert refused.status_code == 403 and refused.json()["action"] == "system.read", (host, refused.text)
+    answer(status=500)
+    assert_pdp_unavailable(mcall("GET", "/api/mcp/meta"), "hosts")
+
+
+@needs_mcp
+def test_an_action_that_the_document_does_not_publish_is_a_plain_denial_without_a_question():
+    # library.read and observability.read are not published here. A key that names their tools gets the refusal of the creator, and the PDP is not asked.
+    answer(default=True)
+    before = len(received())
+    refused = make_mcp_key(token("integrator"), f"unpublished-{uuid.uuid4().hex[:8]}", ["query_library"], ["*"])
+    assert refused.status_code == 403 and refused.json()["action"] == "library.read", refused.text
+    asked_actions = {e["action"]["name"] for r in received()[before:] for e in evaluations(r)}
+    assert "library.read" not in asked_actions, asked_actions
 
 
 @needs_access

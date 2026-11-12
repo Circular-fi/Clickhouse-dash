@@ -17,6 +17,8 @@ health {
 
 mcp {
   enabled      = true
+  # The tests send many requests with no valid key from one address: the limit of contract 3.9 is tested in mcp.unauth.hcl.
+  unauthenticated_rate_limit_per_minute = 0
   storage_file = "/data/mcp_keys.json"
 
   max_rows              = 100

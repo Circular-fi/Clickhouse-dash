@@ -266,7 +266,8 @@ def test_a_run_query_of_a_key_is_a_use_with_a_budget_and_an_approval(key):
     gate("query.run.read")
     action = awaiting(call(key, "run_query", {"host": "local", "sql": "SELECT 41 + 1 AS answer", "lease_s": 900}))
     body = received()["submissions"][-1]["body"]
-    assert body["op"] == {"tool": "run_query", "host": "local", "sql": "SELECT 41 + 1 AS answer", "ch_user": "chdash_mcp"}
+    assert body["op"] == {"tool": "run_query", "host": "local", "sql": "SELECT 41 + 1 AS answer", "ch_user": "chdash_mcp",
+                          "max_rows": 1000, "max_result_bytes": 1048576, "timeout_seconds": 30}
     assert body["view"]["title"] == "ClickHouse read"
     asked = [q for q in questions() if q["action"] == "query.run.read"]
     # The first question of the call has usage and no effect (a use of an action that lists a budget).

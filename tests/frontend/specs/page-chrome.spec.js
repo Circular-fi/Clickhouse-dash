@@ -478,10 +478,10 @@ test.describe('touch screens', () => {
 
 // ---- the navigation follows the access of the human (docs/access.md, "Navigation", user decision 2026-10-18) -----------------------
 //
-// The instance is ACCESS_BASE_URL: tests/config/access.authzen.hcl (compose service chdash_access), in the authzen mode, with the fake
+// The instance is ACCESS_MCP_BASE_URL: tests/config/access.mcp.hcl (compose service chdash_access_mcp), in the authzen mode with MCP in the mode keys (the pages of the keys and of the usage exist), with the fake
 // PDP ACCESS_PDP_URL. That configuration has no OpenTelemetry tables, so Observability is not a page there. Each request of the browser carries an identity token, signed here with the Ed25519 test key
 // (tests/config/secrets/access-identity-keys.pem has its public key). The PDP gives each test subject its whole grant.
-const ACCESS = (process.env.ACCESS_BASE_URL || '').replace(/\/$/, '');
+const ACCESS = (process.env.ACCESS_MCP_BASE_URL || '').replace(/\/$/, '');
 const ACCESS_PDP = (process.env.ACCESS_PDP_URL || '').replace(/\/$/, '');
 const ACCESS_KEY = crypto.createPrivateKey({
   key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1))]),
@@ -550,7 +550,7 @@ test.describe('the navigation follows the access of the human', () => {
   test.beforeEach(({}, testInfo) => {
     // The fake PDP is one for the whole run: one project sets it and runs these tests, so no other project resets it meanwhile.
     test.skip(testInfo.project.name !== 'desktop-1440', 'the access of a human does not depend on the viewport: one project is enough');
-    requireInstance(test, 'ACCESS_BASE_URL', ACCESS);
+    requireInstance(test, 'ACCESS_MCP_BASE_URL', ACCESS);
     requireInstance(test, 'ACCESS_PDP_URL', ACCESS_PDP);
   });
 

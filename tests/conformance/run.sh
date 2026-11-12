@@ -16,6 +16,10 @@
 #   CONFORMANCE_EXPECTED the list of expected failures (default: tests/conformance/expected.txt).
 #   CONFORMANCE_KEEP     1 to keep the containers and the work directory after the run (for a look at the logs).
 #   CHDASH_APP_IMAGE     the image that runs the chdash binary (default: CHDASH_TEST_IMAGE, debian:trixie-slim).
+#   CONFORMANCE_CONFIG   the configuration of chdash (default: tests/config/access.conformance.hcl). The variants "full" and "lean" are
+#                        access.conformance-full.hcl and access.conformance-lean.hcl.
+#   CONFORMANCE_PROFILE  the profile of the runner (default: tests/conformance/profile.json). It must match the configuration: its
+#                        approval_calls name each action that the document declares: profile-full.json and profile-lean.json.
 set -euo pipefail
 
 [[ $# -ge 1 && $# -le 2 ]] || { echo "usage: $0 /path/to/chdash [CLICKHOUSE_IMAGE]" >&2; exit 2; }
@@ -91,11 +95,11 @@ cmp -s "$work/identity-keys.json" "$here/identity-keys.json" ||
 if [[ -f "$pa_dir/conformance/vectors/effect.json" ]] && ! cmp -s "$pa_dir/conformance/vectors/effect.json" "$here/effect-vectors.json"; then
   echo "WARNING: tests/conformance/effect-vectors.json differs from conformance/vectors/effect.json of the ProcurAuth repository" >&2
 fi
-cp "$here/profile.json" "$work/profile.json"
+cp "${CONFORMANCE_PROFILE:-$here/profile.json}" "$work/profile.json"
 tr -d '\n' < "$repo/tests/config/secrets/access-pdp-token" > "$work/pdp-token"
 printf 'conformance-test-password' > "$work/ch-password"
 printf 'conformance-write-password' > "$work/ch-write-password"
-cp "$repo/tests/config/access.conformance.hcl" "$work/config.hcl"
+cp "${CONFORMANCE_CONFIG:-$repo/tests/config/access.conformance.hcl}" "$work/config.hcl"
 chmod 0644 "$work"/*
 chmod 0755 "$work" "$work/access-conformance"
 
@@ -110,6 +114,10 @@ for _ in $(seq 1 90); do
   sleep 1
 done
 [[ "$ready" == 1 ]] || { docker logs "$ch_name" 2>&1 | tail -20 >&2; die "ClickHouse did not start"; }
+# The tables of the traces: the variant "full" turns the traces on (observability.read), and the tool list_services reads them.
+# The GRANT lines of the file name the users of the test stack: this ClickHouse has only the user chdash.
+grep -v '^GRANT' "$repo/tests/clickhouse-init/03-otel-traces.sql" | docker exec -i "$ch_name" clickhouse-client --user chdash --password conformance-test-password --multiquery \
+  >/dev/null || die "the tables of the traces could not be made"
 # The write account of the tool run_write_query: another user than the user of the other accounts (tests/config/access.conformance.hcl).
 docker exec "$ch_name" clickhouse-client --user chdash --password conformance-test-password --multiquery -q \
   "CREATE USER chdash_write IDENTIFIED WITH plaintext_password BY 'conformance-write-password'; GRANT CREATE TABLE, SELECT ON default.* TO chdash_write" \

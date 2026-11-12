@@ -22,6 +22,8 @@ access {
   }
   pdp {
     url        = "http://approval_pdp:8181"
+    # The test network is closed: the PDP is in the same Docker network, without TLS.
+    insecure_link = true
     token_file = "/run/secrets/chdash-test/access-pdp-token"
     timeout    = "500ms"
     cache_ttl  = "1s"
@@ -34,6 +36,8 @@ access {
 
 mcp {
   enabled   = true
+  # The tests send many requests with no valid key from one address: the limit of contract 3.9 is tested in mcp.unauth.hcl.
+  unauthenticated_rate_limit_per_minute = 0
   auth_mode = "identity"
   usage {
     enabled = true

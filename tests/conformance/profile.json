@@ -118,6 +118,26 @@
           "host": "conf",
           "sql": "SELECT 1"
         }
+      },
+      "mcp_call_multi": {
+        "headers": {
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "export_query"
+        },
+        "tool": "export_query",
+        "action": "query.export",
+        "resource_type": "host",
+        "resource_id": "conf",
+        "ancestors": [
+          {
+            "type": "service",
+            "id": "chdash"
+          }
+        ],
+        "arguments": {
+          "host": "conf",
+          "sql": "SELECT 1"
+        }
       }
     },
     "approval_calls": {
@@ -138,7 +158,10 @@
           "op": {
             "tool": "list_databases",
             "arguments": "{\"host\":\"conf\"}",
-            "host": "conf"
+            "host": "conf",
+            "max_rows": 1000,
+            "max_result_bytes": 1048576,
+            "timeout_seconds": 30
           },
           "variants": {
             "effect_2": {
@@ -149,7 +172,10 @@
               "op": {
                 "tool": "list_databases",
                 "arguments": "{\"filter\":\"a*\",\"host\":\"conf\"}",
-                "host": "conf"
+                "host": "conf",
+                "max_rows": 1000,
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             },
             "effect_3": {
@@ -160,7 +186,10 @@
               "op": {
                 "tool": "list_databases",
                 "arguments": "{\"filter\":\"b*\",\"host\":\"conf\"}",
-                "host": "conf"
+                "host": "conf",
+                "max_rows": 1000,
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             }
           }
@@ -185,7 +214,10 @@
             "tool": "run_query",
             "host": "conf",
             "sql": "SELECT 1",
-            "ch_user": "chdash"
+            "ch_user": "chdash",
+            "max_rows": 1000,
+            "max_result_bytes": 1048576,
+            "timeout_seconds": 30
           },
           "variants": {
             "effect_2": {
@@ -197,7 +229,10 @@
                 "tool": "run_query",
                 "host": "conf",
                 "sql": "SELECT 2",
-                "ch_user": "chdash"
+                "ch_user": "chdash",
+                "max_rows": 1000,
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             },
             "effect_3": {
@@ -209,7 +244,10 @@
                 "tool": "run_query",
                 "host": "conf",
                 "sql": "SELECT 3",
-                "ch_user": "chdash"
+                "ch_user": "chdash",
+                "max_rows": 1000,
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             }
           }
@@ -234,7 +272,8 @@
             "tool": "run_write_query",
             "host": "conf",
             "sql": "CREATE TABLE IF NOT EXISTS default.conf_a (x UInt8) ENGINE = Memory",
-            "ch_user": "chdash_write"
+            "ch_user": "chdash_write",
+            "timeout_seconds": 30
           },
           "variants": {
             "effect_2": {
@@ -246,7 +285,8 @@
                 "tool": "run_write_query",
                 "host": "conf",
                 "sql": "CREATE TABLE IF NOT EXISTS default.conf_b (x UInt8) ENGINE = Memory",
-                "ch_user": "chdash_write"
+                "ch_user": "chdash_write",
+                "timeout_seconds": 30
               }
             },
             "effect_3": {
@@ -258,7 +298,8 @@
                 "tool": "run_write_query",
                 "host": "conf",
                 "sql": "CREATE TABLE IF NOT EXISTS default.conf_c (x UInt8) ENGINE = Memory",
-                "ch_user": "chdash_write"
+                "ch_user": "chdash_write",
+                "timeout_seconds": 30
               }
             }
           }
@@ -325,7 +366,9 @@
           "op": {
             "tool": "system_overview",
             "arguments": "{\"host\":\"conf\"}",
-            "host": "conf"
+            "host": "conf",
+            "max_result_bytes": 1048576,
+            "timeout_seconds": 30
           },
           "variants": {
             "effect_2": {
@@ -338,7 +381,9 @@
               "op": {
                 "tool": "system_overview",
                 "arguments": "{\"host\":\"conf\",\"params\":{\"refresh\":0}}",
-                "host": "conf"
+                "host": "conf",
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             },
             "effect_3": {
@@ -351,7 +396,9 @@
               "op": {
                 "tool": "system_overview",
                 "arguments": "{\"host\":\"conf\",\"params\":{\"refresh\":1}}",
-                "host": "conf"
+                "host": "conf",
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             }
           }
@@ -411,7 +458,10 @@
             "host": "conf",
             "sql": "SELECT 1",
             "ch_user": "chdash",
-            "options": "{\"format\":\"csv\"}"
+            "options": "{\"format\":\"csv\"}",
+            "max_rows": 1000,
+            "max_result_bytes": 1048576,
+            "timeout_seconds": 30
           },
           "variants": {
             "effect_2": {
@@ -424,7 +474,10 @@
                 "host": "conf",
                 "sql": "SELECT 2",
                 "ch_user": "chdash",
-                "options": "{\"format\":\"csv\"}"
+                "options": "{\"format\":\"csv\"}",
+                "max_rows": 1000,
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             },
             "effect_3": {
@@ -437,7 +490,10 @@
                 "host": "conf",
                 "sql": "SELECT 3",
                 "ch_user": "chdash",
-                "options": "{\"format\":\"csv\"}"
+                "options": "{\"format\":\"csv\"}",
+                "max_rows": 1000,
+                "max_result_bytes": 1048576,
+                "timeout_seconds": 30
               }
             }
           }
