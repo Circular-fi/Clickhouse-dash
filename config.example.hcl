@@ -343,11 +343,13 @@ access {
     # clock_skew     = "60s"                # tolerance on exp, iat and nbf (0s to 5m). 0s: none
   }
   pdp {
-    # https, or http on a private network only (a http URL that is not a loopback address writes a
-    # warning at start). The start reads <origin>/.well-known/authzen-configuration.
-    url        = "http://pdp.example.internal:4182"   # or: url_env, url_file
+    # https, or http to this machine. A http URL to another host, or verify = false, stops the start
+    # unless insecure_link = true is set (then it writes a warning). The start reads
+    # <origin>/.well-known/authzen-configuration.
+    url        = "https://pdp.example.internal:4182"  # or: url_env, url_file
     # ca_file  = "/etc/chdash/pdp-ca.pem"   # https only: the CA of the PDP; default: the store of the system
-    # verify   = true                       # https only: false checks no certificate (a warning at start)
+    # verify   = true                       # https only: false checks no certificate (needs insecure_link = true)
+    # insecure_link = false                 # true: accept a http URL to another host, or verify = false (a warning at start)
     # The token of this server at the PDP is a secret: token_file or token_env only.
     token_file = "/run/secrets/db_pdp_token"
     # timeout  = "500ms"                    # no answer in this time: the request gets 503

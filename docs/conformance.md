@@ -39,6 +39,8 @@ tests/conformance/run.sh /path/to/chdash
 | `CONFORMANCE_EXPECTED` | Another list of expected failures. |
 | `CONFORMANCE_STRICT` | Set it to `1`. The script then fails also for a case of the list that passes. |
 | `CONFORMANCE_KEEP` | Set it to `1` to keep the containers and the work directory for a look at the logs. |
+| `CONFORMANCE_CONFIG` | The configuration of ChDash. The default is `tests/config/access.conformance.hcl`. The variants are in [The three variants](#the-three-variants). |
+| `CONFORMANCE_PROFILE` | The profile of the runner. The default is `tests/conformance/profile.json`. It must match the configuration. |
 | `CHDASH_APP_IMAGE` | The image that runs the `chdash` binary. The default is the image of the runner (`CHDASH_TEST_IMAGE`, `debian:trixie-slim`). A binary that the Alpine test image builds needs an Alpine image with `libstdc++`. |
 
 ### The commit of the runner
@@ -71,6 +73,8 @@ The file `tests/conformance/expected.txt` has one case id on each line. The reas
 |---|---|
 | `tests/config/access.conformance.hcl` | The configuration of ChDash: mode `authzen`, `pdp.cache_ttl = 0s`, one host, one query library, MCP in the mode `identity`. |
 | `tests/conformance/profile.json` | The profile of the runner: the identity token, the keys, the PDP listener and the operations. |
+| `tests/config/access.conformance-full.hcl`, `tests/conformance/profile-full.json` | The variant "full". |
+| `tests/config/access.conformance-lean.hcl`, `tests/conformance/profile-lean.json` | The variant "lean". |
 | `tests/conformance/identity-keys.json` | The public keys of the two test keys of the runner, as a JWK Set with the `kid` of the profile. |
 | `tests/conformance/expected.txt` | The expected failures. |
 | `tests/conformance/run.sh` | The script. |
@@ -89,6 +93,24 @@ The script makes the JWK Set again from the private keys of the runner. It stops
 
 The cache of the PDP answers is off. The cases give a different answer for each request, so a kept answer would hide the result. The profile has `answer_cache = false`, and the runner skips the cases that need a cache.
 
+### The three variants
+
+The action document depends on the configuration (refer to [access.md](access.md#actions-and-tools)). The member `approval_calls` of the profile must name each action that the document publishes (case U111). One run cannot cover every configuration. A configuration that hides an action that no tool serves is the defect that hid in 1.4.0. So the run has three variants:
+
+| Variant | Configuration | Published actions that differ | `approval_calls` |
+|---|---|---|---|
+| default | A library that no person can change, the write account, the usage with `all_keys` and one host. | `query.run.write` and `mcp.usage.read` are published. `library.write` and `observability.read` are not. | 7 actions |
+| full | A writable library, the traces on (the script makes the tables of `otel`), the write account and the usage with `all_keys`. | Also `library.write` (the tool `library_write`, with the operation `import` of an empty library: it runs each time) and `observability.read` (the tool `list_services`). | 9 actions |
+| lean | No write account, no usage, a library that no person can change, no signal. | `query.run.write` and `mcp.usage.read` are not published: no tool serves them. | 5 actions |
+
+Run the three of them before a release:
+
+```text
+tests/conformance/run.sh /path/to/chdash
+CONFORMANCE_CONFIG=tests/config/access.conformance-full.hcl CONFORMANCE_PROFILE=tests/conformance/profile-full.json tests/conformance/run.sh /path/to/chdash
+CONFORMANCE_CONFIG=tests/config/access.conformance-lean.hcl CONFORMANCE_PROFILE=tests/conformance/profile-lean.json tests/conformance/run.sh /path/to/chdash
+```
+
 ### The operations of the profile
 
 Each case uses an operation. The profile maps it to a request of ChDash:
@@ -102,32 +124,40 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 | `list_options` | `GET /.well-known/procurauth/resources?type=host` | The route of the options (the profile has `options_type` = `host`). |
 | `mcp_call_plain` | `POST /mcp`, `tools/call` of `list_databases` with the argument `host` = `conf` | `explorer.read` on the host `conf`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 | `mcp_call_budget` | `POST /mcp`, `tools/call` of `run_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.run.read` on the host `conf`, with `context.usage`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
+| `mcp_call_multi` | `POST /mcp`, `tools/call` of `export_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.export` on the host `conf`, with `context.usage`. The tool needs a second permission, `query.run.read` on the host: ChDash asks it first, without usage ([access.md](access.md#approval-of-an-action)). The cases U96 and U97 run it. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 | `mcp_call_approval` | `POST /mcp`, `tools/call` of the tool of one action. It is not in `operations`: the member `approval_calls` has one entry for each action that a tool uses. The runner runs each case of the approvals once for each entry. It adds the control arguments (`lease_s`, `approval_ref`, `wait_s`) and changes the arguments for the variants `effect_2` and `effect_3`. | The action of the entry, on its node. ChDash asks the question without effect (17.7, step 1), and only a reason `approval_required` starts the flow ([access.md](access.md#approval-of-an-action)). |
 
-The profile has the member `mcp` (`path` = `/mcp`, `session_budget` = `true`: the action `mcp.session` lists the budget `requests`). It has the member `approval_calls`, because each action can need an approval. It has no `use_multi`, no `mcp_call_multi` and no tool that asks for input. The reasons are:
+The profile has the member `mcp` (`path` = `/mcp`, `session_budget` = `true`: the action `mcp.session` lists the budget `requests`). It has the member `approval_calls`, because each action can need an approval. It has `mcp_call_multi` (the tool `export_query` needs two permissions, so the cases U96 and U97 run). It has no `use_multi` and no tool that asks for input. The reasons are:
 
-- ChDash has no use that needs two permissions. A run needs `query.run.read` or `query.run.write`: one of the two is enough, so the other action is no required permission. The cases U34, U35, U96 and U97 refuse a use when the second permission is `false`, and they need such a use. These cases are skipped.
-- ChDash has no tool that asks for input. The case that uses it is skipped.
-- The route of the export has two permissions, but its use is the stream of a token that the run made. A case sends one request, so it cannot make this use.
+- ChDash has no HTTP route that is one use with two required permissions in one request. A run needs `query.run.read` or `query.run.write`: one of the two is enough, so the other action is no required permission. The route of the export has two permissions. Its use is the stream of a token that the run made. A case sends one request. The cases U34 and U35 need `use_multi`, and they are skipped. The tool `export_query` has two required permissions, and the cases U96 and U97 test the rule on it.
+- ChDash has no tool that asks for input. The case U117 that uses it is skipped.
 
-The `op` of an entry is the `op` that ChDash builds ([access.md](access.md#the-op-and-the-view)). For `run_query` and `run_write_query` it has `tool`, `host`, `sql` and `ch_user`. For another tool it has `tool`, `host` (when the call has one) and `arguments`: the compact JSON text of the arguments with sorted members and with the defaults of the tool. The case U108 checks that the `view` has only JSON Pointers.
+The `op` of an entry is the `op` that ChDash builds ([access.md](access.md#the-op-and-the-view)). For `run_query`, `export_query` and `run_write_query` it has `tool`, `host`, `sql`, `ch_user` and the caps of the call. The caps are `max_rows`, `max_result_bytes` and `timeout_seconds`. The write tool has `timeout_seconds` only. For another tool it has `tool`, `host` (when the call has one), `arguments` and the caps of the tool. `arguments` is the compact JSON text of the arguments, with sorted members and with the defaults of the tool. The caps are the values of `mcp.max_rows`, `mcp.max_result_bytes` and `mcp.query_timeout_seconds` (ProcurAuth 17.3a). The case U108 checks that the `view` has only JSON Pointers.
 
 ### The headers of an MCP request
 
 The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. Since the ProcurAuth commit `85b695d` (2026-11-07), each MCP request that a case writes has them too. With an older runner, the 11 MCP cases U18, U23, U26, U29, U31, U88, U89, U91, U94, U95 and U98 fail for this reason only.
 
-## Result of 2026-11-11: the approvals for each action
+## Result of 2026-11-12: the three variants
 
-The run used the static release binary of the branch `feat/approvals`, built with `tests/smoke/Dockerfile.release` as version 1.4.0, and the script `tests/conformance/run.sh` and the runner of the ProcurAuth lot S7 (commit `48f3d3a`). The cases of the approvals are required: U30 and U100 to U117. The profile has `approval_calls` for the actions that an MCP tool uses: `explorer.read` (`list_databases`), `query.run.read` (`run_query`), `query.run.write` (`run_write_query`), `query.export` (`export_query`, with the other permission `query.run.read`), `library.read` (`query_library`), `system.read` (`system_overview`) and `mcp.usage.read` (`mcp_analysis_all_usage`). The configuration of the run has a write account (`chdash_write`, made by the script) and `mcp.usage` with `all_keys`, and a library that is not writable (so `library.write` is not published).
+The run used the static release binary of the branch `feat/alignment`, built with `tests/smoke/Dockerfile.release`, the script `tests/conformance/run.sh` and the runner of the ProcurAuth lot S7 (commit `48f3d3a`). Each variant ran in strict mode. The cases of the approvals are required: U30 and U100 to U117.
 
-| Result | Cases |
+| Result | Default | Full | Lean |
+|---|---|---|---|
+| Run | 117 cases: 114 passed, 0 failed, 3 skipped | 117 cases: 114 passed, 0 failed, 3 skipped | 117 cases: 114 passed, 0 failed, 3 skipped |
+| Actions with a call in `approval_calls` | 7 | 9 | 5 |
+| Expected failures (`tests/conformance/expected.txt`) | none | none | none |
+
+The cases U96 and U97 pass: the profile has `mcp_call_multi` (`export_query`). The skipped cases are these:
+
+| Case | Reason |
 |---|---|
-| Run | 117 cases: 112 passed, 0 failed, 5 skipped (strict mode) |
-| Skipped, the profile has no use with two permissions | U34, U35, U96, U97 |
-| Skipped, ChDash has no tool that asks for input | U117 |
-| Expected failures (`tests/conformance/expected.txt`) | none |
+| U34, U35 | The profile has no `use_multi`. ChDash has no HTTP route that is one use with two required permissions in one request: the stream of an export needs a token that a run made, and a case sends one request. The rule is tested on a tool by U96 and U97. |
+| U117 | ChDash has no tool that asks for input (`mcp_call_input`). |
 
-The action document has one action that no entry of the profile covers only when a feature is on that the profile leaves off. The identity mode does not publish `mcp.keys.read` and `mcp.keys.write`, so these actions need no call. The configuration of the run makes the query library read-only, so `library.write` is not published either.
+The runner has no profile for the mode `keys`: the keys of the page are tested by `tests/native/approval_test.cpp` and by `tests/backend-functional/test_approval_keys.py`. The profile of 1.4.0 hid two defects. Its configuration made the library read-only and turned on the usage with `all_keys`, so U111 passed with actions that had no tool in other configurations. The variants close this gap.
+
+The action document has one action that no entry of the profile covers only when a feature is on that the variant leaves off. The identity mode does not publish `mcp.keys.read` and `mcp.keys.write`, so these actions need no call.
 
 ## Notes
 

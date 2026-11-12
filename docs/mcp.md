@@ -4,7 +4,7 @@ ChDash has a built-in MCP server. An AI client reads ClickHouse data through ChD
 
 MCP is off by default. Add an `mcp {}` block to the configuration to enable it. The setting `mcp.auth_mode` chooses how the endpoint knows its caller: the keys of ChDash (the default) or the identity token of the portal (refer to [The identity mode](#the-identity-mode)).
 
-The MCP server follows sections 1 to 8 of the MCP server contract (`mcp-server-contract/SPEC.md`, version 1). This document describes how ChDash applies each rule. ChDash has no tool with an effect, no job and no access gateway. Sections 9, 10 and 11 of the contract do not apply to the MCP endpoint.
+The MCP server follows the MCP server contract (`mcp-server-contract/SPEC.md`, version 1). This document describes how ChDash applies each rule. Section 9 of the contract (the approval of an action by a person) applies to each tool that the PDP decides: each tool of the identity mode, and each tool of a key of the page that has a creator. The tools with an effect are `run_write_query` and `library_write`, and both exist in the identity mode only. A key of the configuration has no PDP question, so it has no approval (contract 9.1). ChDash has no job and no access gateway of its own.
 
 ## How it works
 
@@ -77,6 +77,7 @@ clickhouse {
 | `max_memory_bytes` | `1073741824` | `max_memory_usage` of each query (16 MiB or more). |
 | `max_rows_to_read` | `0` | `max_rows_to_read` of each query. `0` means no limit. A query that reads more fails with `read_limit`. |
 | `rate_limit_per_minute` | `600` | Requests per minute for each key. `0` means no limit. A key can lower it (`limits.rate_limit_per_minute`). |
+| `unauthenticated_rate_limit_per_minute` | `10` | Requests with no valid key for each client address and each minute (contract 3.9). `0` means no limit. Refer to [Rate limit](#rate-limit). |
 | `allowed_origins` | `[]` | Origins that can call from a browser, for example `["https://inspector.example.com"]`. Refer to [Origin check](#origin-check). |
 
 Each value is a global limit. A key can only lower `max_rows`, `timeout_seconds` and `rate_limit_per_minute`. A key cannot raise them. A higher value in a key stops the start.
@@ -514,9 +515,12 @@ The identity mode adds no field to a message of MCP.
 | `run_query`, `explain_query` | `query.run.read` (host) |
 | `run_write_query` ([The write tool](#the-write-tool)) | `query.run.write` (host) |
 | `export_query` ([The export tool](#the-export-tool)) | `query.export` (host), and `query.run.read` (host) as the other permission |
+| `library_write` ([The library tool](#the-library-tool)) | `library.write` (service) |
 | `get_action_status` | None. It asks the PDP no question. |
 | `mcp_analysis_all_usage` | `mcp.usage.read` (service) |
 | An API tool | The action of its route, as in the table of the pages ([access.md](access.md#actions)) |
+
+A tool of the identity mode names an action that the document publishes. The document and the tools agree: an action that no tool serves is not published ([access.md](access.md#actions-and-tools)). `query.run.write` is published when a host has `mcp_write_uri`. `query.export` is published when a host has `mcp_uri`. `library.write` is published when a query library is writable. `mcp.usage.read` is published when `mcp.usage.enabled` and `mcp.usage.all_keys` are true.
 
 The tools `list_hosts`, `mcp_analysis_my_limits` and `mcp_analysis_my_usage` use no action of the pages. They show only the service and the subject itself, so they use `mcp.session`. The PDP can grant `mcp.session` to each person who may use MCP.
 
@@ -528,7 +532,8 @@ Each `tools/call` of this mode can need the approval of the owner of the key. Th
 
 - Each tool accepts the optional control arguments `approval_ref`, `lease_s`, `until`, `wait_s` and `supersedes`. `tools/list` shows them in the schema of each tool except `get_action_status`. A call must give exactly one of `approval_ref`, `lease_s` and `until` when the PDP asks for an approval. The control arguments never reach the tool and never enter the effect.
 - When the PDP says `approval_required` and then `approval_required` or `approval_pending` to the question with the effect, the tool does not run. The result is not an error. Its `structuredContent` is `{"action": {"id", "status": "awaiting_approval", "code", "executed": false}}`, and the second item of `content` starts with `NOT EXECUTED`. The agent calls the tool again after the approval, with the same arguments.
-- The tool errors are `approval_denied`, `approval_expired`, `approval_unavailable` (retryable), `approval_rate_limited` (retryable, with `retry_after`) and `invalid_argument`. Their messages are fixed.
+- The tool errors are `approval_denied`, `approval_expired`, `approval_unavailable` (retryable), `approval_rate_limited` (retryable, with `retry_after`) and `invalid_argument`. Their messages are fixed. A fault of the agent in the approval API (`explanation_required`, `cannot_supersede`) is a tool error `invalid_argument`, not an outage.
+- The description of each tool tells the four facts of contract 4.4: the tool can need the approval of the owner, the result `awaiting_approval` with `executed: false`, the new call with the same arguments, and `get_action_status`. Each tool has an `outputSchema` (contract 4.5) with the member `action` of contract 9.4, the error object and the result of the tool. The schema of `lease_s` and `wait_s` shows the bounds that the PDP publishes in its metadata (`procurauth_approval_lease_min_seconds`, `procurauth_approval_lease_max_seconds`, `procurauth_approval_wait_max_seconds`).
 - The tool `get_action_status` (argument `request_id`) gives `{"status": "pending" | "approved" | "denied" | "void"}` and renews the lease of the request for the agent. It has the annotation `readOnlyHint: true`.
 
 A call that needs no approval costs one question, as before. Only the answer `approval_required` starts the flow: ChDash then asks with the effect (without usage, then with usage after a `true` answer). A route of the pages or of the API cannot wait: it answers `403` with `{"error": "approval_cannot_wait"}` ([access.md](access.md#the-page-and-the-api)).
@@ -593,7 +598,7 @@ A true answer can have `limits` (ProcurAuth 7.3). For a tool call, ChDash takes 
 | `max_memory` (bytes) | `max_memory_usage` |
 | `max_result_size` (bytes) | Bytes in the result |
 
-The tools of the data, of the SQL and of the observability send these settings with their statements, when the settings profile of the MCP user has no lower value. An API tool gives the ceilings to the route that it calls. The route then applies them as it does for the pages ([access.md](access.md#how-chdash-applies-a-ceiling)).
+The tools of the data, of the SQL and of the observability send these settings with their statements. They send a setting only when the settings profile of the MCP user has no lower value. When the profile has `readonly = 1`, ClickHouse takes no setting. ChDash then counts `max_rows_read`, `max_read_size` and `max_duration` itself, and it refuses a call that has a `max_memory` ceiling ([The settings profile of the user](#the-settings-profile-of-the-user)). `export_query` applies the ceilings of its own action and of `query.run.read`, the lowest value of each. An API tool gives the ceilings to the route that it calls. The route then applies them as it does for the pages ([access.md](access.md#how-chdash-applies-a-ceiling)).
 
 The PDP can send for an action only the ceilings that the document declares for that action ([access.md](access.md#actions-that-list-ceilings)). For example, `explorer.read` declares `max_rows`, `max_rows_read`, `max_duration` and `max_memory`, and `mcp.session` declares none. A ceiling that the action does not declare, a name that ChDash does not know, or a value below 1 cannot be applied. The answer is then a `false` answer, and the log has the line `access.ceiling_unenforceable`.
 
@@ -614,7 +619,7 @@ The identity mode has no key of ChDash. These things exist only in the keys of C
 - The limits of a key (`max_rows`, `timeout_seconds` and `rate_limit_per_minute` of a key). The global values of the `mcp` block apply, and the ceilings of the PDP lower them.
 - The default host of a key.
 - `include_cost` of `mcp_analysis_my_usage`. It reads the cost of the host of a key, and a subject has no such host. The tool gives `invalid_argument`.
-- The Keys page. ChDash has no key to show, because the keys live in the portal. The routes that make, delete or adopt a key answer 403 `manage_disabled`.
+- The Keys page. ChDash has no key to show, because the keys live in the portal. The routes that make, delete or adopt a key answer 403 `forbidden`: the actions `mcp.keys.read` and `mcp.keys.write` are not published, so ChDash asks the PDP nothing.
 
 ### The usage in the identity mode
 
@@ -659,7 +664,7 @@ ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from
 
 ## Tools
 
-Each tool has a JSON Schema in `tools/list`. It also has the annotations `readOnlyHint: true`, `idempotentHint: true` and `openWorldHint: false` (contract 4.3). A tool reads and changes nothing. The only exception is `run_write_query` of the identity mode ([The write tool](#the-write-tool)), which has its own annotations. It reads only the database of ChDash and the database of its host. `destructiveHint` is absent. It has a meaning only when `readOnlyHint` is false.
+Each tool has a JSON Schema in `tools/list`. It also has the annotations `readOnlyHint: true`, `idempotentHint: true` and `openWorldHint: false` (contract 4.3). A tool reads and changes nothing. The only exceptions are `run_write_query` and `library_write` of the identity mode ([The write tool](#the-write-tool), [The library tool](#the-library-tool)), which have their own annotations. It reads only the database of ChDash and the database of its host. `destructiveHint` is absent. It has a meaning only when `readOnlyHint` is false.
 
 A result without an error has `structuredContent`, a JSON object. The same object is also in `content[0].text` as compact JSON text (contract 5.1). A result of the protocol `2026-07-28` also has `resultType: "complete"`. The data of the database and of the telemetry is in an `untrusted` object. Refer to [Untrusted text](#untrusted-text).
 
@@ -925,11 +930,27 @@ Arguments: `host`, `sql` (one `SELECT` or `WITH` statement), `type` (`plan` by d
 
 The tools of the catalog stay read-only: `run_query` and `explain_query` run with `readonly = 1`, and a write statement there gives `statement_not_allowed`.
 
+### The library tool
+
+`library_write` exists only in the identity mode, and only when a query library is writable (`query_library { writable = true }`). It is the tool of the action `library.write`. Without it, a writable library would have an action that no agent can use, and the use could never wait for an approval. The arguments are:
+
+- `host` (required): the library belongs to a host.
+- `operation`: `folder_create`, `folder_update`, `folder_delete`, `query_create`, `query_update`, `query_delete` or `import`.
+- `id`: the folder or the query of an update or a delete.
+- `library`: the name of one of several libraries.
+- `recursive`: for `folder_delete` only.
+- `body`: the JSON body of the route of the Query page for this operation (refer to [query-library.md](query-library.md)).
+- The control arguments of [The approval of a person](#the-approval-of-a-person).
+
+The tool has the annotations `readOnlyHint: false`, `destructiveHint: true` and `openWorldHint: true`. The key of ChDash (the mode `keys`) never has it.
+
+The tool calls the route of the library in the process, as the Query page does. It runs after the approval of the call when the PDP asks for one. The `op` of an approval holds `tool`, `host` and `arguments` (the compact text of the call, with the members in sorted order). So the owner reads the operation and the text of the saved query. A result is in `untrusted`: the answer of the route. A library that is not writable, or no library, gives the tool error `not_enabled`.
+
 ### The export tool
 
 `export_query` exists only in the identity mode, for each host that has `mcp_uri`. Arguments: `host` (required), `sql` (one read statement, as for `run_query`), `format` (`csv`, the default, or `json`) and the control arguments of [The approval of a person](#the-approval-of-a-person). It runs the statement with `readonly = 1` and the caps of the call, and it gives the rows as the text of an export in `untrusted.content`: `csv` has a header line, and `json` is an array of objects. The result also has `host`, `format`, `columns`, `row_count`, `truncated` and `elapsed_ms`. `truncated` is `true` when a row cap or a byte cap cut the rows. The tool does not download a file: the stream of a file stays on the page.
 
-The tool is the use of the action `query.export` (one unit of the budget `exports`). It needs a second permission, `query.run.read` on the host (ProcurAuth 5.5a). ChDash asks it first, without usage and without effect. A `false` answer gives the answer of a tool that does not exist. The `op` of an approval has `tool`, `host`, `sql`, `ch_user` and `options` (the text of `{"format": ...}`).
+The tool is the use of the action `query.export` (one unit of the budget `exports`). It needs a second permission, `query.run.read` on the host (ProcurAuth 5.5a). ChDash asks it after the check of the arguments and of the control arguments (contract 9.4, steps 1 and 2: a bad argument asks the PDP nothing), without usage and without effect. A `false` answer gives the answer of a tool that does not exist. The ceilings of this answer lower the ceilings of the call: the lowest value of each ceiling applies, and a ceiling that `query.run.read` does not declare makes the answer `false`. The `op` of an approval has `tool`, `host`, `sql`, `ch_user` and `options` (the text of `{"format": ...}`).
 
 ### The analysis tools
 
@@ -1156,7 +1177,7 @@ Each key has a token bucket in memory (contract 3.9). The bucket holds `rate_lim
 
 Above the limit, the answer is status 429 with `Retry-After` and an empty body (the binding asks for no body before ChDash reads the message). Each ChDash (an instance) keeps its own bucket, so a key that reaches two instances has two buckets. A key reads what is left of its own bucket with `mcp_analysis_my_limits` (refer to [The analysis tools](#the-analysis-tools)). A read of the bucket takes a token, as any call does. It takes no more.
 
-ChDash does not limit the requests that have no valid key. Contract 3.9 asks for a limit of 10 a minute for each client address. Put such a limit in the reverse proxy.
+ChDash also limits the requests that have no valid key, for each client address (contract 3.9). The setting is `mcp.unauthenticated_rate_limit_per_minute` (default `10`, `0` means no limit). A request counts when it has no key, an unknown key, an expired key, an orphan key or no valid identity token. Above the limit, the answer is status 429 with `Retry-After` and an empty body. A request with a valid key never uses this bucket. Behind a reverse proxy, the address is the address of the proxy: all the clients of the proxy share the bucket, and valid keys are not affected. Each instance keeps its own bucket.
 
 ### The settings profile of the user
 
@@ -1166,7 +1187,7 @@ The settings profile of the ClickHouse MCP user can set `readonly` and some limi
 | --- | --- |
 | `0` (the default) | `readonly = 1` and the limits of the table below. |
 | `2` | The limits of the table below, **not** `readonly`. The profile already stops every write. The profile lets a statement change its settings. A `SETTINGS` clause in the SQL can win over the limits that ChDash sends. So `run_query` and `explain_query` refuse the clause (`clause_not_allowed`). A statement therefore cannot change a limit. |
-| `1` | **Nothing.** ClickHouse refuses any setting. The profile holds the limits (time, memory, rows to read). ChDash still limits the rows and the bytes that it returns, and it sets `truncated`. The `query_id` of each statement still names its key and its tool. The `query_id` is not a setting. |
+| `1` | **Nothing.** ClickHouse refuses any setting. The profile holds the limits (time, memory, rows to read). ChDash still limits the rows and the bytes that it returns, and it sets `truncated`. The `query_id` of each statement still names its key and its tool. The `query_id` is not a setting. In the identity mode, the ceilings of the grant still apply: ChDash counts the rows and the bytes read (`max_rows_read`, `max_read_size`) and the time (`max_duration`) on its side, as the pages do, and it stops the statement past a ceiling (`read_limit`, `timeout`). A ceiling `max_memory` cannot be counted on this side: a call with this ceiling gets the tool error `ceiling_unenforceable`, and the statement does not run. |
 | unknown (an old server without `getSetting`) | Everything, as for `0`. |
 
 **The profile wins over the configuration.** When the profile of the user sets one of these settings, ChDash does not send a value that contradicts the profile: `max_execution_time`, `max_result_rows`, `max_result_bytes`, `max_memory_usage` or `max_rows_to_read`. Neither the configuration (`mcp { max_rows, query_timeout_seconds, ... }`) nor a key can raise such a limit. If the configuration or a key sets a value **lower** than the profile, the lower value applies. A key can only lower a limit, never raise it. In short, the limit of a call is the smallest of the profile, the configuration and the key.
@@ -1242,7 +1263,7 @@ The context of a call uses W3C Trace Context (`traceparent`) and W3C Baggage (`b
 
 ### Probes and metrics
 
-These endpoints need no key (contract 8.1):
+These endpoints need no key (contract 8.1). They are for the platform that runs ChDash, not for a person or an agent. The access of humans does not ask the PDP for them, and the identity token does not guard them. Serve them on a network that only the platform reaches: the edge or the router must not publish `/healthz`, `/livez`, `/readyz` and `/metrics` ([access.md](access.md#routes-with-no-action)).
 
 | Endpoint | Meaning |
 | --- | --- |
@@ -1629,7 +1650,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 
   ChDash sends it only when the client can read it. This applies to a request of `2026-07-28`. It also applies to a request with `MCP-Protocol-Version: 2025-06-18` (or later), and to a request without this header.
 
-  A request with an older version (`2025-03-26`, `2024-11-05`) gets the text only, so its response is half the size. The endpoint has no session, so the header of each request gives the protocol version. The tools declare no `outputSchema`, so no client needs `structuredContent` to validate a result.
+  A request with an older version (`2025-03-26`, `2024-11-05`) gets the text only, so its response is half the size. The endpoint has no session, so the header of each request gives the protocol version. In the identity mode, and for a key of the page that has a creator, each tool declares an `outputSchema` (contract 4.5): one schema for each kind of tool (the tools that return rows, `get_action_status` and the others). Each schema has the member `action` of contract 9.4 and the error object, so a result that waits and a tool error both follow it. The schema of the other keys declares none.
 
   The response is written once into one buffer and moved to the answer. The copies of the result in memory are the JSON of the tool and the body of the response. The limit of the size of a result is `mcp.max_result_bytes` (1 MiB by default).
 
