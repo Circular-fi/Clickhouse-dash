@@ -4,7 +4,7 @@ name: Conformance
 # The job builds the binary as the release does, and runs tests/conformance/run.sh. The script fails only for a failed case that
 # tests/conformance/expected.txt does not list.
 # The ProcurAuth repository is public: the job checks it out without a secret.
-# The expected result (2026-11-12), for each of the three variants: 117 cases, 114 passed, 0 failed, 3 skipped. tests/conformance/expected.txt is empty.
+# The expected result (2026-11-12), for each of the three variants: 117 cases, 116 passed, 0 failed, 1 skipped. tests/conformance/expected.txt is empty.
 # The job checks out one fixed commit of ProcurAuth (the `ref` below), so a change of the runner never changes the result alone.
 # To bump it: run tests/conformance/run.sh with PROCURAUTH_DIR on the new commit and CONFORMANCE_STRICT=1, update expected.txt, then put the
 # full SHA of the new commit in `ref` and in docs/conformance.md ("The commit of the runner").
@@ -51,8 +51,7 @@ jobs:
           # ProcurAuth main of 2026-11-13 (lots S7 and PS1, merged): the runner with Mcp-Method and Mcp-Name, the rule of
           # use_ceiling (U37), the cases of the approvals for each action (U30 and U100 to U117, the profile key approval_calls),
           # and context.permission_only for the other permissions (protocol 5.5a, the cases U34, U35, D95, D96).
-          # TODO(SM1): after the merge of lot/SM1 into procurauth main, pin the merge commit; until then U34 and U35 skip
-          ref: 74f5495d74d475c2bb7fa074ff7c7f79517436fb
+          ref: 1bdfe6199209b80e828b4cffd6e9d3052289f775
           path: procurauth
           persist-credentials: false
 
