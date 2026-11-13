@@ -82,6 +82,10 @@ struct AccessQuestion {
   // ProcurAuth 17.1: the effect of the operation, "sha256:" and 64 hexadecimal digits. Only PdpClient::decide_approval sends it. Empty: the
   // question has no context.approval.
   std::string approval_effect;
+  // ProcurAuth 5.5a: true for a question about a permission that is not the use action of the operation (an other action or an other resource).
+  // The question has context.permission_only = true, no usage and no effect. The PDP ignores `confirm` for it. Its answer is never cached for a
+  // question without the member.
+  bool permission_only = false;
 };
 
 // "node" or "subtree".

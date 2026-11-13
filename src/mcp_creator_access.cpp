@@ -208,6 +208,11 @@ McpCreatorCall McpCreatorAccess::call(const McpKey& key, const McpToolInfo& tool
   // With the approval flow, a reason of 17.1 is not a refusal here: the creator holds the action, and the operation asks for the approval.
   std::vector<AccessDecision> decisions;
   if (!questions.empty()) {
+    // With a use, the questions that remain are the other permissions of the call (other resources of the same operation): they carry
+    // context.permission_only, and the PDP ignores `confirm` for them (5.5a). Without a use, one of them is the operation itself.
+    if (use) {
+      for (AccessQuestion& question : questions) question.permission_only = true;
+    }
     decisions = decide_(key.creator, questions);
     decisions.resize(questions.size());
     for (size_t i = 0; i < questions.size(); ++i) {

@@ -441,13 +441,18 @@ def test_the_export_action_asks_for_an_approval_like_any_other_action():
 
 @needs_approval
 def test_the_approval_of_an_export_follows_the_use_action_alone():
-    # Spec question 53: only a confirm on query.export submits the call for approval. A confirm on query.run.read (the scope) asks no approval:
-    # the call is refused with a tool error that says so, and nothing goes to the approval API.
+    # ProcurAuth 5.5a (spec question 53): the question of the other permission (query.run.read) has context.permission_only, and the PDP
+    # ignores confirm for it. A confirm on query.run.read asks no approval: the export runs, and nothing goes to the approval API.
     gate("query.run.read")
-    error = error_of(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))
-    assert error["code"] == "scope_needs_approval" and "query.export" in error["message"], error
+    result = structured(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))
+    assert result["row_count"] == 1, result
     assert received()["submissions"] == []
-    assert not [q for q in questions() if q["action"] == "query.export" and "approval" in q["context"]]
+    asked = [q for q in questions() if q["action"] in ("query.run.read", "query.export")]
+    scope = [q for q in asked if q["action"] == "query.run.read"]
+    use = [q for q in asked if q["action"] == "query.export"]
+    assert scope and all(q["context"].get("permission_only") is True and "usage" not in q["context"] and "approval" not in q["context"] for q in scope), scope
+    assert use and all("permission_only" not in q["context"] for q in use), use
+    # Only a confirm on query.export submits the call for approval.
     gate("query.export")
     action = awaiting(call("export_query", {"host": "local", "sql": "SELECT 1", "lease_s": 600}))
     assert received()["submissions"][-1]["body"]["op"]["tool"] == "export_query"

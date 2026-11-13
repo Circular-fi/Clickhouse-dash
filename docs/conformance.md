@@ -45,7 +45,7 @@ tests/conformance/run.sh /path/to/chdash
 
 ### The commit of the runner
 
-The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `48f3d3abd977f2bd4a49ab856f000c77cf396b4e` (main of 2026-11-10, the merge of the lot S7). This commit has the cases of the approvals for each action (U30 and U100 to U117) and the profile key `approval_calls`. The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
+The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `74f5495d74d475c2bb7fa074ff7c7f79517436fb` (main of 2026-11-13, the merge of the lot PS1 and of spec question 53). This commit has the cases of the approvals for each action (U30 and U100 to U117), the profile key `approval_calls` and the member `context.permission_only` (protocol 5.5a). The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
 
 1. Run `tests/conformance/run.sh` with `PROCURAUTH_DIR` on the new commit and `CONFORMANCE_STRICT=1`.
 2. Update `tests/conformance/expected.txt` and the result in this document.
@@ -124,7 +124,7 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 | `list_options` | `GET /.well-known/procurauth/resources?type=host` | The route of the options (the profile has `options_type` = `host`). |
 | `mcp_call_plain` | `POST /mcp`, `tools/call` of `list_databases` with the argument `host` = `conf` | `explorer.read` on the host `conf`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 | `mcp_call_budget` | `POST /mcp`, `tools/call` of `run_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.run.read` on the host `conf`, with `context.usage`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
-| `mcp_call_multi` | `POST /mcp`, `tools/call` of `export_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.export` on the host `conf`, with `context.usage`. The tool needs a second permission, `query.run.read` on the host: ChDash asks it first, without usage ([access.md](access.md#approval-of-an-action)). The cases U96 and U97 run it. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
+| `mcp_call_multi` | `POST /mcp`, `tools/call` of `export_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.export` on the host `conf`, with `context.usage`. The tool needs a second permission, `query.run.read` on the host: ChDash asks it first, with `context.permission_only` and without usage ([access.md](access.md#approval-of-an-action)). The cases U96 and U97 run it. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 | `mcp_call_approval` | `POST /mcp`, `tools/call` of the tool of one action. It is not in `operations`: the member `approval_calls` has one entry for each action that a tool uses. The runner runs each case of the approvals once for each entry. It adds the control arguments (`lease_s`, `approval_ref`, `wait_s`) and changes the arguments for the variants `effect_2` and `effect_3`. | The action of the entry, on its node. ChDash asks the question without effect (17.7, step 1), and only a reason `approval_required` starts the flow ([access.md](access.md#approval-of-an-action)). |
 
 The profile has the member `mcp` (`path` = `/mcp`, `session_budget` = `true`: the action `mcp.session` lists the budget `requests`). It has the member `approval_calls`, because each action can need an approval. It has `mcp_call_multi` (the tool `export_query` needs two permissions, so the cases U96 and U97 run). It has no `use_multi` and no tool that asks for input. The reasons are:
@@ -140,7 +140,7 @@ The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-2
 
 ## Result of 2026-11-12: the three variants
 
-The run used the static release binary of the branch `feat/alignment`, built with `tests/smoke/Dockerfile.release`, the script `tests/conformance/run.sh` and the runner of the ProcurAuth lot S7 (commit `48f3d3a`). Each variant ran in strict mode. The cases of the approvals are required: U30 and U100 to U117.
+The run used the static release binary of the branch `feat/alignment`, built with `tests/smoke/Dockerfile.release`, the script `tests/conformance/run.sh` and the runner of ProcurAuth at commit `74f5495` (lots S7 and PS1). Each variant ran in strict mode. The cases of the approvals are required: U30 and U100 to U117.
 
 | Result | Default | Full | Lean |
 |---|---|---|---|
@@ -152,7 +152,7 @@ The cases U96 and U97 pass: the profile has `mcp_call_multi` (`export_query`). T
 
 | Case | Reason |
 |---|---|
-| U34, U35 | The profile has no `use_multi`. ChDash has no HTTP route that is one use with two required permissions in one request: the stream of an export needs a token that a run made, and a case sends one request. The rule is tested on a tool by U96 and U97. |
+| U34, U35 | The profile has no `use_multi`. ChDash has no HTTP route that is one use with two required permissions in one request: the stream of an export needs a token that a run made, and a case sends one request. The rule is tested on a tool by U96 and U97. The member `context.permission_only` of the other permission (the cases U34 and U35 check it for an HTTP route) is tested by `tests/native/approval_test.cpp`, `tests/native/access_test.cpp` and `tests/backend-functional/test_approval.py`. |
 | U117 | ChDash has no tool that asks for input (`mcp_call_input`). |
 
 The runner has no profile for the mode `keys`: the keys of the page are tested by `tests/native/approval_test.cpp` and by `tests/backend-functional/test_approval_keys.py`. The profile of 1.4.0 hid two defects. Its configuration made the library read-only and turned on the usage with `all_keys`, so U111 passed with actions that had no tool in other configurations. The variants close this gap.

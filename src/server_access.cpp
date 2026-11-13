@@ -492,7 +492,12 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
       actions.push_back("query.run.write");
       std::vector<AccessQuestion> questions;
       for (const auto& host : access_host_ids()) {
-        for (const char* action : actions) questions.push_back(AccessQuestion{action, access_host_resource(cfg_.access.audience, host)});
+        for (const char* action : actions) {
+          AccessQuestion question{action, access_host_resource(cfg_.access.audience, host)};
+          // The run is an other permission of the use query.export (ProcurAuth 5.5a).
+          question.permission_only = rule.kind == AccessRuleKind::Export && std::string_view(action) != "query.export";
+          questions.push_back(std::move(question));
+        }
       }
       const auto decisions = access_decide(questions);
       bool export_somewhere = rule.kind != AccessRuleKind::Export;
@@ -582,8 +587,11 @@ bool Server::check_rule(const AccessRule& rule, const httplib::Request& req, htt
     }
     case AccessRuleKind::Export: {
       // An export runs SQL: it needs query.export and, as a run, query.run.read or query.run.write, all on the host of the export.
-      const auto decisions = access_decide({AccessQuestion{"query.export", resource}, AccessQuestion{"query.run.read", resource},
-                                            AccessQuestion{"query.run.write", resource}});
+      // The run is an other permission of the use query.export (ProcurAuth 5.5a): its questions have context.permission_only.
+      AccessQuestion run_read{"query.run.read", resource};
+      AccessQuestion run_write{"query.run.write", resource};
+      run_read.permission_only = run_write.permission_only = true;
+      const auto decisions = access_decide({AccessQuestion{"query.export", resource}, run_read, run_write});
       if (refuse_export(res, decisions, !body_read && is_write_method(req.method))) return true;
       state.read_only = !decisions[2].allowed;
       state.ceilings = export_ceilings(decisions);
@@ -862,7 +870,10 @@ bool Server::access_check_export_stream(httplib::Response& res, const std::strin
   // other permissions of the use (ProcurAuth 5.5a): they are asked without context.usage. The action of the use, query.export, is asked
   // later with context.usage (access_use_export), when the download starts.
   const AccessResource resource = access_resource_of(host_id, std::string());
-  const auto decisions = access_decide({AccessQuestion{"query.run.read", resource}, AccessQuestion{"query.run.write", resource}});
+  AccessQuestion read{"query.run.read", resource};
+  AccessQuestion write{"query.run.write", resource};
+  read.permission_only = write.permission_only = true;
+  const auto decisions = access_decide({read, write});
   if (!decisions[0].allowed && !decisions[1].allowed) {
     refuse_decision(res, access_refusal_of(decisions), "query.run.read");
     return false;

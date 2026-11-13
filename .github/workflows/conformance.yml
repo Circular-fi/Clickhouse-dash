@@ -48,9 +48,10 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           repository: SCcagg5/procurauth
-          # ProcurAuth main of 2026-11-10 (lot S7, merged): the runner with Mcp-Method and Mcp-Name, the rule of
-          # use_ceiling (U37), and the cases of the approvals for each action (U30 and U100 to U117, the profile key approval_calls).
-          ref: 48f3d3abd977f2bd4a49ab856f000c77cf396b4e
+          # ProcurAuth main of 2026-11-13 (lots S7 and PS1, merged): the runner with Mcp-Method and Mcp-Name, the rule of
+          # use_ceiling (U37), the cases of the approvals for each action (U30 and U100 to U117, the profile key approval_calls),
+          # and context.permission_only for the other permissions (protocol 5.5a, the cases U34, U35, D95, D96).
+          ref: 74f5495d74d475c2bb7fa074ff7c7f79517436fb
           path: procurauth
           persist-credentials: false
 

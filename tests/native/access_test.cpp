@@ -763,6 +763,26 @@ void test_pdp_body_and_answer() {
   rapidjson::Document one_subtree;
   one_subtree.Parse(single.c_str(), single.size());
   CHECK(one_subtree["context"]["match"].GetString() == std::string("subtree"));
+  // ProcurAuth 5.5a: the question of an other permission has context.permission_only = true, alone or with the match "subtree", in a batch and
+  // alone. The question of the use (and any other question) has no such member.
+  AccessQuestion other_permission{"query.run.read", access_host_resource("db", "prod")};
+  other_permission.permission_only = true;
+  AccessQuestion other_subtree{"query.run.read", access_host_resource("db", "prod"), AccessMatch::Subtree};
+  other_subtree.permission_only = true;
+  const std::string marked = PdpClient::request_body("alice", {other_permission, other_subtree, AccessQuestion{"query.export", access_host_resource("db", "prod")}});
+  rapidjson::Document marked_doc;
+  marked_doc.Parse(marked.c_str(), marked.size());
+  CHECK(marked_doc["evaluations"][0]["context"]["permission_only"].IsBool() && marked_doc["evaluations"][0]["context"]["permission_only"].GetBool());
+  CHECK(!marked_doc["evaluations"][0]["context"].HasMember("match") && !marked_doc["evaluations"][0]["context"].HasMember("usage"));
+  CHECK(marked_doc["evaluations"][1]["context"]["permission_only"].GetBool() && marked_doc["evaluations"][1]["context"]["match"].GetString() == std::string("subtree"));
+  CHECK(!marked_doc["evaluations"][2].HasMember("context"));
+  const std::string marked_one = PdpClient::request_body("alice", {other_permission});
+  rapidjson::Document marked_one_doc;
+  marked_one_doc.Parse(marked_one.c_str(), marked_one.size());
+  CHECK(marked_one_doc["context"]["permission_only"].GetBool() && !marked_one_doc["context"].HasMember("approval") && !marked_one_doc["context"].HasMember("usage"));
+  // The question of the use never has the member, with or without a usage.
+  const std::string use_body = PdpClient::use_request_body("alice", AccessQuestion{"query.export", access_host_resource("db", "prod")});
+  CHECK(use_body.find("permission_only") == std::string::npos);
   // A host names the service.
   const auto& host = doc["evaluations"][1]["resource"];
   CHECK(host["type"].GetString() == std::string("host") && host["id"].GetString() == std::string("prod"));
@@ -1066,6 +1086,25 @@ void test_pdp_cache_answers() {
   fake->answer = ok(R"({"decision":false})");
   const AccessDecision kept = ask(0);
   CHECK(std::string(kept.source) == "cache" && kept.allowed && kept.limits.size() == 1 && kept.limits.at("max_rows") == 1000);
+  // The answer to a question with permission_only (5.5a) ignores `confirm`: it never serves the same question without the member, and the
+  // other way round. A client of its own keeps the counts of the cache below.
+  {
+    std::vector<FakeTransport::Call> marked_calls;
+    auto marked_transport = std::make_unique<FakeTransport>(&marked_calls);
+    FakeTransport* marked_fake = marked_transport.get();
+    PdpClient marked_client(options, std::move(marked_transport));
+    AccessQuestion plain = q(7);
+    AccessQuestion marked = q(7);
+    marked.permission_only = true;
+    marked_fake->answer = ok(R"({"decision":false})");
+    CHECK(!marked_client.decide("alice", {plain}, PdpCallContext{})[0].allowed);
+    marked_fake->answer = ok(R"({"decision":true})");
+    const AccessDecision first = marked_client.decide("alice", {marked}, PdpCallContext{})[0];
+    CHECK(first.allowed && std::string(first.source) == "pdp");  // not the kept answer of the plain question
+    CHECK(std::string(marked_client.decide("alice", {marked}, PdpCallContext{})[0].source) == "cache");
+    CHECK(!marked_client.decide("alice", {plain}, PdpCallContext{})[0].allowed);  // the plain answer stays apart
+    CHECK_EQ(marked_client.cached_entries(), size_t(2));
+  }
   // An answer with units 1 is never kept; units 0 is kept.
   fake->answer = ok(R"({"decision":true,"context":{"usage":{"units":1}}})");
   ask(1);

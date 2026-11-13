@@ -37,6 +37,9 @@ the headers that matter and the body). The tests set its answers and read what i
                              The PDP follows 6.11: a request with context.usage at any level that is not one evaluation (an
                              Access Evaluation request, or an Access Evaluations request without items), or with "match": "subtree",
                              or with units other than 1, gets HTTP 400 and counts nothing.
+                             The PDP follows 5.5a: a question with "context": {"permission_only": true} is the question of an other permission
+                             of an operation. It gets a plain decision: the approval gate never answers it (confirm is ignored). The member
+                             with another value, or with context.usage or context.approval, gets HTTP 400 (invalid_request in a batch item).
 POST /control/approval   {"actions": ["query.run.write", ...] or ["*"], "submit": {"status": 409, "error": "no_device"}, "max_command_bytes": 16384}
                              the approval gate of ProcurAuth section 17 (docs/access.md, "Approval of an action"). An action in "actions"
                              needs an approval for each subject. A question without context.approval.effect gets approval_required; with an
@@ -179,6 +182,14 @@ def take_units(answer: dict, subject: dict, action: dict, out: dict) -> dict:
     return {"decision": True, "context": context}
 
 
+def permission_only_valid(context) -> bool:
+    """ProcurAuth 5.5a: context.permission_only has the only valid value true, and no context.usage and no context.approval with it.
+    A context without the member is valid."""
+    if not isinstance(context, dict) or "permission_only" not in context:
+        return True
+    return context["permission_only"] is True and "usage" not in context and "approval" not in context
+
+
 def decide(subject: dict, action: dict, resource: dict, context: dict | None = None) -> dict:
     """Return the AuthZEN answer of one evaluation: {"decision": bool}, with a context for an unknown subject, resource or match.
     A question with context.usage takes units from a true answer (take_units)."""
@@ -189,6 +200,8 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     match = context.get("match", "node") if isinstance(context, dict) else None
     if match not in ("node", "subtree"):
         return dict(INVALID_REQUEST)
+    if not permission_only_valid(context):
+        return dict(INVALID_REQUEST)
     if str((subject or {}).get("id", "")) in answer["unknown_subjects"]:
         return dict(UNKNOWN_SUBJECT)
     chain = chain_of(resource, answer["parents"] or {})
@@ -198,7 +211,9 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     if isinstance(fixed, dict):
         return json.loads(json.dumps(fixed))
     granted = allowed(answer, subject, action, chain, match == "subtree")
-    if granted and match == "node":
+    # 5.5a, 17.1: the question of an other permission has context.permission_only. The PDP ignores `confirm` for it: a plain decision.
+    permission_only = isinstance(context, dict) and context.get("permission_only") is True
+    if granted and match == "node" and not permission_only:
         gated = approval_gate(subject, action, chain, context)
         if gated is not None:
             return gated
@@ -471,6 +486,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(int(answer["search"]["status"]), {"error": "test search status"})
             return self.reply(200, search(answer, body), echo)
         if self.path == "/access/v1/evaluation":
+            if not permission_only_valid(body.get("context")):
+                # 5.5a: a bad context.permission_only is HTTP 400 for one evaluation (invalid_request in an item of a batch).
+                return self.reply(400, {"error": "context.permission_only is not valid here"}, echo)
             return self.reply(200, decide(body.get("subject"), body.get("action"), body.get("resource"), body.get("context")), echo)
         out = []
         for item in body.get("evaluations") or []:

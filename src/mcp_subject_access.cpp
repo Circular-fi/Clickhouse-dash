@@ -176,12 +176,15 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
   bool scope_needs_approval = false;
   const auto other_stop = [&]() -> std::optional<AccessDecision> {
     if (!needs_other) return std::nullopt;
-    std::vector<AccessDecision> other = decide_(subject, {AccessQuestion{"query.run.read", question->resource}});
+    AccessQuestion scope{"query.run.read", question->resource};
+    scope.permission_only = true;  // 5.5a: the PDP ignores `confirm` for it and answers a plain decision
+    std::vector<AccessDecision> other = decide_(subject, {scope});
     other.resize(1);
     if (other.front().failed) return other.front();
     if (!other.front().allowed) {
-      // ProcurAuth 5.5a, spec question 53: the approval follows the action of the use alone (query.export). The other permission only limits the
-      // scope: a reason of 17.1 for it can start no approval. The call is refused with a tool error that says so (never an approval).
+      // ProcurAuth 5.5a (spec question 53): the approval follows the action of the use alone (query.export). The question carries
+      // context.permission_only, so a PDP of the protocol never gives a reason of 17.1 for it. A PDP that does is not valid (10.3): the call is
+      // refused with a tool error that says so, and never starts an approval.
       scope_needs_approval = pdp_reason_is_approval(other.front().reason);
       AccessDecision denied;
       denied.source = "pdp";

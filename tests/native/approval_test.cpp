@@ -1893,6 +1893,8 @@ void test_export_other_permission_order_and_ceilings() {
   Script script;
   McpApprovalGate gate(make_config(), script.ports());
   std::vector<std::string> asked;
+  bool scope_marked = true;  // every question of the other permission has permission_only (5.5a)
+  bool use_marked = false;   // the question of the use never has it
   AccessDecision other = yes(0);
   other.limits["max_rows_read"] = 500;
   other.limits["max_duration"] = 7;
@@ -1905,12 +1907,14 @@ void test_export_other_permission_order_and_ceilings() {
         std::vector<AccessDecision> out;
         for (const auto& q : questions) {
           asked.push_back(q.action);
+          scope_marked = scope_marked && q.permission_only;
           out.push_back(q.action == "query.run.read" ? other : yes(0));
         }
         return out;
       },
       [&](const std::string&, const AccessQuestion& q) {
         asked.push_back(q.action + "+usage");
+        use_marked = use_marked || q.permission_only;
         return own;
       });
   access.set_approval(&gate);
@@ -1930,10 +1934,11 @@ void test_export_other_permission_order_and_ceilings() {
     CHECK_EQ(asked.size(), size_t(2));
     CHECK(asked.size() == 2 && asked[0] == "query.run.read" && asked[1] == "query.export+usage");
     CHECK(info.ceilings.max_rows_read == 500 && info.ceilings.max_duration_seconds == 7 && info.ceilings.max_rows == 50);
+    CHECK(scope_marked && !use_marked);
   }
   {
-    // Spec question 53: the approval follows the action of the use alone. A reason of 17.1 for the other permission starts no approval: the call is
-    // refused with a tool error, and the PDP gets no question with an effect.
+    // Spec question 53: the approval follows the action of the use alone. A PDP of the protocol never gives a reason of 17.1 for a question with
+    // permission_only. A PDP that does (a fault) starts no approval: the call is refused with a tool error, and the PDP gets no question with an effect.
     asked.clear();
     other.limits.clear();
     other.allowed = false;

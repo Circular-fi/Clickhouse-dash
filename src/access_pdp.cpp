@@ -60,9 +60,15 @@ void write_action(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_vie
 }
 
 // The context of a question: {"match": "subtree"} for the navigation, else empty (the PDP takes "node"). The question of a use has
-// {"usage": {"units": 1}} (ProcurAuth 6.4) and never the match "subtree" (6.11).
-void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match, bool usage = false, const std::string& effect = std::string()) {
+// {"usage": {"units": 1}} (ProcurAuth 6.4) and never the match "subtree" (6.11). The question of an other permission of the operation has
+// {"permission_only": true} (5.5a), and never usage or an effect.
+void write_context(rapidjson::Writer<rapidjson::StringBuffer>& w, AccessMatch match, bool usage = false, const std::string& effect = std::string(),
+                   bool permission_only = false) {
   w.StartObject();
+  if (permission_only) {
+    w.Key("permission_only");
+    w.Bool(true);
+  }
   if (match == AccessMatch::Subtree) {
     w.Key("match");
     w.String("subtree");
@@ -92,10 +98,10 @@ void write_evaluation_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const 
   write_action(w, question.action);
   w.Key("resource");
   write_resource(w, question.resource);
-  // AuthZEN 1.0, 7.1: the context of an item replaces the default. Only a question of the navigation has one.
-  if (question.match == AccessMatch::Subtree) {
+  // AuthZEN 1.0, 7.1: the context of an item replaces the default. Only a question of the navigation or a question of an other permission has one.
+  if (question.match == AccessMatch::Subtree || question.permission_only) {
     w.Key("context");
-    write_context(w, question.match);
+    write_context(w, question.match, false, std::string(), question.permission_only);
   }
   w.EndObject();
 }
@@ -388,7 +394,7 @@ std::string PdpClient::request_body(const std::string& subject, const std::vecto
     w.Key("resource");
     write_resource(w, questions.front().resource);
     w.Key("context");
-    write_context(w, questions.front().match);
+    write_context(w, questions.front().match, false, std::string(), questions.front().permission_only);
   } else {
     // AuthZEN 1.0, 7.1: the subject at the top is the default of each evaluation.
     w.Key("evaluations");
@@ -433,6 +439,8 @@ std::string PdpClient::cache_key(const std::string& subject, const AccessQuestio
   key.append(question.action).push_back('\x1f');
   key.append(path).push_back('\x1f');
   key.append(match);
+  // The answer to the question of an other permission (5.5a) ignores `confirm`: it never serves a question without the member.
+  if (question.permission_only) key.append("|permission_only");
   return key;
 }
 
