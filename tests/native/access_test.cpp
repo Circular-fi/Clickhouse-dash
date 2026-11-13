@@ -34,9 +34,11 @@ extern "C" {
 #include <cstdio>
 #include <chrono>
 #include <cstring>
+#include <iostream>
 #include <map>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <tuple>
 #include <utility>
 #include <string>
@@ -1104,6 +1106,26 @@ void test_pdp_cache_answers() {
     CHECK(std::string(marked_client.decide("alice", {marked}, PdpCallContext{})[0].source) == "cache");
     CHECK(!marked_client.decide("alice", {plain}, PdpCallContext{})[0].allowed);  // the plain answer stays apart
     CHECK_EQ(marked_client.cached_entries(), size_t(2));
+    // The log line access.decision has the field permission_only for the marked question only: present and true, never false.
+    {
+      std::ostringstream captured;
+      std::streambuf* const previous = std::cerr.rdbuf(captured.rdbuf());
+      AccessQuestion logged_plain = q(8);
+      AccessQuestion logged_marked = q(8);
+      logged_marked.permission_only = true;
+      marked_fake->answer = ok(R"({"decision":true})");
+      marked_client.decide("alice", {logged_marked}, PdpCallContext{});
+      marked_client.decide("alice", {logged_plain}, PdpCallContext{});
+      std::cerr.rdbuf(previous);
+      std::vector<std::string> lines;
+      std::istringstream in(captured.str());
+      for (std::string line; std::getline(in, line);) {
+        if (line.find("\"event\":\"access.decision\"") != std::string::npos) lines.push_back(line);
+      }
+      CHECK_EQ(lines.size(), size_t(2));
+      CHECK(lines.size() == 2 && lines[0].find("\"permission_only\":true") != std::string::npos);
+      CHECK(lines.size() == 2 && lines[1].find("permission_only") == std::string::npos);
+    }
   }
   // An answer with units 1 is never kept; units 0 is kept.
   fake->answer = ok(R"({"decision":true,"context":{"usage":{"units":1}}})");

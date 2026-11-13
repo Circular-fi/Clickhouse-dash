@@ -51,6 +51,7 @@ jobs:
           # ProcurAuth main of 2026-11-13 (lots S7 and PS1, merged): the runner with Mcp-Method and Mcp-Name, the rule of
           # use_ceiling (U37), the cases of the approvals for each action (U30 and U100 to U117, the profile key approval_calls),
           # and context.permission_only for the other permissions (protocol 5.5a, the cases U34, U35, D95, D96).
+          # TODO(SM1): after the merge of lot/SM1 into procurauth main, pin the merge commit; until then U34 and U35 skip
           ref: 74f5495d74d475c2bb7fa074ff7c7f79517436fb
           path: procurauth
           persist-credentials: false

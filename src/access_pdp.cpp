@@ -1004,6 +1004,8 @@ std::vector<AccessDecision> PdpClient::decide(const std::string& subject, const 
     // The error that the PDP gives for the item (AuthZEN 1.0, l.866-903).
     if (out[i].error_status) fields.emplace_back("error_status", *out[i].error_status);
     if (!out[i].error_message.empty()) fields.emplace_back("error_message", out[i].error_message);
+    // The question of an other permission (5.5a): the field is present only when it is true, as `usage` and `approval` are.
+    if (questions[i].permission_only) fields.emplace_back("permission_only", true);
     log_event(LogLevel::Info, "access.decision", fields);
   }
   return out;

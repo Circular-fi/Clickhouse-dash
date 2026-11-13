@@ -149,8 +149,9 @@ const std::vector<McpToolInfo>& mcp_approval_tools() {
 
 const char* mcp_approval_description_suffix() {
   return " The owner of the key can need to approve this call: the policy decision point decides. Then the tool does not run. It gives an action "
-         "with the status awaiting_approval and executed false. After the approval, call the tool again with the same arguments. Read the "
-         "verdict with the tool get_action_status.";
+         "with the status awaiting_approval and executed false. After the approval, call the tool again with the same arguments and with exactly one "
+         "of approval_ref, lease_s and until. A call without one of them gets invalid_argument, also in this second call. Read the verdict with the "
+         "tool get_action_status.";
 }
 
 const McpToolInfo* mcp_find_approval_tool(std::string_view name) {
@@ -330,10 +331,11 @@ std::string mcp_with_approval_properties(const std::string& schema_json, const M
   const int64_t lease_max = bounds.lease_max_seconds ? static_cast<int64_t>(std::min<uint64_t>(*bounds.lease_max_seconds, INT64_MAX)) : -1;
   const int64_t wait_max = bounds.wait_max_seconds ? static_cast<int64_t>(std::min<uint64_t>(*bounds.wait_max_seconds, INT64_MAX)) : -1;
   add("approval_ref", "string",
-      "Approval control: the reference that the owner gave with the intent of the agent. Give at most one of approval_ref, lease_s and until, and only when the tool asks for an approval.", -1);
+      "Approval control: the reference that the owner gave with the intent of the agent. Give exactly one of approval_ref, lease_s and until when the tool asks for an approval, and give it again when you call the tool again after the approval.", -1);
   add("lease_s", "integer",
       "Approval control: how many seconds you wait for the approval, a whole number from " + std::to_string(lease_min) +
-          (lease_max >= 0 ? " to " + std::to_string(lease_max) : std::string()) + ".",
+          (lease_max >= 0 ? " to " + std::to_string(lease_max) : std::string()) +
+          ". Give one of approval_ref, lease_s and until in each call of the tool that needs an approval, also in the call after the approval.",
       lease_min, lease_max);
   add("until", "string", "Approval control: the time until which you wait for the approval, as RFC 3339.", -1);
   add("wait_s", "integer", "The most seconds that this call waits for the verdict after it submitted the request. The server bounds it.", 0, wait_max);

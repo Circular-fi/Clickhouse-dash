@@ -1705,6 +1705,13 @@ void test_gate_published_bounds() {
     CHECK(doc["properties"]["wait_s"]["maximum"].GetInt64() == 15);
     const rapidjson::Document plain = args_of(mcp_with_approval_properties(R"({"type":"object","properties":{}})"));
     CHECK(plain["properties"]["lease_s"]["minimum"].GetInt64() == 1 && !plain["properties"]["lease_s"].HasMember("maximum"));
+    // The description of the control arguments and the suffix of each tool tell that the call after the approval repeats one control argument.
+    const auto has = [](const std::string& text, const char* part) { return text.find(part) != std::string::npos; };
+    for (const char* name : {"approval_ref", "lease_s"}) {
+      CHECK(has(doc["properties"][name]["description"].GetString(), "after the approval"));
+    }
+    const std::string suffix = mcp_approval_description_suffix();
+    CHECK(has(suffix, "the same arguments and with exactly one of approval_ref, lease_s and until"));
   }
 }
 

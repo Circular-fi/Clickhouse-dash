@@ -83,6 +83,7 @@ struct AccessQuestion {
   // question has no context.approval.
   std::string approval_effect;
   // ProcurAuth 5.5a: true for a question about a permission that is not the use action of the operation (an other action or an other resource).
+  // (The log line access.decision has the field permission_only, present only when it is true.)
   // The question has context.permission_only = true, no usage and no effect. The PDP ignores `confirm` for it. Its answer is never cached for a
   // question without the member.
   bool permission_only = false;
