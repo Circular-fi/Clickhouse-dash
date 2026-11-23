@@ -32,6 +32,8 @@ image="${CHDASH_TEST_IMAGE:-debian:trixie-slim}"
 # The image that runs the chdash binary. The default is the image of the runner. A binary that the Alpine test image builds needs an Alpine image.
 app_image="${CHDASH_APP_IMAGE:-$image}"
 pa_dir="$(realpath "${PROCURAUTH_DIR:-$repo/../procurauth}" 2>/dev/null || true)"
+# The commit of ProcurAuth that the workflow conformance.yml checks out: the release v1.1 (docs/conformance.md, "The commit of the runner").
+pinned_commit="c820b4ac0e37c4769394876105fd549a6c8b38cc"
 expected_file="${CONFORMANCE_EXPECTED:-$here/expected.txt}"
 for tool in docker openssl curl python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "$tool is required" >&2; exit 2; }
@@ -66,6 +68,13 @@ else
     cp /t/release/access-conformance /out/access-conformance || die "the runner binary is not in the volume $target_volume"
 fi
 chmod 0755 "$work/access-conformance"
+# A local run uses the commit of PROCURAUTH_DIR. Another commit than the pin can give another result: the script says it, and continues.
+if [[ -n "$pa_dir" ]] && command -v git >/dev/null 2>&1; then
+  pa_head="$(git -C "$pa_dir" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$pa_head" && "$pa_head" != "$pinned_commit" ]]; then
+    echo "WARNING: PROCURAUTH_DIR is at the commit $pa_head, not at the pinned commit $pinned_commit" >&2
+  fi
+fi
 [[ -n "$pa_dir" && -d "$pa_dir/crates/access-conformance/examples" ]] || die "PROCURAUTH_DIR does not hold the examples of the runner"
 
 # --- the files of the run -------------------------------------------------------------------------------------------------------

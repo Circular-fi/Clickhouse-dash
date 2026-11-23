@@ -80,6 +80,14 @@
         "path": "/api/query-library?host_id=conf",
         "action": "library.read"
       },
+      "read_health": {
+        "method": "GET",
+        "path": "/livez"
+      },
+      "use_no_action": {
+        "method": "GET",
+        "path": "/metrics"
+      },
       "mcp_call_plain": {
         "headers": {
           "Mcp-Method": "tools/call",

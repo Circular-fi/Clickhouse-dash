@@ -45,13 +45,13 @@ tests/conformance/run.sh /path/to/chdash
 
 ### The commit of the runner
 
-The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `1bdfe6199209b80e828b4cffd6e9d3052289f775` (main of 2026-11-13). This is the commit of the lot SM1. It comes after the commits of the lots S7 and PS1. It is a normal commit, not a merge commit. This commit has the cases of the approvals for each action (U30 and U100 to U117), the profile key `approval_calls` and the member `context.permission_only` (protocol 5.5a). The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
+The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `c820b4ac0e37c4769394876105fd549a6c8b38cc`. This is the commit of the tag `v1.1`, the release 1.1 of ProcurAuth (2026-11-23). The data of this release has 245 cases: 127 for a PEP (the series U), 98 for a PDP and 20 for an edge. The runner of this commit has the cases U118 to U127 and the operations `read_health` and `use_no_action` of the profile. The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
 
 1. Run `tests/conformance/run.sh` with `PROCURAUTH_DIR` on the new commit and `CONFORMANCE_STRICT=1`.
 2. Update `tests/conformance/expected.txt` and the result in this document.
-3. Put the full SHA of the new commit in `ref` of the step "Checkout ProcurAuth" of the workflow, and in this section.
+3. Put the full SHA of the new commit in `ref` of the step "Checkout ProcurAuth" of the workflow, in `pinned_commit` of `tests/conformance/run.sh`, and in this section.
 
-A local run uses the commit that `PROCURAUTH_DIR` holds. Use the same commit as the workflow.
+A local run uses the commit that `PROCURAUTH_DIR` holds. Use the same commit as the workflow. The script holds the pinned commit too (`pinned_commit`), and it writes a warning when `PROCURAUTH_DIR` is at another commit.
 
 ### Exit code
 
@@ -125,6 +125,8 @@ Each case uses an operation. The profile maps it to a request of ChDash:
 | `mcp_call_plain` | `POST /mcp`, `tools/call` of `list_databases` with the argument `host` = `conf` | `explorer.read` on the host `conf`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 | `mcp_call_budget` | `POST /mcp`, `tools/call` of `run_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.run.read` on the host `conf`, with `context.usage`. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
 | `mcp_call_multi` | `POST /mcp`, `tools/call` of `export_query` with the arguments `host` = `conf` and `sql` = `SELECT 1` | `query.export` on the host `conf`, with `context.usage`. The tool needs a second permission, `query.run.read` on the host: ChDash asks it first, with `context.permission_only` and without usage ([access.md](access.md#approval-of-an-action)). The cases U96 and U97 run it. The profile adds the headers `Mcp-Method` and `Mcp-Name`. |
+| `read_health` | `GET /livez`, with no token. | A health probe: no token and no question (ProcurAuth 10.1c, case U127). |
+| `use_no_action` | `GET /metrics` | A route that runs no action: `access` on the service, with no usage and no approval (ProcurAuth 10.1c, case U127). The profile uses `/metrics` because a build without the embedded files serves no file of `/static/`. A file of `/static/` asks the same question ([access.md](access.md#routes-with-no-action)). |
 | `mcp_call_approval` | `POST /mcp`, `tools/call` of the tool of one action. It is not in `operations`: the member `approval_calls` has one entry for each action that a tool uses. The runner runs each case of the approvals once for each entry. It adds the control arguments (`lease_s`, `approval_ref`, `wait_s`) and changes the arguments for the variants `effect_2` and `effect_3`. | The action of the entry, on its node. ChDash asks the question without effect (17.7, step 1), and only a reason `approval_required` starts the flow ([access.md](access.md#approval-of-an-action)). |
 
 The profile has the member `mcp` (`path` = `/mcp`, `session_budget` = `true`: the action `mcp.session` lists the budget `requests`). It has the member `approval_calls`, because each action can need an approval. It has `mcp_call_multi` (the tool `export_query` needs two permissions, so the cases U96 and U97 run). It has no `use_multi` and no tool that asks for input. The reasons are:
@@ -138,15 +140,17 @@ The `op` of an entry is the `op` that ChDash builds ([access.md](access.md#the-o
 
 The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. Since the ProcurAuth commit `85b695d` (2026-11-07), each MCP request that a case writes has them too. With an older runner, the 11 MCP cases U18, U23, U26, U29, U31, U88, U89, U91, U94, U95 and U98 fail for this reason only.
 
-## Result of 2026-11-13: the three variants
+## Result of 2026-11-23: the three variants
 
-The run used the static release binary of ChDash 1.5.1 (main, commit `4091a36`), built with `tests/smoke/Dockerfile.release`. It used the script `tests/conformance/run.sh` and the runner of ProcurAuth at commit `1bdfe61` (the lot SM1, after the lots S7 and PS1). Each variant ran in strict mode. The cases of the approvals are required: U30 and U100 to U117.
+The run used a build of the branch `phase2-2026-11` (after the release 1.5.1), RelWithDebInfo, without sanitizers and without the embedded files. The build used the test toolchain of `tests/Dockerfile.sanitize`. It used the script `tests/conformance/run.sh` and the runner of the ProcurAuth release v1.1 (commit `c820b4a`). Each variant ran in strict mode. The cases of the approvals are required: U30, U100 to U117 and U121 to U125.
 
 | Result | Default | Full | Lean |
 |---|---|---|---|
-| Run | 117 cases: 116 passed, 0 failed, 1 skipped | 117 cases: 116 passed, 0 failed, 1 skipped | 117 cases: 116 passed, 0 failed, 1 skipped |
+| Run | 127 cases: 126 passed, 0 failed, 1 skipped | 127 cases: 126 passed, 0 failed, 1 skipped | 127 cases: 126 passed, 0 failed, 1 skipped |
 | Actions with a call in `approval_calls` | 9 | 11 | 7 |
 | Expected failures (`tests/conformance/expected.txt`) | none | none | none |
+
+The new cases U118 to U127 pass in each variant. U119 runs, because the profile has two signing keys. U126 runs the steps of a tool (`mcp_call_multi`): the profile has no `use_multi`, so the runner skips the steps of a route. U127 uses `read_health` (`/livez`) and `use_no_action` (`/metrics`). Before the change of the routes with no action, U127 failed: `/metrics` asked no question.
 
 The cases U96 and U97 pass: the profile has `mcp_call_multi` (`export_query`). The skipped cases are these:
 

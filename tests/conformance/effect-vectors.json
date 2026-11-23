@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "description": "Test vectors for the effect of protocol 17.3. A vector of the group V01 gives the canonical text and the effect of its input. A vector of the group V02 has an input that a PEP and a PDP refuse with the error invalid_op.",
+  "description": "Test vectors for the effect of protocol 17.3 and 17.3a. The vectors read-with-default, read-empty-op-on-node and navigation-page show the op of a read, of an empty op and of a navigation. A vector of the group V01 gives the canonical text and the effect of its input. A vector of the group V02 has an input that a PEP and a PDP refuse with the error invalid_op.",
   "vectors": [
     {
       "id": "member-order-sorted",
@@ -196,6 +196,45 @@
       },
       "canonical": "{\"action\":\"data.write\",\"op\":{\"tool\":\"list\"},\"resource\":\"host:prod/database:a%2Fb\",\"service\":\"datastore\",\"v\":1}",
       "effect": "sha256:e431b56eb0769ca0b4c9fa58a5a85aa6ba8bfe9d8e5afbd08938a96fc24cdfd8"
+    },
+    {
+      "id": "read-with-default",
+      "group": "V01",
+      "title": "A read of a table. The op has the default number of rows as an integer, and the name of the tool.",
+      "input": {
+        "service": "datastore",
+        "action": "data.read",
+        "resource": "host:prod/database:test2/table:orders",
+        "op": {"tool":"read_rows","host":"prod","database":"test2","table":"orders","limit":100}
+      },
+      "canonical": "{\"action\":\"data.read\",\"op\":{\"database\":\"test2\",\"host\":\"prod\",\"limit\":100,\"table\":\"orders\",\"tool\":\"read_rows\"},\"resource\":\"host:prod/database:test2/table:orders\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:541238285dea4ae12c9b3f144d16ea45e93467b6ac547ccb032b5313899b7682"
+    },
+    {
+      "id": "read-empty-op-on-node",
+      "group": "V01",
+      "title": "A read with no argument that decides what it does has the empty op. The effect binds the service, the action and the resource only.",
+      "input": {
+        "service": "datastore",
+        "action": "data.inspect",
+        "resource": "host:prod/database:test2",
+        "op": {}
+      },
+      "canonical": "{\"action\":\"data.inspect\",\"op\":{},\"resource\":\"host:prod/database:test2\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:e76fcb236e627a998cd4bfe0b4d4b2bd70c97d0af68bcbdc124486efc674c666"
+    },
+    {
+      "id": "navigation-page",
+      "group": "V01",
+      "title": "A navigation. The op has the parent node, the type of the children, a search text and the page size.",
+      "input": {
+        "service": "datastore",
+        "action": "data.inspect",
+        "resource": "",
+        "op": {"tool":"list_children","parent":"host:prod","type":"database","q":"test","limit":50}
+      },
+      "canonical": "{\"action\":\"data.inspect\",\"op\":{\"limit\":50,\"parent\":\"host:prod\",\"q\":\"test\",\"tool\":\"list_children\",\"type\":\"database\"},\"resource\":\"\",\"service\":\"datastore\",\"v\":1}",
+      "effect": "sha256:6492975bd3d6cee66c04f2a43b3750aa2c3573d901b275be101921c569716c62"
     },
     {
       "id": "float-fraction",

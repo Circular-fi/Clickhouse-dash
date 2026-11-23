@@ -4,10 +4,11 @@ name: Conformance
 # The job builds the binary as the release does, and runs tests/conformance/run.sh. The script fails only for a failed case that
 # tests/conformance/expected.txt does not list.
 # The ProcurAuth repository is public: the job checks it out without a secret.
-# The expected result (2026-11-13, release 1.5.1), for each of the three variants: 117 cases, 116 passed, 0 failed, 1 skipped. tests/conformance/expected.txt is empty.
+# The expected result (2026-11-23, the runner of the ProcurAuth release v1.1), for each of the three variants: 127 cases, 126 passed, 0 failed,
+# 1 skipped. tests/conformance/expected.txt is empty.
 # The job checks out one fixed commit of ProcurAuth (the `ref` below), so a change of the runner never changes the result alone.
 # To bump it: run tests/conformance/run.sh with PROCURAUTH_DIR on the new commit and CONFORMANCE_STRICT=1, update expected.txt, then put the
-# full SHA of the new commit in `ref` and in docs/conformance.md ("The commit of the runner").
+# full SHA of the new commit in `ref`, in pinned_commit of tests/conformance/run.sh and in docs/conformance.md ("The commit of the runner").
 # On request (Actions > Conformance > Run workflow), and on a pull request that changes the access code or the files of the run.
 on:
   workflow_dispatch:
@@ -48,11 +49,10 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           repository: SCcagg5/procurauth
-          # ProcurAuth main of 2026-11-13: the commit of the lot SM1, after the lots S7 and PS1 (a normal commit, not a merge commit).
-          # It has the runner with Mcp-Method and Mcp-Name, the rule of use_ceiling (U37), the cases of the approvals for each action
-          # (U30 and U100 to U117, the profile key approval_calls), and context.permission_only for the other permissions (protocol 5.5a,
-          # the cases U34, U35, D95, D96).
-          ref: 1bdfe6199209b80e828b4cffd6e9d3052289f775
+          # ProcurAuth release v1.1 of 2026-11-23: the commit of the tag v1.1 (a normal commit, not a merge commit). Its data has 127 cases for a
+          # PEP. It has the cases U118 to U127 (the form of iat, exp and nbf, kid, the codes of the approval API, permission_only, a route with
+          # no action) and the operations read_health and use_no_action of the profile.
+          ref: c820b4ac0e37c4769394876105fd549a6c8b38cc
           path: procurauth
           persist-credentials: false
 
