@@ -139,7 +139,9 @@ Each answer has an `X-Request-Id` header. When a proxy sets the `X-Request-Id` o
 
 ## Metrics
 
-`GET /metrics` gives the Prometheus text format (version 0.0.4). To remove the route, set `server.metrics = false`. The metrics name hosts and identities. They never show a URI, a user or a password. In the mode `open` of the `access` block, the route needs no identity token: do not expose it to the Internet. In the mode `authzen`, it needs the identity token and the action `access` on the service, because it runs no action (ProcurAuth 10.1c). A system of monitoring then reads it through the edge ([access.md](access.md#routes-with-no-action)). The health probes `/healthz`, `/livez` and `/readyz` need no token in each mode: a router must not publish them.
+`GET /metrics` gives the Prometheus text format (version 0.0.4). To remove the route, set `server.metrics = false`. The metrics name hosts and identities. They never show a URI, a user or a password.
+
+In the mode `open` of the `access` block, the route needs no identity token: do not expose it to the Internet. In the mode `authzen`, it needs the identity token and the action `access` on the service, because it runs no action (ProcurAuth 10.1c). Prometheus then reads it through the edge ([access.md](access.md#routes-with-no-action)). The health probes `/healthz`, `/livez` and `/readyz` need no token in each mode: a router must not publish them.
 
 | Metric | Type | What |
 |---|---|---|

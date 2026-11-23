@@ -45,11 +45,13 @@ tests/conformance/run.sh /path/to/chdash
 
 ### The commit of the runner
 
-The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `c820b4ac0e37c4769394876105fd549a6c8b38cc`. This is the commit of the tag `v1.1`, the release 1.1 of ProcurAuth (2026-11-23). The data of this release has 245 cases: 127 for a PEP (the series U), 98 for a PDP and 20 for an edge. The runner of this commit has the cases U118 to U127 and the operations `read_health` and `use_no_action` of the profile. The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
+The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `c820b4ac0e37c4769394876105fd549a6c8b38cc`. This is the commit of the tag `v1.1`, the release 1.1 of ProcurAuth (2026-11-23). The data of this release has 245 cases: 127 for a PEP (the series U), 98 for a PDP and 20 for an edge.
+
+The runner of this commit has the cases U118 to U127 and the operations `read_health` and `use_no_action` of the profile. The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
 
 1. Run `tests/conformance/run.sh` with `PROCURAUTH_DIR` on the new commit and `CONFORMANCE_STRICT=1`.
 2. Update `tests/conformance/expected.txt` and the result in this document.
-3. Put the full SHA of the new commit in `ref` of the step "Checkout ProcurAuth" of the workflow, in `pinned_commit` of `tests/conformance/run.sh`, and in this section.
+3. Put the full SHA of the new commit in the workflow (`ref` of the step "Checkout ProcurAuth"), in `tests/conformance/run.sh` (`pinned_commit`) and in this section.
 
 A local run uses the commit that `PROCURAUTH_DIR` holds. Use the same commit as the workflow. The script holds the pinned commit too (`pinned_commit`), and it writes a warning when `PROCURAUTH_DIR` is at another commit.
 
