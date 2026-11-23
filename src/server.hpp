@@ -536,9 +536,9 @@ private:
   bool access_use_export(httplib::Response& res, const std::string& host_id);
   // The use of a run of SQL (ProcurAuth 6.4, 10.1; docs/access.md, "Budgets"): the route has AccessRule::spend, so its check asked nothing.
   // The handler calls this function once it has the SQL and before it starts the run. The function classifies the SQL, asks the action
-  // of the use with context.usage, then the other run action without it (access_run_use gives the order and the second try). It sets
-  // readonly and the ceilings. Return false after the function writes the refusal (403, 429 with Retry-After, or 503). Return true when
-  // no check applies.
+  // of the use with context.usage, then the other run action without it and with context.permission_only (access_run_use gives the order and
+  // the second try). It sets readonly and the ceilings. Return false after the function writes the refusal (403, 429 with Retry-After, or
+  // 503). Return true when no check applies.
   bool access_use_run(httplib::Response& res, const std::string& host_id, const std::vector<std::string>& sql_texts);
   // An operation on a run that is not a use (Deep Analyze joins a job that runs already): query.run.read or query.run.write on the host,
   // without context.usage (ProcurAuth 10.1). False: the refusal (403, 429 or 503) is in `res`.

@@ -920,9 +920,16 @@ bool Server::access_use_run(httplib::Response& res, const std::string& host_id, 
   if (!state.enforced || current_request_context().is_mcp()) return true;
   const SqlStatementClass sql_class = access_classify_sql(sql_texts);
   const AccessResource resource = access_resource_of(host_id, std::string());
-  const AccessRunUse use = access_run_use(
-      sql_class, [&](const std::string& action) { return access_decide({AccessQuestion{action, resource}}).front(); },
-      [&](const std::string& action, bool* pdp_true) { return access_decide_use(AccessQuestion{action, resource}, pdp_true); });
+  // The other run action is an other permission of the operation (ProcurAuth 5.5a): its question has context.permission_only, so the PDP
+  // ignores `confirm` for it. A reason of 17.1 in its answer is an answer that is not valid (PdpClient::decide): the run answers 503.
+  const auto ask_other = [&](const std::string& action) {
+    AccessQuestion other{action, resource};
+    other.permission_only = true;
+    return access_decide({other}).front();
+  };
+  const AccessRunUse use = access_run_use(sql_class, ask_other, [&](const std::string& action, bool* pdp_true) {
+    return access_decide_use(AccessQuestion{action, resource}, pdp_true);
+  });
   if (!use.allowed) {
     refuse_decision(res, use.refusal, use.action);
     return false;

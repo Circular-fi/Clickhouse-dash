@@ -27,7 +27,8 @@ void access_enforce_ceilings(const std::string& request_id, const std::vector<Ac
 // permission: it gives readonly and the ceilings of the other class.
 //   1. `ask_use(first)`: the action of the use, with context.usage. It takes the unit. No question without usage comes before it: the case
 //      U04 of the ProcurAuth runner answers only the question with usage, and 10.1 forbids the same question without it.
-//   2. When it is true: `ask(second)`, the other action without context.usage. A failure gives 503 (the unit stays counted).
+//   2. When it is true: `ask(second)`, the other action without context.usage. It is an other permission of the operation (ProcurAuth 5.5a):
+//      the caller asks it with context.permission_only. A failure gives 503 (the unit stays counted).
 //   3. When it is a plain false (no budget_exceeded, no failure, no true answer that was turned false, no true answer without units):
 //      `ask_use(second)`. The PEP chooses the action of the use in its order of preference (10.1). It never asks the second action after
 //      an answer that took a unit.

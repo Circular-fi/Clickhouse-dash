@@ -595,7 +595,8 @@ def test_the_document_declares_the_budgets_and_the_actions_list_them():
 @needs_access
 def test_a_run_sends_one_question_with_usage_and_no_same_question_without_it():
     # U19, U21: one question with usage 1 for the action of the use; the other run action goes without usage; the action of the use
-    # never goes without usage before.
+    # never goes without usage before. The other run action is an other permission of the operation (ProcurAuth 5.5a): its question has
+    # context.permission_only and nothing else.
     answer(default=True)
     since = len(received())
     response = start_run()
@@ -603,14 +604,16 @@ def test_a_run_sends_one_question_with_usage_and_no_same_question_without_it():
     reads = [e for r in received()[since:] for e in evaluations(r) if e["action"]["name"] == "query.run.read"]
     assert len(reads) == 1 and reads[0]["context"] == {"usage": {"units": 1}}, reads
     writes = [e for r in received()[since:] for e in evaluations(r) if e["action"]["name"] == "query.run.write"]
-    assert writes and all("usage" not in e["context"] for e in writes), writes
+    assert writes and all(e["context"] == {"permission_only": True} for e in writes), writes
     # The question with usage is one Access Evaluation request, never a batch (U24, ProcurAuth 6.11).
     usage_requests = [r for r in received()[since:] if any("usage" in e["context"] for e in evaluations(r))]
     assert len(usage_requests) == 1 and usage_requests[0]["path"] == "/access/v1/evaluation"
-    # A write (SET) is a use of query.run.write; the other action is query.run.read, without usage.
+    # A write (SET) is a use of query.run.write; the other action is query.run.read, without usage and with context.permission_only.
     since = len(received())
     assert start_run("SET max_threads = 1", token("setter")).status_code == 200
     assert [e["action"]["name"] for e in usage_asked(since=since)] == ["query.run.write"]
+    others = [e for r in received()[since:] for e in evaluations(r) if e["action"]["name"] == "query.run.read"]
+    assert others and all(e["context"] == {"permission_only": True} for e in others), others
     # The routes that run no SQL of the person take no unit: the formatter, the names of the editor, the Explorer.
     since = len(received())
     assert call("POST", "/api/format", json={"host_id": "local", "sql": "select 1"}).status_code in (200, 400, 404, 422)
@@ -699,6 +702,24 @@ def test_a_failure_of_the_question_with_usage_gives_503_and_it_is_sent_one_time(
         assert response.json()["error_code"] == "pdp_unavailable" and response.json()["retryable"] is True
         time.sleep(0.3)
         assert len(usage_asked(since=since)) == 1, (order, usage_asked(since=since))
+
+
+@needs_access
+def test_a_reason_of_17_1_for_a_question_with_permission_only_is_not_valid():
+    # ProcurAuth 5.5a and 10.3, MCP binding 3.7: a question with context.permission_only never gets a reason of 17.1. Such an answer is not
+    # valid, so the route answers 503, never the 403 approval_cannot_wait of a use that needs an approval.
+    gated = {"decision": False, "context": {"reason": "approval_required"}}
+    # The export: query.run.read and query.run.write are the other permissions of the use query.export.
+    answer(default=True, fixed={"query.run.read": gated, "query.run.write": gated})
+    assert_pdp_unavailable(call("POST", "/api/export/run", json={"host_id": "local", "queries": ["SELECT 1"], "format": "csv"}), "query.export")
+    # The run: the other run action, after the use took its unit.
+    answer(default=True, fixed={"query.run.write": gated})
+    response = start_run()
+    assert_pdp_unavailable(response, "query.run.write")
+    # The reason of 17.1 for the action of the use (no permission_only) stays the refusal of a call that cannot wait.
+    answer(default=True, fixed={"query.run.read": gated})
+    refused = start_run()
+    assert refused.status_code == 403 and refused.json() == {"error": "approval_cannot_wait"}, refused.text
 
 
 @needs_access
