@@ -111,7 +111,7 @@ The identity token is a JWT (RFC 7519) in the compact JWS form. ChDash verifies 
 | Item | Rule |
 |---|---|
 | Header | `alg` is `Ed25519` or `ES256` (P-256, SHA-256). The name `EdDSA` is deprecated (RFC 9864, 4.1.2): a token with it is refused. A header with `crit` is refused. `typ` is required and must be exactly `JWT` (the comparison is case-sensitive): an absent `typ`, `jwt`, `JOSE` and `at+jwt` are refused. ChDash never fetches a key: `jku`, `x5u` and `jwk` have no effect. |
-| `kid` | When it is present, it must be a text, and ChDash verifies the token with the configured key of this `kid` only (refer to [Public keys](#public-keys)). A `kid` that is not a text gives `malformed`. A `kid` that no configured key has gives `kid`. When the configuration holds more than one key, `kid` is required: a token without it gives `kid` (ProcurAuth 9.4). With one key, a token without `kid` is verified with this key. |
+| `kid` | When it is present, it must be a text, and ChDash verifies the token with the configured key of this `kid` only (refer to [Public keys](#public-keys)). A `kid` that is not a text gives `malformed`. A `kid` that no configured key has gives `kid`. When the configuration holds more than one key, `kid` is required: a token without it gives `kid` (ProcurAuth 9.4). With one key, ChDash verifies a token without `kid` with this key. |
 | Signature | It must be valid for the key that `kid` selects, or for the one configured key when `kid` is absent. |
 | `iss` | It must be equal to `identity.issuer`. |
 | `aud` | A text equal to `identity.audience`, or a list that contains it. |
