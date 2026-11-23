@@ -66,7 +66,7 @@ CFG_INT("server", "max_body_bytes", size_t, c.server.max_body_bytes, "0", 65536,
 CFG_INT("server", "max_host_streams", size_t, c.server.max_host_streams, "64", 0, 4096, false, "streams", "Open status streams of the pages (one for each visible page). It is at most half of max_worker_threads: a higher value stops the start. Past the limit a page polls.")
 CFG_INT("server", "write_timeout_ms", int, c.server.write_timeout_ms, "120000", 1000, 3600000, false, "ms", "How long one write of a response waits for a client that does not read (a paused download). Past it the response ends.")
 CFG_INT("server", "shutdown_timeout_ms", int, c.server.shutdown_timeout_ms, "10000", 1000, 600000, false, "ms", "How long a stop (SIGTERM, SIGINT) waits for the running requests. Past it the process ends with status 1.")
-CFG_BOOL("server", "metrics", c.server.metrics, "true", "Serve GET /metrics (the Prometheus text format).")
+CFG_BOOL("server", "metrics", c.server.metrics, "true", "Serve GET /metrics (the Prometheus text format). In the authzen mode, the route needs the identity token and the action access on the service.")
 CFG_BOOL("server", "access_log", c.server.access_log, "true", "Write one log line for each request. A probe that succeeds is not written.")
 CFG_INT("server", "stats_log_interval_ms", int, c.server.stats_log_interval_ms, "300000", 10000, 86400000, true, "ms", "Write a server.stats log line this often. 0 = never.")
 

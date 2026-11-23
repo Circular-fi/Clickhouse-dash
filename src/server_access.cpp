@@ -1,5 +1,6 @@
 // The access of humans (docs/access.md, contract 11): the identity token of each request of the pages and of the API, the
-// decision of the PDP for the action of each route, readonly = 1 for a run without query.run.write, and the decisions of a page.
+// decision of the PDP for the action of each route (the action `access` on the service for a route that runs no action, ProcurAuth 10.1c),
+// readonly = 1 for a run without query.run.write, and the decisions of a page.
 // The MCP endpoint checks its caller in api_mcp.cpp: its keys, or the identity token in the identity mode (docs/mcp.md).
 
 #include "server.hpp"
@@ -12,6 +13,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "http_guard.hpp"
 #include "json_parse.hpp"
 #include "json_text.hpp"
 #include "log.hpp"
@@ -108,6 +110,29 @@ bool any_failed(const std::vector<AccessDecision>& decisions) {
 }
 
 bool is_write_method(const std::string& method) { return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE"; }
+
+// The refusal of the action `access` on a route that runs no action (ProcurAuth 10.1c). The address of a page (a GET that is not under
+// /api/ or /static/, and not /metrics) gets an HTML page with no script and no data: the 503 page when the PDP gave no valid answer, else the
+// 403 page that names the action `access`. Any other route, and a spent budget, get the JSON refusal (10.3).
+void refuse_entry(const httplib::Request& req, httplib::Response& res, const AccessDecision& decision, const std::string& request_id) {
+  const AccessOutcome outcome = access_outcome(decision);
+  const bool page = (req.method == "GET" || req.method == "HEAD") && req.path.rfind("/api/", 0) != 0 && req.path.rfind("/static/", 0) != 0 &&
+                    req.path != "/metrics" && outcome != AccessOutcome::BudgetExceeded;
+  if (!page) {
+    if (is_write_method(req.method)) res.set_header("Connection", "close");
+    refuse_decision(res, decision, "access");
+    return;
+  }
+  static const AccessPage entry{"service", "ClickHouse Dash", "", {"access"}};
+  const bool failed = outcome == AccessOutcome::Failed;
+  log_event(failed ? LogLevel::Warn : LogLevel::Info, failed ? "access.page_unavailable" : "access.page_denied",
+            {{"request_id", request_id}, {"page", entry.name}, {"path", req.path.substr(0, 512)}});
+  const std::string html = failed ? access_unavailable_page(entry) : access_denied_page(entry, {}, access_root_of(req.path));
+  res.status = failed ? 503 : 403;
+  res.set_header("Cache-Control", "no-store");
+  set_page_security_policy(res, html);
+  res.set_content(html, "text/html; charset=utf-8");
+}
 
 // The members host_id and database of a JSON body, when they are text. Other members and a body that is not JSON give nothing.
 void body_names(const std::string& body, std::string* host_id, std::string* database) {
@@ -261,7 +286,8 @@ void Server::init_access() {
                    {"evaluations_max_items", known.evaluations_max_items.value_or(0)},
                    {"evaluations_max_bytes", known.evaluations_max_bytes.value_or(0)},
                    {"usage_max_seconds", known.usage_max_seconds.value_or(0)},
-                   {"idle_max_seconds", known.idle_max_seconds.value_or(0)}});
+                   {"idle_max_seconds", known.idle_max_seconds.value_or(0)},
+                   {"directory_max_age_seconds", known.directory_max_age_seconds.value_or(0)}});
         break;
       }
     }
@@ -426,6 +452,15 @@ bool Server::check_access(const httplib::Request& req, httplib::Response& res, c
     case AccessRuleKind::Exempt:
     case AccessRuleKind::Identity:
       return false;
+    case AccessRuleKind::NoAction: {
+      // ProcurAuth 10.1c: the action `access` on the service, with no usage and no approval. The question has no usage, so the cache of the
+      // PDP client keeps its answer for pdp.cache_ttl, for this subject (10.1): a page that loads many files asks the PDP once in that time.
+      // The PDP client treats a reason of 17.1 for `access` as an answer that is not valid (503).
+      const auto decisions = access_decide({AccessQuestion{"access", access_service_resource(cfg_.access.audience)}});
+      if (decisions.front().allowed) return false;
+      refuse_entry(req, res, decisions.front(), request_id);
+      return true;
+    }
     case AccessRuleKind::Unknown: {
       // No route: the router answers 404. A route that the table of rules does not know: refused (fail closed).
       if (!http_.has_route(req.method == "HEAD" ? std::string("GET") : req.method, req.path)) return false;

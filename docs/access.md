@@ -14,7 +14,7 @@ The access has three parts:
 2. **Decision.** For each action, ChDash asks a PDP (Policy Decision Point) with the OpenID AuthZEN Authorization API 1.0. The decision depends only on the human, the action and the resource.
 3. **Enforcement.** ChDash applies the decision on the server side, for each route. It does not trust the page to hide an action.
 
-The access gateway decides only the action `access` (the entry into ChDash). ChDash decides all its other actions.
+The access gateway decides only the action `access` (the entry into ChDash). ChDash decides all its other actions. ChDash also asks `access` for each route that runs no action, for example a static file (refer to [Routes with no action](#routes-with-no-action)).
 
 ## Configuration
 
@@ -130,16 +130,16 @@ ChDash keeps a verified token (its SHA-256, its subject and its `exp`) in memory
 
 ChDash checks the token when a request starts. A stream that started with a valid token (the result of a run, the status of the hosts, an export) continues after the `exp` of the token. The next request needs a new token.
 
-These routes need no token: `/livez`, `/readyz`, `/healthz`, `/metrics`, `GET /.well-known/procurauth/actions` and `/mcp`. Keep `/metrics` on the internal network. `/mcp` checks its caller itself: with `mcp.auth_mode = "identity"`, it needs the identity token (refer to [The MCP endpoint](#the-mcp-endpoint)).
+These routes need no token: the health probes `/livez`, `/readyz` and `/healthz`, `GET /.well-known/procurauth/actions` and `/mcp`. `/mcp` checks its caller itself: with `mcp.auth_mode = "identity"`, it needs the identity token (refer to [The MCP endpoint](#the-mcp-endpoint)). Each other route needs the token, also `/metrics` and the files of `/static/` (ProcurAuth 10.0, step 2). Refer to [Routes with no action](#routes-with-no-action).
 
 ## Network
 
 ChDash must be reachable only through the edge (the access gateway and its reverse proxy). The identity token is a bearer credential in a header. A client that reaches ChDash directly can send any token that it holds, or can use a service without an edge in front of it. Obey these rules:
 
-- Kubernetes: write a NetworkPolicy for the pods of ChDash. Allow ingress only from the pods of the edge, and from the monitoring that reads `/metrics`. Allow egress only to the ClickHouse hosts, to the PDP and to the telemetry receiver.
+- Kubernetes: write a NetworkPolicy for the pods of ChDash. Allow ingress only from the pods of the edge, and from the platform that reads the health probes. Allow egress only to the ClickHouse hosts, to the PDP and to the telemetry receiver. `/metrics` needs an identity token: the monitoring reads it through the edge.
 - Docker Compose: put ChDash on a network that only the edge and ChDash use. Do not publish the port of ChDash on the host.
 - Bind address: set `server.listen_host` to the address of the internal network, not `0.0.0.0`. The default is `0.0.0.0`, so ChDash writes a `config.warning` at start when `access.mode = "authzen"` and `server.listen_host` is `0.0.0.0`. The warning does not stop the start.
-- The edge must replace the identity header that a client sends. Keep `/metrics`, the probes and `/api/health` off the public network ([Routes with no action](#routes-with-no-action)).
+- The edge must replace the identity header that a client sends. Keep the health probes off the public network ([Routes with no action](#routes-with-no-action)).
 
 ## Actions
 
@@ -207,7 +207,7 @@ An action that the document does not publish is a plain denial for ChDash: it ne
 | `mcp.analysis.read` | `service` | `POST /mcp` in the mode `identity`: the tools `mcp_analysis_my_limits` and `mcp_analysis_my_usage`. They show the limits and the usage of the subject itself. |
 | `mcp.session` | `service` | `POST /mcp` in the mode `identity`: each request that calls no tool (`initialize`, `ping`, `server/discover`, a notification). Each one takes a unit of the budget `requests` ([Budgets](#budgets)). No tool uses this action. |
 
-The shell of each page needs the action of its page (refer to [Navigation](#navigation)). These routes need a valid token and no action: the files of `/static/`, the redirects of the former addresses, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), and the routes of a capability that a checked request gave: `GET /api/query/stream`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`.
+The shell of each page asks `access` on the service, then the action of its page (refer to [Navigation](#navigation)). These routes run no action, so they ask `access` on the service (ProcurAuth 10.1c): the files of `/static/`, the redirects of the former addresses, `/metrics`, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta`, `POST /api/query/cancel` and `POST /api/query/deep-analysis/cancel`. Refer to [Routes with no action](#routes-with-no-action). These routes need a valid token and ask their own questions: `GET /.well-known/procurauth/resources` (refer to [The route of the options](#the-route-of-the-options)), `GET /api/query/stream` (the use of a run that its route checked) and `POST /api/export/stream` (refer to [The stream of an export](#the-stream-of-an-export)).
 
 A route that is not in this table is refused with `403` and the action `unknown` (fail closed), and the log has the line `access.no_rule`. A path that has no route gets `404`.
 
@@ -289,7 +289,7 @@ ChDash shows only the hosts on which the human holds one action at least:
 - `GET /api/hosts`, `GET /api/hosts/stream` and the hosts of `GET /api/mcp/meta` list only the visible hosts. The stream keeps the hosts of its start.
 - The host picker of a page shows only the visible hosts on which the human holds one action of that page. For example, the System page needs `system.read` on the host.
 - A request for a hidden host gets the same answer as a request for a host that does not exist: `403` with the action of the route. The answer does not tell that the host exists.
-- `GET /api/health`, `/readyz` and `/metrics` still count all the hosts, as in 1.0.8. `/metrics` names the hosts: keep it on the internal network.
+- `GET /api/health`, `/readyz` and `/metrics` still count all the hosts, as in 1.0.8. `/metrics` names the hosts. `GET /api/health` and `/metrics` need the token and `access` on the service. `/readyz` gives only the counts, with no name.
 - The global features still name the host of each item, as in 1.0.8: the folders and the queries of the query library, and the keys of the MCP pages.
 
 ### Databases in the Explorer
@@ -670,9 +670,10 @@ The navigation shows only the pages that the human may use (decision of 2026-10-
 
 Rules:
 
+- Before the shell of a page, ChDash checks the identity token and asks `access` on the service ([Routes with no action](#routes-with-no-action)). A refusal gives the `403` page with the action `access` and no link. No valid answer gives the `503` page below.
 - For each page that it serves, ChDash sends one batch to the PDP: the batch of the hosts, as for `GET /api/version`. The cache of the decisions applies, so the two batches of one page normally make one call to the PDP. An address of the Explorer that names a database (`/explorer/catalog/<database>...`) also asks for `explorer.read` on that database of each host.
 - A human without the action of the page gets status `403` and a page with the name of the action and a link to each page that the human may use. This page has no script and no data of the page. The log has the line `access.page_denied`.
-- When the PDP gives no valid answer for the batch of a page, ChDash sends status `503` and a page that tells the human to try again later. This page is not the `403` page, and it has no script and no data. The log has the line `access.page_unavailable`. The root (`/`) does the same. `GET /api/hosts` and the stream of the hosts answer `503` with `pdp_unavailable`.
+- When the PDP gives no valid answer for `access` or for the batch of a page, ChDash sends status `503` and a page that tells the human to try again later. This page is not the `403` page, and it has no script and no data. The log has the line `access.page_unavailable`. The root (`/`) does the same. `GET /api/hosts` and the stream of the hosts answer `503` with `pdp_unavailable`.
 - `GET /api/version` also answers `503` with `pdp_unavailable` and the action `access`. It never gives a list of `false` decisions for a failure. The page then keeps its links and shows `access: unavailable` in the version badge.
 - An address of the Explorer in one database opens with `explorer.read` on that database of one host. The Explorer link of the header needs `explorer.read` on the service, on one host or below one host (match `subtree`).
 - The root (`/`) is the Query page. A human without a query action goes to the first page of the table that the human may use. A human with no page gets the `403` page.
@@ -691,8 +692,10 @@ ChDash is a PEP that handles the reasons `approval_required`, `approval_pending`
 |---|---|
 | An MCP tool in the identity mode (an agent) | The flow below. One code serves each tool: `McpApprovalGate` in `src/mcp_approval.cpp`. |
 | A page or a route of the API (a person in a browser) | The call cannot wait (ProcurAuth 17.7a). ChDash fails closed. The route answers `403` with the body `{"error": "approval_cannot_wait"}`. It sends no effect and submits no request. This is the one exception to the rule that each function of ChDash can wait for an approval ([The page and the API](#the-page-and-the-api)). |
-| An MCP key of the page (the mode `keys`) | The key has the same flow as an MCP tool of the identity mode, for its creator ([The keys of the page](#the-keys-of-the-page)). A key of the configuration has no creator and no PDP: it needs no approval. |
-| A request with no identity token and no PDP (a key of the configuration, the mode `open`, the probes) | It stays outside the approval. It has no subject for the PDP to decide ([Routes with no action](#routes-with-no-action)). |
+| An MCP key of the page (the mode `keys`) | The key has the same flow as an MCP tool of the identity mode, for its creator ([The keys of the page](#the-keys-of-the-page)). |
+| An MCP key of the configuration file (an `mcp_key` block, the mode `keys`) | The key has the same flow, with the subject `key:<name>` ([The keys of the configuration file](#the-keys-of-the-configuration-file)). |
+| A request with no PDP (the mode `open`) or with no question (the health probes) | It stays outside the approval. The mode `open` has no access control and no PDP, so no action can need an approval there ([Routes with no action](#routes-with-no-action)). |
+| A route with no action (`access` on the service) | `confirm` has no effect on `access` (ProcurAuth 17.8). A reason of 17.1 for `access` is not a valid answer: `503`. |
 | `tools/list`, the navigation, the questions with the match `subtree` | The PDP ignores `confirm` (ProcurAuth 17.8). Nothing changes. |
 | A request that calls no tool (`mcp.session`, `ping`) | The call cannot wait. HTTP 403 and `-32001` (binding 5.1b). ChDash sends no effect and submits no request. |
 
@@ -754,9 +757,6 @@ Limits of the mode `keys`. These limits come from what the mode has:
 - The pages of the keys (`mcp.keys.read`, `mcp.keys.write`) and of the usage (`mcp.usage.read`) are pages of the mode `keys`. Their actions have no tool. A page cannot wait, so they are in the exception of [The page and the API](#the-page-and-the-api).
 - A key of the page that the PDP does not know (the reason `unknown_subject`) is an orphan, as before: it gets the `401` and no approval is asked.
 
-### The op and the view
-
-The `op` holds each value that decides what the tool does. The `view` is a template of JSON Pointers into the `op`: the person reads values of the `op`, never a text that ChDash wrote apart. The control arguments are never in the `op`.
 ### The keys of the configuration file
 
 A key of the configuration file is an `mcp_key` block, or a `key` block of the older form, of the mode `keys` ([mcp.md](mcp.md#the-mcp_key-block)). The owner decided on 2026-11-23 that a use of such a key can need an approval. Thus, in the mode `authzen`, ChDash asks the PDP for each call of such a key:
@@ -772,6 +772,9 @@ A key of the configuration file is an `mcp_key` block, or a `key` block of the o
 
 The mode `open` has no access control and no PDP. In this mode, a key of the configuration file asks no question and needs no approval. It works as a standalone key (MCP binding 7.1). Nothing in the mode `open` can change this, because no PDP exists to ask. A file without an `access` block does not start ([Configuration](#configuration)).
 
+### The op and the view
+
+The `op` holds each value that decides what the tool does. The `view` is a template of JSON Pointers into the `op`: the person reads values of the `op`, never a text that ChDash wrote apart. The control arguments are never in the `op`.
 
 | Tool | `op` | `view` |
 |---|---|---|
@@ -824,23 +827,33 @@ A person cannot use an action that the document does not publish: ChDash answers
 
 ### Routes with no action
 
-Some routes use no action. ChDash asks the PDP nothing for them, and they stay outside the approval:
+A route that runs no action of the document follows ProcurAuth 10.1c (decision 210 of ProcurAuth). There are two rules:
+
+- A health probe gives no data of the service. It needs no token, and ChDash asks the PDP no question for it. The health probes of ChDash are `/livez`, `/readyz` and `/healthz`.
+- Each other route needs a valid token. Then ChDash asks the action `access` on the resource `service` (the id is `identity.audience`), with no `context.usage` and no `context.approval`. The route runs only after a `true` answer.
 
 | Routes | Check | Reason |
 |---|---|---|
-| `/healthz`, `/livez`, `/readyz` | None | The platform probes (contract 8.1: they need no key). They give a status, no data of a host. |
-| `/metrics` | None | The Prometheus metrics (contract 8.1). The metrics name the hosts and count the requests. |
+| `/healthz`, `/livez`, `/readyz` | None | The health probes (ProcurAuth 10.1c, contract 8.1). `/livez` and `/healthz` give `ok` or a status. `/readyz` gives the counts of the hosts, and no name. |
 | `GET /.well-known/procurauth/actions` | None | The document of the actions (ProcurAuth 5.1). |
-| `GET /api/health` | A valid token | A script of monitoring uses it, the pages do not. It gives the number of hosts and of healthy hosts for all the hosts, and no name. |
-| `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/mcp/meta` | A valid token | The shell of the page uses them. They ask the batch of the navigation. |
-| The files of `/static/` and the redirects | A valid token | They hold no data. |
-| `GET /api/query/stream`, `POST /api/query/cancel` | A valid token, and the subject that started the run | A run gave these capabilities to its subject. Another subject gets the answer for an unknown `query_id`. `POST /api/query/deep-analysis/cancel` has the cancel token only. |
-| `POST /mcp` in the mode `keys` | The key. No identity token | The standalone keys (binding 7.1). A key of the page asks the PDP for its creator. A key of the configuration asks nothing. |
-| Each route in the mode `open` | None | The mode has no check. |
+| `/metrics` | A valid token and `access` on the service | The Prometheus metrics. They name the hosts and count the requests, so they are not a health probe. |
+| `GET /api/health` | A valid token and `access` on the service | A script of monitoring uses it, the pages do not. It gives the number of hosts and of healthy hosts for all the hosts, and no name. |
+| `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/mcp/meta` | A valid token and `access` on the service | The shell of the page uses them. After `access`, they ask the batch of the navigation. |
+| The shells of the pages, the files of `/static/` and the redirects | A valid token and `access` on the service | A shell then asks the batch of its page ([Navigation](#navigation)). The files and the redirects hold no data. |
+| `POST /api/query/cancel`, `POST /api/query/deep-analysis/cancel` | A valid token and `access` on the service | They stop a run. A run gave these capabilities to its subject: another subject gets the answer for an unknown `query_id`. `POST /api/query/deep-analysis/cancel` has the cancel token only. |
+| `GET /api/query/stream` | A valid token, and the subject that started the run | The stream is the use of the run: `POST /api/query/run` asked its question. |
+| `POST /mcp` in the mode `keys` | The key. No identity token | A key of the page asks the PDP for its creator. A key of the configuration file asks the PDP for `key:<name>` ([The keys of the configuration file](#the-keys-of-the-configuration-file)). |
+| Each route in the mode `open` | None | The mode has no access control and no PDP. |
 
-ProcurAuth 10.0 says that a PEP refuses each request without a valid token, except the action document. It also says that the PEP accepts requests only through the edge. Contract 8.1 requires the three probes and `/metrics` without a key. ChDash follows both: these routes need no token, and the edge or the router must not publish them. They are for the network of the platform.
+The question for `access`:
 
-What a router must not publish: `/metrics`, `/healthz`, `/livez`, `/readyz` and `/api/health`. A router rule that sends a whole prefix to ChDash (for example `PathPrefix(/clickhouse/)`) publishes them. Exclude them in the rule, or set `server.metrics = false` and scrape on a private network. Without the exclusion, a person who holds only `access` on the service reads the metrics and the probes. The same person reads the counts of `/api/health`. ChDash asks the PDP nothing for these routes. The routes of the keys (`/mcp`) must reach ChDash for the agents: send them through the edge of the keys, not through the edge of the persons.
+- It is one evaluation with the subject of the token, the action `access` and the resource `{"type": "service", "id": <identity.audience>}`, with no `ancestors`.
+- `confirm` has no effect on `access` (ProcurAuth 17.8), so such a route never waits for an approval. A reason of 17.1 in the answer is an answer that is not valid: the route answers `503`.
+- A refusal gives `403` with the action `access`, and no valid answer gives `503` (ProcurAuth 10.3). The address of a page gets the HTML page of the refusal: the `403` page or the `503` page of [Navigation](#navigation). Another route gets the JSON error.
+- The question has no usage, so ChDash keeps the answer for `pdp.cache_ttl` (ProcurAuth 10.1). The key of the kept answer is the subject, the action and the service. Thus a page that loads many files costs one question to the PDP for each subject and each `pdp.cache_ttl`. Each other request in that time uses the kept answer and sends nothing to the PDP.
+- A path outside `/api/` and `/.well-known/` that has no route also asks `access` before the `404`. The router answers `404` only after a `true` answer.
+
+The health probes are for the network of the platform. Do not publish them on the public network: a router rule that sends a whole prefix to ChDash (for example `PathPrefix(/clickhouse/)`) publishes them. `/metrics` needs an identity token. A system of monitoring reads it through the edge, with a key that holds `access` on the service. To turn the route off, set `server.metrics = false`. The routes of the keys (`/mcp`) must reach ChDash for the agents: send them through the edge of the keys, not through the edge of the persons.
 
 ### Network
 
@@ -900,12 +913,13 @@ At the start, ChDash reads `GET <origin>/.well-known/authzen-configuration[<path
 - `policy_decision_point` must be `pdp.url` (a slash at the end does not count) (AuthZEN 1.0, l.1364). Each endpoint must have the scheme, the host and the port of `pdp.url`. Thus the token goes to this origin only.
 - The members `procurauth_usage_max_seconds`, `procurauth_idle_max_seconds`, `procurauth_evaluations_max_bytes` and `procurauth_evaluations_max_items` (ProcurAuth 6.9, 10.7, 10.7a) are whole numbers from 1. ChDash uses them for the idle time, the wait of a question with `context.usage` (one second more than the published time, never less than `pdp.timeout`) and the size of a request.
 - The members `procurauth_approval_max_command_bytes`, `procurauth_approval_lease_min_seconds`, `procurauth_approval_lease_max_seconds` and `procurauth_approval_wait_max_seconds` (ProcurAuth 17.3a, 17.4, 17.5) give the bound of a command and the bounds of a lease and of a wait. ChDash uses the lower value of `access.approval.max_command_bytes` and of the member. It shows the lease bounds in the schema of each tool. It bounds `wait_s` by the lower value of `access.approval.wait` and of the member. A value that is not a whole number from 1 is ignored: ChDash never needs these members. The other members `procurauth_approval_*` are ignored.
+- The member `procurauth_directory_max_age_seconds` (ProcurAuth 3.9, 10.7b) is the age bound of the directory of the PDP, in seconds. ChDash writes it in the line `access.pdp_metadata` (`directory_max_age_seconds`, `0` when the member is absent). ChDash takes no decision from it. A value that is not a whole number from 1 is ignored, as for the members `procurauth_approval_*`.
 - `procurauth_usage_max_seconds` must not be above `pdp.usage_max_seconds` (`120` by default). ChDash never lowers the published time to fit (decision of 2026-11-07). A higher value at the start stops the start. The message names `access.pdp.usage_max_seconds`, the value of the metadata and the limit. Raise the key (3600 at most), or lower the time of the PDP. A higher value in a document that ChDash reads after the start makes this document not valid: the questions fail (`503`) until a good document comes.
 - The wait for the answer to a question with `context.usage` is the published `procurauth_usage_max_seconds` plus one second, and never shorter than `pdp.timeout`. Example: the portal publishes `5`, so ChDash waits 6 seconds. A PDP without the member gets the wait `pdp.timeout`. Thus the wait is never longer than `pdp.usage_max_seconds` plus one second, or `pdp.timeout` when it is longer.
 - A document that cannot be used stops the start. The message names `access.pdp.url` and the cause.
 - A PDP that does not answer at the start does not stop the start: the portal can restart after ChDash. ChDash writes the line `access.pdp_metadata_failed`. Until it reads the metadata, each question fails (503), without a request to the PDP. ChDash tries again at a question, at most once each second.
 - A good document is read again after one hour. When this fails, the old document stays in use. A document that is not valid then is not used: questions fail until a good document comes.
-- The start writes `access.pdp_metadata` with the endpoints that apply.
+- The start writes `access.pdp_metadata` with the endpoints that apply, and with the values of `procurauth_evaluations_max_items`, `procurauth_evaluations_max_bytes`, `procurauth_usage_max_seconds`, `procurauth_idle_max_seconds` and `procurauth_directory_max_age_seconds` (`0` for a member that is absent).
 
 ### Resource Search
 
@@ -960,6 +974,9 @@ The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run 
 | A request with a ceiling neither reads nor fills a shared cache of a page (decision of 2026-11-07) | `tests/native/cache_acl_test.cpp` (`ttl_cache_a_request_with_a_ceiling_neither_reads_nor_keeps`, `ddl_text_cache_a_request_with_a_ceiling_reads_every_text_and_keeps_none`), and `test_a_request_with_a_ceiling_neither_reads_nor_fills_the_shared_cache_of_a_page` of `test_access.py` |
 | The deadline of a split batch and the limit of the wait of a use (decision of 2026-11-07) | `tests/native/pdp_transport_cases.hpp` (`test_pdp_batch_deadline`), `tests/native/access_test.cpp` (`test_pdp_usage_wait_limit`), `tests/native/config_test.cpp` (the keys `access.pdp.batch_timeout` and `access.pdp.usage_max_seconds`), and the case 10 of `tests/tls/pdp.sh` (the start stops above the limit) |
 | A result past a row or byte ceiling is a refusal 403 `ceiling_exceeded` that names the ceiling; the list of the functions and the structure of the signal tables obey the ceilings (decision of 2026-11-07) | `tests/native/ch_query_test.cpp` (`test_a_result_past_a_ceiling_names_the_ceiling`, `test_apply_ceilings_lowers_and_never_loosens`), `test_a_result_past_a_ceiling_is_a_refusal_that_names_the_ceiling` of `test_access.py`, and the case U37 of the ProcurAuth runner |
+| A health probe asks nothing, and a route with no action asks `access` on the service; the files of a page cost one kept question (ProcurAuth 10.1c, decision 210) | `tests/native/access_test.cpp` (`test_route_rules`, `test_pdp_access_of_a_route_with_no_action`), the tests `test_a_health_probe_asks_nothing_and_a_route_with_no_action_asks_access_on_the_service`, `test_the_files_of_a_page_cost_one_kept_question` and `test_a_reason_of_approval_or_a_failure_for_access_gives_503` of `test_access.py`, and the case U127 of the ProcurAuth runner |
+| The metadata member `procurauth_directory_max_age_seconds` (ProcurAuth 10.7b) | `tests/native/access_test.cpp` (`test_pdp_metadata_directory_max_age`) |
+| A key of the configuration file asks the PDP for `key:<name>` (owner decision of 2026-11-23) | `tests/native/mcp_test.cpp` (`test_creator_access`, `test_protocol_key_ceiling_refusal`), the tests `test_a_key_of_the_configuration_file_...` of `tests/backend-functional/test_approval_keys.py`, and `test_the_mcp_endpoint_keeps_its_keys_and_needs_no_identity_token` of `test_access.py` |
 | The reason `unknown_subject` (ProcurAuth 11.1) | `test_an_orphan_mcp_key_is_refused_until_a_person_adopts_it` and `test_a_creator_without_permissions_keeps_the_key` of `test_access.py`; `tests/native/access_test.cpp` (the answer) and `tests/native/mcp_test.cpp` (`test_creator_access`) |
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).

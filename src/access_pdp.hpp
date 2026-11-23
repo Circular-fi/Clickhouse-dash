@@ -346,6 +346,9 @@ struct PdpEndpoints {
   std::optional<uint64_t> approval_lease_min_seconds;
   std::optional<uint64_t> approval_lease_max_seconds;
   std::optional<uint64_t> approval_wait_max_seconds;
+  // procurauth_directory_max_age_seconds (ProcurAuth 3.9, 10.7b): the age bound of the directory of the PDP, in seconds. ChDash writes it in the
+  // log line access.pdp_metadata and takes no decision from it. A member that is not a whole number from 1 is ignored, as for the members above.
+  std::optional<uint64_t> directory_max_age_seconds;
 };
 
 // The bounds of the approval API that the PDP published (the members procurauth_approval_* of its metadata). Nothing is set before a
@@ -483,7 +486,9 @@ public:
   std::chrono::milliseconds usage_timeout();
   // The reading of a metadata document: false, and `error` says why, when it cannot be used. `identifier` is the base URL of the
   // configuration. An absent endpoint of evaluation or evaluations, an endpoint of another origin, a policy_decision_point that is not
-  // `identifier`, a procurauth_* member that is not a whole number from 1: not valid. Other members are ignored (l.1342).
+  // `identifier`, a member procurauth_usage_max_seconds, procurauth_idle_max_seconds, procurauth_evaluations_max_bytes or
+  // procurauth_evaluations_max_items that is not a whole number from 1: not valid. A member procurauth_approval_* or
+  // procurauth_directory_max_age_seconds that is not a whole number from 1 is ignored. Other members are ignored (l.1342).
   static bool parse_metadata(const std::string& body, const std::string& identifier, PdpEndpoints* out, std::string* error);
 
   // A Resource Search (AuthZEN 1.0, l.1151-1210): the ids of the resources of `resource_type` below `ancestors` on which `subject` can do

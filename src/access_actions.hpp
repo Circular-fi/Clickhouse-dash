@@ -100,12 +100,16 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
 
 // What a route needs.
 enum class AccessRuleKind {
-  // No identity token: the probes, the metrics, the list of actions, and the MCP endpoint (the mode of its keys; the identity mode
-  // reads the token itself, before the message).
+  // No identity token and no question: the health probes (/livez, /readyz, /healthz: ProcurAuth 10.1c), the list of actions (5.1), and
+  // the MCP endpoint (the mode of its keys; the identity mode reads the token itself, before the message).
   Exempt,
-  // A valid identity token and no action: the page shells, the files, the hosts, and the routes of a capability that a
-  // checked request gave (the stream and the cancel of a run).
+  // A valid identity token. The route asks its own questions: the route of the options (ProcurAuth 5.6), and the stream of a run or of an
+  // export (the use of an operation whose actions a checked request asked, or that the handler asks).
   Identity,
+  // A route that runs no action of the document (ProcurAuth 10.0 step 2, 10.1c): a valid identity token, then the action `access` on the
+  // service, with no usage and no approval. A refusal is 403. The page shells, the files of /static/, the redirects, /metrics, the version,
+  // the hosts, the health of the hosts, the meta of MCP and the cancel of a run. The answer is kept for pdp.cache_ttl (10.1).
+  NoAction,
   // One action: `action`. With `host`, on the host of the request (its parameter host_id, or the field host_id of its body), or on
   // the database of that host that the parameter `database` names when `database_param` is true and the request has it. Without
   // `host`, on the service.

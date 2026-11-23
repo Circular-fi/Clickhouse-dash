@@ -32,7 +32,7 @@ AccessRule host_rule(AccessRuleKind kind, const char* action, bool database_para
 }
 
 AccessRule mcp_rule(std::string_view method, std::string_view path) {
-  if (path == "/api/mcp/meta") return method == "GET" ? rule(AccessRuleKind::Identity) : rule(AccessRuleKind::Unknown);
+  if (path == "/api/mcp/meta") return method == "GET" ? rule(AccessRuleKind::NoAction) : rule(AccessRuleKind::Unknown);
   if (path == "/api/mcp/keys") {
     if (method == "GET") return rule(AccessRuleKind::Action, "mcp.keys.read");
     if (method == "POST") return rule(AccessRuleKind::Action, "mcp.keys.write");
@@ -254,27 +254,31 @@ std::string access_actions_json(std::string_view server, const AccessFeatures& f
 
 AccessRule access_rule(std::string_view method_in, std::string_view path) {
   const std::string_view method = method_in == "HEAD" ? std::string_view("GET") : method_in;
-  if (path == "/livez" || path == "/readyz" || path == "/healthz" || path == "/metrics" || path == "/.well-known/procurauth/actions" ||
-      path == "/mcp") {
+  // The health probes give no data of the service: no token and no question (ProcurAuth 10.1c). The action document has the same rule (5.1).
+  if (path == "/livez" || path == "/readyz" || path == "/healthz" || path == "/.well-known/procurauth/actions" || path == "/mcp") {
     return rule(AccessRuleKind::Exempt);
   }
+  // The metrics run no action, and they are not a health probe: they name the hosts and count the requests (ProcurAuth 10.1c).
+  if (path == "/metrics") return rule(AccessRuleKind::NoAction);
   // The route of the options (ProcurAuth 5.6) lists the children that the person of the token can see: it needs the token (the edge makes
-  // it for the person who fills the form of the grants).
+  // it for the person who fills the form of the grants), and it asks only its own questions.
   if (path == "/.well-known/procurauth/resources") return method == "GET" ? rule(AccessRuleKind::Identity) : rule(AccessRuleKind::Unknown);
   // Any other path under /.well-known/ has no route and no data. The router answers 404, also without a token. The former path
   // /.well-known/access-actions is one of them: it has no alias.
   if (starts_with(path, "/.well-known/")) return rule(AccessRuleKind::Exempt);
-  // The pages, their files and the redirects of former addresses: they read no data.
-  if (!starts_with(path, "/api/")) return rule(AccessRuleKind::Identity);
+  // The pages, their files and the redirects of former addresses run no action (ProcurAuth 10.1c). A page shell then asks the batch of its
+  // navigation (docs/access.md, "Navigation").
+  if (!starts_with(path, "/api/")) return rule(AccessRuleKind::NoAction);
 
   if (path == "/api/version" || path == "/api/hosts" || path == "/api/hosts/stream" || path == "/api/health") {
-    return method == "GET" ? rule(AccessRuleKind::Identity) : rule(AccessRuleKind::Unknown);
+    return method == "GET" ? rule(AccessRuleKind::NoAction) : rule(AccessRuleKind::Unknown);
   }
-  // The stream and the cancel of a run, and the cancel of a Deep Analyze: the query id and the cancel token come from a request
-  // that the rule of its route checked.
-  if ((path == "/api/query/stream" && method == "GET") || (path == "/api/query/cancel" && method == "POST") ||
-      (path == "/api/query/deep-analysis/cancel" && method == "POST")) {
-    return rule(AccessRuleKind::Identity);
+  // The stream of a run is the use of the run: the query id comes from a request that the rule of its route checked.
+  if (path == "/api/query/stream" && method == "GET") return rule(AccessRuleKind::Identity);
+  // The cancel of a run and of a Deep Analyze stops a run and runs no action: the query id and the cancel token come from a request that the
+  // rule of its route checked.
+  if ((path == "/api/query/cancel" && method == "POST") || (path == "/api/query/deep-analysis/cancel" && method == "POST")) {
+    return rule(AccessRuleKind::NoAction);
   }
   // A run names its host in the JSON body (POST) or in the parameter host_id (GET).
   if ((path == "/api/query/run" || path == "/api/query" || path == "/api/query/analysis" || path == "/api/format" ||

@@ -1264,7 +1264,9 @@ The context of a call uses W3C Trace Context (`traceparent`) and W3C Baggage (`b
 
 ### Probes and metrics
 
-These endpoints need no key (contract 8.1). They are for the platform that runs ChDash, not for a person or an agent. The access of humans does not ask the PDP for them, and the identity token does not guard them. Serve them on a network that only the platform reaches: the edge or the router must not publish `/healthz`, `/livez`, `/readyz` and `/metrics` ([access.md](access.md#routes-with-no-action)).
+The health probes need no key (contract 8.1). They are for the platform that runs ChDash, not for a person or an agent. The access of humans does not ask the PDP for them, and the identity token does not guard them (ProcurAuth 10.1c). Serve them on a network that only the platform reaches: the edge or the router must not publish `/healthz`, `/livez` and `/readyz`.
+
+`/metrics` needs no key of MCP. In the mode `open` of the `access` block, it needs nothing. In the mode `authzen`, it runs no action, so it needs the identity token and the action `access` on the service (ProcurAuth 10.1c, [access.md](access.md#routes-with-no-action)). This is a difference from contract 8.1: the MCP binding is the source for a service of ProcurAuth (binding 12, item 1).
 
 | Endpoint | Meaning |
 | --- | --- |

@@ -45,7 +45,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 | `max_host_streams` | integer | `64` | 0 to 4096 streams | Open status streams of the pages (one for each visible page). It is at most half of max_worker_threads: a higher value stops the start. Past the limit a page polls. |
 | `write_timeout_ms` | integer | `120000` | 1000 to 3600000 ms | How long one write of a response waits for a client that does not read (a paused download). Past it the response ends. |
 | `shutdown_timeout_ms` | integer | `10000` | 1000 to 600000 ms | How long a stop (SIGTERM, SIGINT) waits for the running requests. Past it the process ends with status 1. |
-| `metrics` | boolean | `true` |  | Serve GET /metrics (the Prometheus text format). |
+| `metrics` | boolean | `true` |  | Serve GET /metrics (the Prometheus text format). In the authzen mode, the route needs the identity token and the action access on the service. |
 | `access_log` | boolean | `true` |  | Write one log line for each request. A probe that succeeds is not written. |
 | `stats_log_interval_ms` | integer | `300000` | 0 or 10000 to 86400000 ms | Write a server.stats log line this often. 0 = never. |
 

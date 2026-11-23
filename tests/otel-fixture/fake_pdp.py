@@ -12,7 +12,10 @@ the headers that matter and the body). The tests set its answers and read what i
                              and every resource below it (the prefix rule of the grants, docs/access.md "Hosts"). The path is
                              "service:<id>/host:<id>/database:<id>" with the ids percent-encoded; a path that does not start with
                              "service:" starts below the service of the PDP ("host:local" is "service:db/host:local"). deny_subjects
-                             lists the subjects that exist and hold no action: false for every action, with no reason.
+                             lists the subjects that exist and hold no action: false for every action, with no reason. The action
+                             access (ProcurAuth 8.3, 10.1c: a route with no action) is true for each known subject, also with
+                             "default": false or a grant in "subjects"; deny_subjects and a deny entry "access" refuse it, and "fixed"
+                             replaces its answer.
                              unknown_subjects lists the subjects that the PDP does not know: false for every action, with
                              "context": {"reason": "unknown_subject"} (contract 11.5). subjects gives the whole grant of a
                              subject: true for the entries of its list only (the same forms as allow). parents gives the tree of
@@ -210,6 +213,13 @@ def decide(subject: dict, action: dict, resource: dict, context: dict | None = N
     fixed = (answer["fixed"] or {}).get(str((action or {}).get("name", "")))
     if isinstance(fixed, dict):
         return json.loads(json.dumps(fixed))
+    if str((action or {}).get("name", "")) == "access":
+        # ProcurAuth 8.3 and 10.1c: the edge decides `access` before it sends a request, so each known test subject holds it, also with
+        # "default": false or with a grant in "subjects". A subject of deny_subjects and a deny entry of access refuse it. `confirm` has no
+        # effect on it (17.8), and it has no ceiling: the answer is a plain decision.
+        subject_id = str((subject or {}).get("id", ""))
+        refused = subject_id in answer["deny_subjects"] or any(matches(entry, "access", chain) for entry in answer["deny"])
+        return {"decision": not refused}
     granted = allowed(answer, subject, action, chain, match == "subtree")
     # 5.5a, 17.1: the question of an other permission has context.permission_only. The PDP ignores `confirm` for it: a plain decision.
     permission_only = isinstance(context, dict) and context.get("permission_only") is True

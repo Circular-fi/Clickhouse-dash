@@ -375,6 +375,7 @@ const char* mcp_tool_access_action(const McpToolInfo& tool) {
         return "query.export";
       case AccessRuleKind::Exempt:
       case AccessRuleKind::Identity:
+      case AccessRuleKind::NoAction:
         return nullptr;
       case AccessRuleKind::Unknown:
         return "unknown";

@@ -702,6 +702,7 @@ std::string rule_text(const char* method, const char* path) {
   switch (rule.kind) {
     case AccessRuleKind::Exempt: return "exempt";
     case AccessRuleKind::Identity: return "identity";
+    case AccessRuleKind::NoAction: return "access";
     case AccessRuleKind::Action: return std::string(rule.action) + where;
     case AccessRuleKind::Run: return "run" + where + (rule.spend ? " spend" : "");
     case AccessRuleKind::Export: return "export" + where;
@@ -711,18 +712,20 @@ std::string rule_text(const char* method, const char* path) {
 }
 
 void test_route_rules() {
-  // Every route of server.cpp, with what it needs.
+  // Every route of server.cpp, with what it needs. "access": the route runs no action, so it asks the action access on the service (ProcurAuth
+  // 10.1c). Only the health probes, the action document and the MCP endpoint need no token.
   const std::vector<std::tuple<const char*, const char*, const char*>> table = {
-      {"GET", "/livez", "exempt"}, {"GET", "/readyz", "exempt"}, {"GET", "/healthz", "exempt"}, {"GET", "/metrics", "exempt"},
+      {"GET", "/livez", "exempt"}, {"GET", "/readyz", "exempt"}, {"GET", "/healthz", "exempt"}, {"GET", "/metrics", "access"},
+      {"HEAD", "/livez", "exempt"}, {"HEAD", "/metrics", "access"},
       {"GET", "/.well-known/procurauth/actions", "exempt"}, {"POST", "/mcp", "exempt"}, {"GET", "/mcp", "exempt"},
-      {"GET", "/", "identity"}, {"GET", "/query", "identity"}, {"GET", "/system/queries/123", "identity"}, {"GET", "/explorer/catalog", "identity"},
-      {"GET", "/observability/traces", "identity"}, {"GET", "/mcp-integration/usage", "identity"}, {"GET", "/static/app_common.js", "identity"},
-      {"HEAD", "/static/app_common.js", "identity"},
-      {"GET", "/api/version", "identity"}, {"GET", "/api/hosts", "identity"}, {"GET", "/api/hosts/stream", "identity"}, {"GET", "/api/health", "identity"},
+      {"GET", "/", "access"}, {"GET", "/query", "access"}, {"GET", "/system/queries/123", "access"}, {"GET", "/explorer/catalog", "access"},
+      {"GET", "/observability/traces", "access"}, {"GET", "/mcp-integration/usage", "access"}, {"GET", "/static/app_common.js", "access"},
+      {"HEAD", "/static/app_common.js", "access"}, {"GET", "/explorer/_operations", "access"},
+      {"GET", "/api/version", "access"}, {"GET", "/api/hosts", "access"}, {"GET", "/api/hosts/stream", "access"}, {"GET", "/api/health", "access"},
       {"GET", "/api/meta", "run@host/database"}, {"POST", "/api/format", "run@host body"},
       {"POST", "/api/query/run", "run@host body spend"}, {"POST", "/api/query", "run@host body spend"}, {"GET", "/api/query/stream", "identity"},
-      {"POST", "/api/query/cancel", "identity"}, {"POST", "/api/query/analysis", "run@host body"}, {"POST", "/api/query/deep-analysis", "run@host body spend"},
-      {"GET", "/api/query/deep-analysis", "run@host"}, {"POST", "/api/query/deep-analysis/cancel", "identity"}, {"GET", "/api/query/execution", "run@host"},
+      {"POST", "/api/query/cancel", "access"}, {"POST", "/api/query/analysis", "run@host body"}, {"POST", "/api/query/deep-analysis", "run@host body spend"},
+      {"GET", "/api/query/deep-analysis", "run@host"}, {"POST", "/api/query/deep-analysis/cancel", "access"}, {"GET", "/api/query/execution", "run@host"},
       {"POST", "/api/export/run", "export@host body"}, {"POST", "/api/export/stream", "identity"}, {"GET", "/api/export/stream", "export@host"},
       {"GET", "/api/traces/search", "observability.read@host"}, {"GET", "/api/traces/logs", "observability.read@host"}, {"GET", "/api/logs/meta", "observability.read@host"},
       {"GET", "/api/metrics/series", "observability.read@host"}, {"POST", "/api/logs/search", "unknown"},
@@ -730,7 +733,7 @@ void test_route_rules() {
       {"GET", "/api/query-library/queries/q1", "library.read"}, {"POST", "/api/query-library/folders", "library.write"},
       {"PATCH", "/api/query-library/folders/f1", "library.write"}, {"DELETE", "/api/query-library/queries/q1", "library.write"},
       {"POST", "/api/query-library/import", "library.write"},
-      {"GET", "/api/mcp/meta", "identity"}, {"GET", "/api/mcp/keys", "mcp.keys.read"}, {"POST", "/api/mcp/keys", "mcp.keys.write"},
+      {"GET", "/api/mcp/meta", "access"}, {"GET", "/api/mcp/keys", "mcp.keys.read"}, {"POST", "/api/mcp/keys", "mcp.keys.write"},
       {"DELETE", "/api/mcp/keys/k1", "mcp.keys.write"}, {"GET", "/api/mcp/keys/k1/access", "mcp.keys.read"}, {"GET", "/api/mcp/access", "mcp.keys.read"},
       {"GET", "/api/mcp/usage", "mcp.usage.read"}, {"GET", "/api/mcp/usage/overview", "mcp.usage.read"},
       {"GET", "/api/mcp/keys/k1/usage", "mcp.usage.read"}, {"GET", "/api/mcp/keys/k1/cost", "mcp.usage.read"},
@@ -1290,6 +1293,71 @@ void test_pdp_permission_only_reason_of_approval() {
   fake->answer = ok(R"({"decision":false,"context":{"reason":"invalid_resource"}})");
   const AccessDecision denied = client.decide("alice", {other}, PdpCallContext{})[0];
   CHECK(!denied.failed && !denied.allowed && denied.reason == PdpReason::InvalidResource);
+}
+
+// ProcurAuth 10.1c: a route that runs no action asks `access` on the service, with no usage and no approval. `confirm` has no effect on
+// `access` (17.8), so a reason of 17.1 for it is not valid: the route answers 503, and nothing is kept. A true answer is kept for cache_ttl
+// for the subject, so the files of one page cost one question to the PDP.
+void test_pdp_access_of_a_route_with_no_action() {
+  std::vector<FakeTransport::Call> calls;
+  auto transport = std::make_unique<FakeTransport>(&calls);
+  FakeTransport* fake = transport.get();
+  PdpOptions options;
+  options.cache_ttl = std::chrono::seconds(60);
+  PdpClient client(options, std::move(transport));
+  const AccessQuestion entry{"access", access_service_resource("db")};
+  // The question: the action access, the service with no ancestors, and no usage, no approval and no permission_only in the context.
+  const std::string body = PdpClient::request_body("alice", {entry});
+  rapidjson::Document doc;
+  doc.Parse(body.c_str(), body.size());
+  CHECK(doc["action"]["name"].GetString() == std::string("access"));
+  CHECK(doc["resource"]["type"].GetString() == std::string("service") && doc["resource"]["id"].GetString() == std::string("db"));
+  CHECK(!doc["resource"].HasMember("properties"));
+  CHECK(!doc["context"].HasMember("usage") && !doc["context"].HasMember("approval") && !doc["context"].HasMember("permission_only"));
+  for (const char* reason : {"approval_required", "approval_pending", "approval_denied", "approval_expired"}) {
+    fake->answer = ok(std::string(R"({"decision":false,"context":{"reason":")") + reason + R"("}})");
+    const AccessDecision answer = client.decide("alice", {entry}, PdpCallContext{})[0];
+    CHECK(answer.failed && access_outcome(answer) == AccessOutcome::Failed);
+    CHECK_EQ(client.cached_entries(), size_t(0));
+  }
+  // A plain false is a refusal (403), and an unknown subject too.
+  fake->answer = ok(R"({"decision":false,"context":{"reason":"unknown_subject"}})");
+  const AccessDecision unknown = client.decide("bob", {entry}, PdpCallContext{})[0];
+  CHECK(!unknown.failed && access_outcome(unknown) == AccessOutcome::Denied && access_refusal(unknown, "access").status == 403);
+  // A true answer: the first request of a subject asks the PDP, the next ones of the same subject use the kept answer.
+  fake->answer = ok(R"({"decision":true})");
+  const size_t before = calls.size();
+  CHECK(client.decide("carol", {entry}, PdpCallContext{})[0].allowed);
+  for (int i = 0; i < 20; ++i) {
+    const AccessDecision again = client.decide("carol", {entry}, PdpCallContext{})[0];
+    CHECK(again.allowed && std::string(again.source) == "cache");
+  }
+  CHECK_EQ(calls.size(), before + 1);
+  // Another subject has its own answer.
+  CHECK(std::string(client.decide("dave", {entry}, PdpCallContext{})[0].source) == "pdp");
+  CHECK_EQ(calls.size(), before + 2);
+}
+
+// ProcurAuth 3.9 and 10.7b: the metadata member procurauth_directory_max_age_seconds is a whole number from 1. ChDash reads it for its log and
+// takes no decision from it. A member of another form is ignored, as the members procurauth_approval_* are: it never stops ChDash.
+void test_pdp_metadata_directory_max_age() {
+  const std::string base = R"({"policy_decision_point":"http://pdp.test","access_evaluation_endpoint":"http://pdp.test/access/v1/evaluation",)"
+                           R"("access_evaluations_endpoint":"http://pdp.test/access/v1/evaluations")";
+  std::string error;
+  PdpEndpoints none;
+  CHECK(PdpClient::parse_metadata(base + "}", "http://pdp.test", &none, &error));
+  CHECK(!none.directory_max_age_seconds);
+  PdpEndpoints one;
+  CHECK(PdpClient::parse_metadata(base + R"(,"procurauth_directory_max_age_seconds":1})", "http://pdp.test", &one, &error));
+  CHECK(one.directory_max_age_seconds == uint64_t(1));
+  PdpEndpoints minute;
+  CHECK(PdpClient::parse_metadata(base + R"(,"procurauth_directory_max_age_seconds":60})", "http://pdp.test", &minute, &error));
+  CHECK(minute.directory_max_age_seconds == uint64_t(60));
+  for (const char* bad : {"0", "-1", "1.5", "1e2", "\"60\"", "null", "true", "[60]"}) {
+    PdpEndpoints ignored;
+    CHECK(PdpClient::parse_metadata(base + R"(,"procurauth_directory_max_age_seconds":)" + bad + "}", "http://pdp.test", &ignored, &error));
+    CHECK(!ignored.directory_max_age_seconds);
+  }
 }
 
 // The resources of the hosts (contract 11.4): the encoded ids, the path, the valid ids, and the cache that keeps two hosts apart.
@@ -2640,6 +2708,8 @@ int main() {
   RUN(test_access_outcome);
   RUN(test_pdp_cache_answers);
   RUN(test_pdp_permission_only_reason_of_approval);
+  RUN(test_pdp_access_of_a_route_with_no_action);
+  RUN(test_pdp_metadata_directory_max_age);
   RUN(test_resources);
   RUN(test_host_hierarchy);
   RUN(test_navigation_pages);

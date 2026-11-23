@@ -517,6 +517,18 @@ const DENIED_PATHS = { explorer: '/explorer/catalog', system: '/system', 'mcp-ke
 async function asHuman(page, sub) {
   await page.setExtraHTTPHeaders({ 'X-Identity-Token': identityToken(sub) });
 }
+// Each file of a page, the version and the hosts run no action: each request needs the identity token, and ChDash asks the action access on the
+// service for it (ProcurAuth 10.1c, docs/access.md "Routes with no action"). The list collects each such request that got 401 or 403: a request
+// of the page without the identity header, or a refusal of access.
+function refusedFiles(page) {
+  const refused = [];
+  page.on('response', (response) => {
+    const { pathname } = new URL(response.url());
+    const file = pathname.includes('/static/') || pathname.endsWith('/api/version') || pathname.endsWith('/api/hosts');
+    if (file && [401, 403].includes(response.status())) refused.push(`${response.status()} ${pathname}`);
+  });
+  return refused;
+}
 // The links of the header that a human sees. A wide window shows the switcher as a row of links; a narrow one has a button that opens it.
 async function visibleNavLinks(page) {
   const shown = [];
@@ -561,8 +573,11 @@ test.describe('the navigation follows the access of the human', () => {
 
   test('a human with only query actions sees the Query page and no link to another page; the other pages answer 403', async ({ page }) => {
     await asHuman(page, 'nav-querier');
+    const refused = refusedFiles(page);
     await page.goto(`${ACCESS}/query`);
     await expect(page.locator('#runButton')).toBeVisible({ timeout: 15_000 });
+    // The identity header reached each file of the page, and the PDP gave access for each of them.
+    expect(refused).toEqual([]);
     // The server lists the pages of this render, and hides the links of the others from the first paint.
     await expect(page.locator('#chdashPages')).toHaveAttribute('content', 'query');
     for (const name of ['explorer', 'observability', 'system', 'mcp']) {

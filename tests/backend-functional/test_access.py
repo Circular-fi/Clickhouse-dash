@@ -277,6 +277,93 @@ def test_the_actions_are_published_without_a_token():
     assert call("GET", "/livez", tok=None).status_code == 200
 
 
+def is_entry(evaluation: dict) -> bool:
+    """True for the question of a route with no action (ProcurAuth 10.1c): access on the service, with no usage and no approval."""
+    return evaluation["action"]["name"] == "access"
+
+
+def entries(since: int = 0) -> list[dict]:
+    return [e for r in received()[since:] for e in evaluations(r) if is_entry(e)]
+
+
+# ProcurAuth U127 (10.0 step 2, 10.1c, decision 210): a health probe needs no token and asks no question. Each other route that runs no action
+# needs the token and asks access on the service, with no usage and no approval. The runner of ProcurAuth runs the case on /livez and /metrics.
+@needs_access
+def test_a_health_probe_asks_nothing_and_a_route_with_no_action_asks_access_on_the_service():
+    since = len(received())
+    for path in ("/livez", "/readyz", "/healthz"):
+        assert call("GET", path, tok=None).status_code in (200, 503), path
+        assert call("GET", path).status_code in (200, 503), path
+    assert received()[since:] == []
+    paths = ["/metrics", "/static/app_common.js", "/api/health", "/api/mcp/meta", "/explorer/_operations"]
+    for path in paths:
+        assert call("GET", path, tok=None).status_code == 401, path
+    assert received()[since:] == []
+    for path in paths:
+        subject = f"entry-{uuid.uuid4().hex[:8]}"  # a new subject: no kept answer
+        before = len(received())
+        response = call("GET", path, tok=token(subject), allow_redirects=False)
+        # /api/health answers 503 with its counts when a host is down: that is not a refusal.
+        ran = response.status_code in (200, 302, 303, 307, 308) or (path == "/api/health" and "healthy_hosts" in response.text)
+        assert ran, (path, response.status_code, response.text[:200])
+        questions = [e for r in received()[before:] for e in evaluations(r)]
+        assert len(questions) >= 1 and is_entry(questions[0]), (path, questions)
+        first = questions[0]
+        assert first["subject"] == {"type": "user", "id": subject}, first
+        assert first["resource"] == SERVICE, first
+        assert "usage" not in first["context"] and "approval" not in first["context"] and "permission_only" not in first["context"], first
+        # A file, a redirect, /metrics and the health of the hosts ask nothing else. The meta of MCP asks nothing else here: MCP is off on
+        # this instance.
+        assert len(questions) == 1, (path, questions)
+    # A subject that the PDP refuses gets 403 with the action access, and no file. The address of a page gets the 403 page.
+    answer(deny_subjects=["refused"])
+    for path in paths[:4]:
+        response = call("GET", path, tok=token("refused"))
+        assert response.status_code == 403 and response.json()["action"] == "access", (path, response.text[:200])
+    page = call("GET", "/query", tok=token("refused"))
+    assert page.status_code == 403 and 'id="accessDenied"' in page.text and 'data-action="access"' in page.text, page.text[:300]
+    assert "<script" not in page.text
+
+
+# ProcurAuth 10.1, 10.1c: the question of a route with no action has no usage, so its answer is kept for pdp.cache_ttl. The files of one page
+# cost one question for a subject in that time: each other request uses the kept answer.
+@needs_access
+def test_the_files_of_a_page_cost_one_kept_question():
+    subject = f"files-{uuid.uuid4().hex[:8]}"
+    tok = token(subject)
+    files = ["/static/app_common.js", "/static/app_api.js", "/static/app_dom.js", "/static/app_boot.js", "/static/app_assets.js"]
+    before = len(received())
+    started = time.monotonic()
+    for path in files * 4:
+        assert call("GET", path, tok=tok).status_code in (200, 304), path
+    elapsed = time.monotonic() - started
+    asked_ = [e for r in received()[before:] for e in evaluations(r)]
+    assert all(is_entry(e) for e in asked_), asked_
+    # One question for each period of the cache at most: 20 requests in less than one period ask the PDP once.
+    assert 1 <= len(asked_) <= 1 + int(elapsed / CACHE_TTL), (len(asked_), elapsed)
+    if elapsed < CACHE_TTL * 0.8:
+        assert len(asked_) == 1, (len(asked_), elapsed)
+    # Another subject has its own question.
+    other = len(received())
+    assert call("GET", files[0], tok=token(f"{subject}-b")).status_code == 200
+    assert len(entries(other)) == 1
+
+
+# ProcurAuth 10.1c and 17.8: confirm has no effect on access, so a reason of 17.1 for it is not a valid answer (503), and a PDP that fails gives
+# 503. The address of a page gets the 503 page with no script.
+@needs_access
+def test_a_reason_of_approval_or_a_failure_for_access_gives_503():
+    for fixed in ({"decision": False, "context": {"reason": "approval_required"}}, {"decision": False, "context": {"reason": "approval_pending"}}):
+        answer(fixed={"access": fixed})
+        response = call("GET", "/static/app_common.js", tok=token(f"gate-{uuid.uuid4().hex[:8]}"))
+        assert response.status_code == 503 and response.json()["error_code"] == "pdp_unavailable", response.text[:200]
+    answer(status=500)
+    response = call("GET", "/metrics", tok=token(f"down-{uuid.uuid4().hex[:8]}"))
+    assert response.status_code == 503 and response.json()["action"] == "access", response.text[:200]
+    page = call("GET", "/explorer/catalog", tok=token(f"down-{uuid.uuid4().hex[:8]}"))
+    assert page.status_code == 503 and 'id="accessUnavailable"' in page.text and "<script" not in page.text, page.text[:300]
+
+
 # Old id u05 (second test). No ProcurAuth case id: the protocol has one path, and the old path is a choice of ChDash.
 @needs_access
 def test_the_former_path_of_the_document_has_no_route():
@@ -386,7 +473,8 @@ def test_a_failure_of_the_pdp_gives_the_503_page_and_no_host_list():
     assert 'id="accessUnavailable"' in page.text and 'id="accessDenied"' not in page.text
     assert "<script" not in page.text
     assert call("GET", "/").status_code == 503
-    assert_pdp_unavailable(call("GET", "/api/hosts"), "hosts")
+    # The routes with no action ask access on the service first (ProcurAuth 10.1c): its failure names the action access.
+    assert_pdp_unavailable(call("GET", "/api/hosts"), "access")
     # The routes that filter a list with the decisions answer 503 too, never an empty list or false decisions.
     assert_pdp_unavailable(call("GET", "/api/version"), "access")
     assert_pdp_unavailable(call("GET", "/api/explorer/catalog?host_id=local"), "explorer.read")
@@ -1430,7 +1518,9 @@ def test_one_batch_for_the_page_hides_what_is_denied():
     assert set(access["hosts"]) == {"local", "other"}, access
     assert access["hosts"]["local"]["system.read"] is False and access["hosts"]["other"]["explorer.read"] is True
     assert len(access["hosts"]["local"]) == 5
-    batches = received()[before:]
+    # The question of the route with no action (access on the service, ProcurAuth 10.1c), then one batch of the navigation.
+    batches = [r for r in received()[before:] if not all(is_entry(e) for e in evaluations(r))]
+    assert len(entries(before)) == 1, received()[before:]
     assert len(batches) == 1 and batches[0]["path"] == "/access/v1/evaluations", batches
     # One batch: the five published actions on each of the two hosts.
     asked_ = evaluations(batches[0])

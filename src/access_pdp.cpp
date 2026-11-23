@@ -639,6 +639,8 @@ bool PdpClient::parse_metadata(const std::string& body, const std::string& ident
   tolerant("procurauth_approval_lease_min_seconds", &endpoints.approval_lease_min_seconds);
   tolerant("procurauth_approval_lease_max_seconds", &endpoints.approval_lease_max_seconds);
   tolerant("procurauth_approval_wait_max_seconds", &endpoints.approval_wait_max_seconds);
+  // The age bound of the directory of the PDP (ProcurAuth 3.9, 10.7b): only for the log. ChDash takes no decision from it.
+  tolerant("procurauth_directory_max_age_seconds", &endpoints.directory_max_age_seconds);
   *out = std::move(endpoints);
   return true;
 }
@@ -884,10 +886,13 @@ bool PdpClient::ask_chunk(const std::string& subject, const std::vector<AccessQu
   call.error = check_result(result, elapsed, context, call.path, timeout);
   if (call.error.empty() && !parse_answer(result.body, asked.size(), &decisions)) call.error = "the answer is not a valid AuthZEN answer";
   // ProcurAuth 5.5a and 10.3, MCP binding 3.7 (decision 195): a question with context.permission_only never gets a reason of 17.1. Such an answer
-  // is not valid, as a bad member is: every question of the request fails, and nothing is kept.
+  // is not valid, as a bad member is: every question of the request fails, and nothing is kept. The action `access` never needs an approval
+  // either (10.1c, 17.8): a reason of 17.1 for it is not valid too.
   for (size_t k = 0; call.error.empty() && k < asked.size(); ++k) {
     if (asked[k].permission_only && pdp_reason_is_approval(decisions[k].reason)) {
       call.error = "a reason of ProcurAuth 17.1 for a question with context.permission_only (5.5a)";
+    } else if (asked[k].action == "access" && pdp_reason_is_approval(decisions[k].reason)) {
+      call.error = "a reason of ProcurAuth 17.1 for the action access (10.1c)";
     }
   }
 

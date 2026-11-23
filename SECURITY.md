@@ -36,7 +36,7 @@ ChDash has no login page. The configuration requires an `access` block. The `acc
    - the system user: `SELECT` on the `system` tables that the pages read and on the OpenTelemetry tables, and `KILL QUERY` for the cancel. The access audit lists the missing ones.
    - the MCP user: read only (`readonly = 1` in its profile), and `SELECT` on the data that MCP may read.
 7. **Run the container with the least privilege.** Use a user that is not root, a read-only root file system, no capability and `no-new-privileges` (`examples/docker-compose.config.yml`). Keep the password files separate from the configuration. Make them readable only by this user.
-8. **Keep `/metrics` internal.** It shows host names and counts, never a password. It needs no identity token, as the probes do.
+8. **Keep `/metrics` and the probes internal.** `/metrics` shows host names and counts, never a password. In the authzen mode, it needs the identity token and the action `access` on the service. The health probes (`/livez`, `/readyz`, `/healthz`) need no identity token in each mode.
 
 ### What ChDash does
 
@@ -45,7 +45,7 @@ ChDash has no login page. The configuration requires an `access` block. The `acc
 - A request body has a size limit. A JSON body has a depth limit. The SQL formatter has a depth limit and a time limit.
 - The identifiers that act as a capability (`query_id`, `export_id`) are created by the system random source. The signing secret of the tokens and the MCP secrets also come from the system random source.
 - The log never holds row data, a password, a token or a `query_id`. The URIs in the log and in `/metrics` have no password.
-- In the authzen mode, ChDash checks the identity token of each request to the pages and to the API. It checks the signature, `iss`, `aud`, `exp` and the life of the token. ChDash checks the action of each route with the PDP. The question names the host and the database of the request, so a grant on one host never covers another host. A PDP error denies the action (fail closed). The log holds each decision (`access.decision`). It also holds the subject of each request (`http.request`).
+- In the authzen mode, ChDash checks the identity token of each request, except the health probes, the action document and the MCP endpoint (which checks its own caller). A route that runs no action, for example a static file or `/metrics`, asks the PDP the action `access` on the service. It checks the signature, `iss`, `aud`, `exp` and the life of the token. ChDash checks the action of each route with the PDP. The question names the host and the database of the request, so a grant on one host never covers another host. A PDP error denies the action (fail closed). The log holds each decision (`access.decision`). It also holds the subject of each request (`http.request`).
 
 Refer to [docs/operations.md](docs/operations.md) for the details. The details cover the headers, the guard, the probes, the shutdown, the log and the metrics.
 
