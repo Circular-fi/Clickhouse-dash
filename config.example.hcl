@@ -293,6 +293,9 @@ mcp {
   max_memory_bytes      = 1073741824
   max_rows_to_read      = 0    # 0: no limit
   rate_limit_per_minute = 600  # per key; 0: no limit
+  # Requests with no valid key (no key, an unknown or expired key, no valid identity token) from one client
+  # address in one minute; over it: 429 with Retry-After. Behind a proxy all clients share it. 0: no limit.
+  # unauthenticated_rate_limit_per_minute = 10
   # Origins of browser clients (scheme://host[:port]). A request with an Origin
   # header that is not listed answers 403. A request without Origin is accepted.
   allowed_origins       = []
@@ -357,6 +360,12 @@ access {
     # search   = false                      # true: the AuthZEN Resource Search lists the databases, if the PDP announces it
     # batch_timeout = "2s"                  # all the requests of one split call; not less than timeout; past it: 503
     # usage_max_seconds = 120               # the highest procurauth_usage_max_seconds of the metadata; above it the start stops
+  }
+  # The approval of a person (docs/access.md, "Approval of an action"). The block is optional, and the keys have
+  # defaults. The PDP decides which grant needs an approval; these keys only tune the MCP calls that wait for one.
+  approval {
+    # wait              = "15s"             # the longest wait of one MCP call for the verdict (0s to 30s); 0s: no wait
+    # max_command_bytes = 16384             # the largest op and view of one approval request (1024 to 1048576)
   }
 }
 

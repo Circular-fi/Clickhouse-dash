@@ -45,7 +45,7 @@ tests/conformance/run.sh /path/to/chdash
 
 ### The commit of the runner
 
-The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `1bdfe6199209b80e828b4cffd6e9d3052289f775` (main of 2026-11-13, the merge of the lots PS1 and SM1). This commit has the cases of the approvals for each action (U30 and U100 to U117), the profile key `approval_calls` and the member `context.permission_only` (protocol 5.5a). The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
+The workflow `.github/workflows/conformance.yml` checks out one fixed commit of ProcurAuth: `1bdfe6199209b80e828b4cffd6e9d3052289f775` (main of 2026-11-13). This is the commit of the lot SM1. It comes after the commits of the lots S7 and PS1. It is a normal commit, not a merge commit. This commit has the cases of the approvals for each action (U30 and U100 to U117), the profile key `approval_calls` and the member `context.permission_only` (protocol 5.5a). The earlier pins have not. A change of the runner thus never changes the result of the job alone. To bump the commit:
 
 1. Run `tests/conformance/run.sh` with `PROCURAUTH_DIR` on the new commit and `CONFORMANCE_STRICT=1`.
 2. Update `tests/conformance/expected.txt` and the result in this document.
@@ -138,9 +138,9 @@ The `op` of an entry is the `op` that ChDash builds ([access.md](access.md#the-o
 
 The MCP server contract (section 2.5, case T03) makes ChDash refuse a `2026-07-28` request without the headers `Mcp-Method` and, for `tools/call`, `Mcp-Name`. The answer is `400` with `-32020`, before any access check. The operation `mcp_call_plain` of the profile sends the two headers. Since the ProcurAuth commit `85b695d` (2026-11-07), each MCP request that a case writes has them too. With an older runner, the 11 MCP cases U18, U23, U26, U29, U31, U88, U89, U91, U94, U95 and U98 fail for this reason only.
 
-## Result of 2026-11-12: the three variants
+## Result of 2026-11-13: the three variants
 
-The run used the static release binary of the branch `feat/alignment`, built with `tests/smoke/Dockerfile.release`, the script `tests/conformance/run.sh` and the runner of ProcurAuth at commit `1bdfe61` (lots S7, PS1 and SM1). Each variant ran in strict mode. The cases of the approvals are required: U30 and U100 to U117.
+The run used the static release binary of ChDash 1.5.1 (main, commit `4091a36`), built with `tests/smoke/Dockerfile.release`. It used the script `tests/conformance/run.sh` and the runner of ProcurAuth at commit `1bdfe61` (the lot SM1, after the lots S7 and PS1). Each variant ran in strict mode. The cases of the approvals are required: U30 and U100 to U117.
 
 | Result | Default | Full | Lean |
 |---|---|---|---|

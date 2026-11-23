@@ -32,7 +32,7 @@ The page succeeds when a visitor understands what the product is from the video,
 
 ## Positioning
 
-The product is a single static binary. The archive is about 6.5 MB, for Linux and macOS, with amd64 and arm64 builds. The binary talks to ClickHouse over the native TCP protocol. It covers query, exploration, observability, server health and MCP in one place. One HCL file configures it.
+The product is a single static binary. The archive is about 10 MB, for Linux and macOS, with amd64 and arm64 builds. The binary talks to ClickHouse over the native TCP protocol. It covers query, exploration, observability, server health and MCP in one place. One HCL file configures it.
 
 Observability reads the tables that the OpenTelemetry Collector contrib ClickHouse exporter writes. It uses no second store.
 
