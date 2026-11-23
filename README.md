@@ -179,7 +179,7 @@ For this reason, a failure of the system account does not mark a host as down wh
 
 ## HTTP API
 
-- `GET /livez`: liveness (the process answers). `GET /readyz`: readiness (a host answers and the server does not stop). `GET /healthz`: strict health (every host answers). `GET /metrics`: the Prometheus text format. Refer to [`docs/operations.md`](docs/operations.md) for the probes, the shutdown on SIGTERM, the JSON log and the metrics. The same document covers the HTTP security: the headers and the write guard.
+- `GET /livez`: liveness (the process answers). `GET /readyz`: readiness (a host answers and the server does not stop). `GET /healthz`: strict health (every host answers). `GET /metrics`: the Prometheus text format (in the authzen mode, it needs the identity token: [`docs/access.md`](docs/access.md#routes-with-no-action)). Refer to [`docs/operations.md`](docs/operations.md) for the probes, the shutdown on SIGTERM, the JSON log and the metrics. The same document covers the HTTP security: the headers and the write guard.
 - `GET /api/meta?host_id=<id>` build metadata and optional scoped autocomplete catalogs. A request without `host_id` gets `400 missing_host_id`. The other routes of the pages behave the same way.
   The server-wide catalogs use `system_uri`. They are `keywords`, `functions`, `table_functions`, `formats`, `settings` and `data_types`.
   The catalogs that depend on visibility use `runner_uri`. They are `databases`, `tables` and `columns`.
