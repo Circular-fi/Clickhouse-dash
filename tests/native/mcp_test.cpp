@@ -5622,6 +5622,39 @@ void test_creator_access() {
   gate.forget(other_host.id);
   state = gate.state(other_host);
   CHECK(has("list_databases"));
+
+  // A key of the configuration file in the authzen mode (owner decision of 2026-11-23): the server gives it the subject key:<name> (ProcurAuth
+  // 3.2). The PDP decides as for a creator, but "unknown_subject" never makes such a key an orphan: it refuses each tool of an action, and the
+  // tools that use no action stay.
+  CHECK_EQ(mcp_file_key_subject("ci-bot"), std::string("key:ci-bot"));
+  McpKey file_key = a_key({"list_databases", "system_overview", "list_hosts"}, {"*"});
+  file_key.id = "ci-bot";
+  file_key.name = "ci-bot";
+  file_key.source = "config";
+  file_key.creator = mcp_file_key_subject(file_key.name);
+  pdp.allowed.insert("key:ci-bot|explorer.read@service:db");
+  const int file_batches = pdp.batches;
+  state = gate.state(file_key);
+  CHECK_EQ(pdp.batches, file_batches + 1);
+  CHECK(state.status == McpCreatorStatus::Active && has("list_databases") && has("list_hosts") && !has("system_overview"));
+  CHECK_EQ(gate.tool_refused_action(file_key, *mcp_find_tool("system_overview")), std::string("system.read"));
+  // The PDP does not know key:ci-bot: no orphan, no tool of an action, and the tool with no action stays.
+  gate.forget(file_key.id);
+  pdp.allowed.erase("key:ci-bot|explorer.read@service:db");
+  pdp.unknown.insert("key:ci-bot");
+  state = gate.state(file_key);
+  CHECK(state.status == McpCreatorStatus::Active && !mcp_creator_orphan(state.status));
+  CHECK(has("list_hosts") && !has("list_databases") && !has("system_overview"));
+  CHECK_EQ(gate.tool_refused_action(file_key, *mcp_find_tool("list_databases")), std::string("explorer.read"));
+  rapidjson::Document no_arguments;
+  no_arguments.SetObject();
+  const McpCreatorCall refused = gate.call(file_key, *mcp_find_tool("list_databases"), no_arguments);
+  CHECK(refused.access == McpAccess::Denied && refused.action == "explorer.read");
+  // A failure of the PDP stays a failure: the state is Unknown.
+  gate.forget(file_key.id);
+  pdp.fails = true;
+  CHECK(gate.state(file_key).status == McpCreatorStatus::Unknown);
+  pdp.fails = false;
 }
 
 // The access of humans can take tools from a key (McpToolBackend::permitted_tools and tool_permitted): tools/list does not show them,
@@ -5687,6 +5720,12 @@ void test_protocol_key_ceiling_refusal() {
   const auto plain = mcp_handle_message(rpc("tools/call", R"({"name":"list_databases","arguments":{}})"), key, backend, info, now);
   CHECK_EQ(plain.http_status, 200);
   CHECK_EQ(parse(plain.body)["error"]["code"].GetInt(), kRpcInvalidParams);
+  // A key of the configuration file asks the PDP for itself (key:<name>): the message names the grant of the key, not of a creator.
+  McpKey file_key = key;
+  file_key.source = "config";
+  const auto file_limited = mcp_handle_message(rpc("tools/call", R"({"name":"system_overview","arguments":{}})"), file_key, backend, info, now);
+  CHECK_EQ(file_limited.http_status, 403);
+  CHECK_EQ(std::string(parse(file_limited.body)["error"]["message"].GetString()), std::string(kMcpFileKeyCeilingMessage));
 }
 
 void test_protocol_modern() {

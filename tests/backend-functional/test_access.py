@@ -1216,8 +1216,10 @@ def test_an_mcp_key_never_has_more_than_its_creator():
         assert mcp_call(secret, "list_hosts").json()["result"]["isError"] is False
         listed = [k for k in mcall("GET", "/api/mcp/keys", tok=tok).json()["keys"] if k["id"] == key["id"]]
         assert listed[0]["orphan"] is None and listed[0]["creator"] == "integrator", listed
-        # The key of the configuration has no creator and keeps working.
-        assert mcp_call(MCP_TOKEN, "list_hosts").status_code == 200
+        # The key of the configuration file asks the PDP for key:access, which is refused here too: its tool of an action is refused, and the
+        # tool that uses no action still works (docs/access.md, "The keys of the configuration file").
+        assert mcp_call(MCP_TOKEN, "list_hosts").json()["result"]["isError"] is False
+        assert mcp_call(MCP_TOKEN, "list_databases").json()["error"]["code"] == -32602
     finally:
         answer(default=True)
         mcall("DELETE", f"/api/mcp/keys/{key['id']}", tok=tok, headers={"Sec-Fetch-Site": "same-origin"})
@@ -1445,8 +1447,9 @@ def test_the_mcp_endpoint_keeps_its_keys_and_needs_no_identity_token():
                             headers={"Content-Type": "application/json", "Authorization": f"Bearer {MCP_TOKEN}"})
     assert response.status_code == 200, response.text
     assert "error" not in response.json(), response.text
-    # The API tool ran in the process without a token, and the PDP was not asked.
-    assert not received()
+    # The API tool ran in the process without a token. The PDP got questions only for the subject of the key of the configuration file, key:access
+    # (owner decision of 2026-11-23, docs/access.md "The keys of the configuration file"): the state of the key. list_hosts asks nothing itself.
+    assert {e["subject"]["id"] for r in received() for e in evaluations(r)} <= {"key:access"}, received()
     # A wrong key is refused by MCP, not by the access of humans.
     response = SESSION.post(f"{MCP_URL}/mcp", data=json.dumps(body), timeout=30,
                             headers={"Content-Type": "application/json", "Authorization": "Bearer mcp_wrong"})

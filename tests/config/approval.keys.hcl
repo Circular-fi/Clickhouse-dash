@@ -1,6 +1,7 @@
 # The approval of an action by a person for the MCP keys of the page (docs/access.md, "Approval of an action"; docs/mcp.md, "Keys and the access of
 # humans"). The mode keys: a key of the page has a creator, and the creator is the subject of the PDP. The fake PDP of the compose service
-# approval_keys_pdp plays the portal. The key of the configuration has no creator and no PDP question: it stays outside the approval.
+# approval_keys_pdp plays the portal. The key of the configuration file asks the PDP with the subject key:standalone (docs/access.md, "The keys
+# of the configuration file"): it has the same flow of the approval.
 # backend-functional/test_approval_keys.py uses it (APPROVAL_KEYS_BASE_URL, APPROVAL_KEYS_PDP_URL).
 server {
   listen_host = "0.0.0.0"

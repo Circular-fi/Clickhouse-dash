@@ -888,8 +888,9 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
       return refused;
     }
     if (access == McpAccess::Denied && !identity && !call.ceiling_refused.empty()) {
-      // The mode keys: the creator holds a grant with a ceiling, and a key cannot apply it. This is not a retry case: 403, fixed message.
-      McpRpcResult refused = finish_fail(kRpcForbidden, kMcpKeyCeilingMessage, 403);
+      // The mode keys: the creator (or a key of the configuration file itself) holds a grant with a ceiling, and a key cannot apply it. This is
+      // not a retry case: 403, fixed message.
+      McpRpcResult refused = finish_fail(kRpcForbidden, key.source == "config" ? kMcpFileKeyCeilingMessage : kMcpKeyCeilingMessage, 403);
       refused.tool = result.tool;
       refused.client_name = result.client_name;
       refused.client_version = result.client_version;

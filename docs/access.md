@@ -747,7 +747,7 @@ An MCP key of the page (the mode `keys`) has a creator: the person who made it. 
 
 Limits of the mode `keys`. These limits come from what the mode has:
 
-- A key of the configuration has no creator, so no subject. ChDash asks no PDP question for it and cannot ask an approval. It stays outside the approval, as the standalone keys of the ruling of 2026-11-11. It has no `get_action_status` and no control argument.
+- A key of the configuration file has no creator. In the mode `authzen`, its subject is the key itself ([The keys of the configuration file](#the-keys-of-the-configuration-file)).
 - A tool that uses no action (`list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage`) asks the PDP nothing in the mode `keys`. The actions `mcp.hosts.read`, `mcp.analysis.read` and `mcp.session` are not in the document of this mode. So these tools need no approval. They accept the control arguments and ignore them.
 - The tools `run_write_query`, `export_query` and `library_write` exist in the identity mode only. A key has no tool for `query.run.write`, `query.export` and `library.write`. So the document of the mode `keys` does not publish these three actions ([Actions and tools](#actions-and-tools)).
 - A call that cannot name one node is a tool error when more than one standing question of the key needs an approval. This happens when the key has several databases in its scope, the call names none of them, and the grants for these databases have `confirm`. The error is `invalid_argument`. For a tool that takes a database, the message tells the agent to name one database in the argument `database`. For a tool that names no database, the message tells the agent to use a tool that does. Before 1.5.0, the agent got the answer of a tool that does not exist.
@@ -757,6 +757,21 @@ Limits of the mode `keys`. These limits come from what the mode has:
 ### The op and the view
 
 The `op` holds each value that decides what the tool does. The `view` is a template of JSON Pointers into the `op`: the person reads values of the `op`, never a text that ChDash wrote apart. The control arguments are never in the `op`.
+### The keys of the configuration file
+
+A key of the configuration file is an `mcp_key` block, or a `key` block of the older form, of the mode `keys` ([mcp.md](mcp.md#the-mcp_key-block)). The owner decided on 2026-11-23 that a use of such a key can need an approval. Thus, in the mode `authzen`, ChDash asks the PDP for each call of such a key:
+
+- **The subject.** The subject of each question is `key:<name>`, with the name of the block (ProcurAuth 3.2). Example: the block `mcp_key "ci-bot"` has the subject `key:ci-bot`. A name has 1 to 32 characters of `a-z`, `0-9`, `_` and `-`, so it is a valid local part. The attribute `subject` of the block is a label of the call log only. ChDash never sends it to the PDP.
+- **The PDP must know the key.** Make a key with the id `<name>` in the PDP, for example in the portal. Give this key its grants. The PDP decides as for any key: the grants of the key and the rights of its owner (ProcurAuth 3.5). ChDash never sends the text of the key to the PDP.
+- **The rules.** The rules of a key of the page apply, with `key:<name>` in place of the creator. ChDash keeps the state of the key for `pdp.cache_ttl`. A call asks the action of its tool on the host of the key, and on its databases for a tool of the data ([Keys and the access of humans](mcp.md#keys-and-the-access-of-humans)). A call of a tool of `query.run.read` takes one unit of the budget `queries` of `key:<name>` ([Budgets of the keys](mcp.md#budgets-of-the-keys)).
+- **The approval.** The key has the flow of [The flow of a tool call](#the-flow-of-a-tool-call), with `key:<name>` as the subject. `tools/list` gives the control arguments and `get_action_status` to the key. The PDP sends the request to the owner of `key:<name>`.
+- **A ceiling.** The mode `keys` applies no ceiling (ProcurAuth 7.5). A `true` answer with a ceiling refuses the call. The answer is HTTP `403` with `-32001` and the fixed message `forbidden: the grant of this key has a limit that a key cannot apply. Use the identity mode of MCP`.
+- **An unknown key.** The answer `unknown_subject` does not make the key an orphan, and nobody can adopt it. It refuses each tool of an action, as a plain `false` does. `tools/list` does not show such a tool. A call gets the answer of a tool that does not exist (`-32602`), and the log has the line `mcp.tool_refused`. To correct this, make the key in the PDP.
+- **A failure of the PDP.** No valid answer gives HTTP `503` with `-32603`, as for a key of the page.
+- **The tools with no action.** `list_hosts`, `mcp_analysis_my_limits` and `mcp_analysis_my_usage` ask the PDP nothing in the mode `keys`. They work also for a key that the PDP does not know.
+
+The mode `open` has no access control and no PDP. In this mode, a key of the configuration file asks no question and needs no approval. It works as a standalone key (MCP binding 7.1). Nothing in the mode `open` can change this, because no PDP exists to ask. A file without an `access` block does not start ([Configuration](#configuration)).
+
 
 | Tool | `op` | `view` |
 |---|---|---|
@@ -846,7 +861,7 @@ The setting `mcp.auth_mode` chooses how `POST /mcp` knows its caller. The two mo
 
 In the mode `keys`, `POST /mcp` needs no identity token. It keeps its keys (contract section 3, [mcp.md](mcp.md)). The API tools of MCP call the routes of the API in the process (the context of an MCP call): these calls need no identity token and ask no PDP for each route. The keys, their tools, their scope and the MCP ClickHouse user limit them.
 
-A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use, on the host of the key (and on its databases for the tools of the data). The key keeps its creator. `tools/list` shows only the tools whose actions the creator holds (one batch for each key and each `pdp.cache_ttl`). `tools/call` asks the PDP for the actions of the called tool only. A key with no creator, or whose creator the PDP does not know (the reason `unknown_subject`), gets the `401` of a key that does not exist until a person adopts it ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). A creator who gets `false` without this reason still exists: the key keeps this creator, and each tool of a refused action is refused. A key of the configuration is not checked.
+A key of the page never has more than its creator ([mcp.md](mcp.md#keys-and-the-access-of-humans)). `mcp.keys.write` alone does not let a person make a key with a read action that the PDP refuses to that person. When a key is made, ChDash asks the PDP for the person and each action that the tools of the key use, on the host of the key (and on its databases for the tools of the data). The key keeps its creator. `tools/list` shows only the tools whose actions the creator holds (one batch for each key and each `pdp.cache_ttl`). `tools/call` asks the PDP for the actions of the called tool only. A key with no creator, or whose creator the PDP does not know (the reason `unknown_subject`), gets the `401` of a key that does not exist until a person adopts it ([mcp.md](mcp.md#orphan-keys-and-their-adoption)). A creator who gets `false` without this reason still exists: the key keeps this creator, and each tool of a refused action is refused. In the mode `authzen`, a key of the configuration file asks the PDP for the subject `key:<name>` ([The keys of the configuration file](#the-keys-of-the-configuration-file)). In the mode `open`, nothing asks the PDP.
 
 ## Transport
 

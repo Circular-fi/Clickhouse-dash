@@ -152,7 +152,7 @@ mcp_key "ci-bot" {
 | --- | --- |
 | label | Required. The name of the key. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. Use at most 32 characters. The prefix `ui_` is reserved for the keys of the page. |
 | `token_env`, `token_file` | Required. Give exactly one of them. `token_env` names an environment variable that holds the token. `token_file` is the path of a file that holds the token, without its last line end. The token is a secret. A `token` attribute (a token in clear text) stops the start. ChDash reads the variable or the file one time, at start. Refer to [Tokens](#tokens). |
-| `subject` | Optional. The name of the user for whom the key operates: 1 to 64 characters of `A-Z a-z 0-9 . _ @ + -`. The call log shows it (`subject`). ChDash has no tool with an effect. The subject therefore gives no permission. |
+| `subject` | Optional. The name of the user for whom the key operates: 1 to 64 characters of `A-Z a-z 0-9 . _ @ + -`. The call log shows it (`subject`). It gives no permission. In the mode `authzen` of the `access` block, the subject of the PDP is `key:<name>`, never this attribute ([access.md](access.md#the-keys-of-the-configuration-file)). |
 | `tools` | The tools of the key, or `["*"]`. Refer to [Tools](#tools). An empty list (the default) gives no tool, except the tools that every key has. |
 | `expires` | Optional. An RFC 3339 time (`2027-10-15T00:00:00Z`, or with an offset `+02:00`). From this time, a request with the key gets the 401 of an unknown key. A key that is expired at start gives a warning, not an error. |
 | `scope.hosts` | The host of the key. This is the name of a `clickhouse.host` block that has `mcp_uri`. **A key reads one host.** The list has exactly one name. When the configuration has only one host with `mcp_uri`, a key without `scope.hosts` reads that host. |
@@ -358,7 +358,7 @@ The schema tools filter their output by the scope after they read it. The row li
 - `limits.max_rows`, `limits.timeout_seconds` and `limits.rate_limit_per_minute` lower the global limits. They never raise them.
 - A key of the configuration can have an expiry (`expires`). From that time, its requests get the 401 of an unknown key. A key of the page has no expiry.
 - A key has no switch and no description. To stop a key, delete it (a key of the page). Or remove its block and restart ChDash (a key of the configuration).
-- `subject` names the user for whom a key operates. The call log shows it. It gives no permission: only the tools, the scope and the limits of the key do.
+- `subject` names the user for whom a key operates. The call log shows it. It gives no permission: only the tools, the scope and the limits of the key do. In the mode `authzen`, the PDP also decides each call of the key ([Keys and the access of humans](#keys-and-the-access-of-humans)).
 
 ### Keys and the access of humans
 
@@ -374,7 +374,7 @@ In the `authzen` mode ([access.md](access.md)), a key of the page never has more
 - `tools/call` asks the PDP for the actions of the called tool only, not for all the actions of the key. The cache of the decisions applies. When the PDP refuses an action of the tool, the call gets the answer of a tool that does not exist (`-32602`, contract 3.6). The log has the line `mcp.tool_refused` with the key, the creator, the tool and the action. The other tools of the key continue to work.
 - When the PDP gives no valid answer to a question of the request, the request gets HTTP `503` with `-32603`, as the routes and the mode `identity` (decision of 2026-11-07). This applies to each question of `tools/call`, and to the batch of the state of the key: then `tools/list`, `initialize`, `ping` and the other requests with no tool get `503` too (a notification gets `503` with no body). A failure never makes the key an orphan.
 - A call of a tool of `query.run.read` (`run_query`, `explain_query`, `format_sql`, `explorer_names`, `query_execution`) is one use of the creator. It takes one unit of the budget `queries` of the creator (refer to [Budgets of the keys](#budgets-of-the-keys)).
-- A key of the configuration is not checked: the operator writes it in the configuration.
+- A key of the configuration file asks the PDP for the subject `key:<name>`, with the same rules and `key:<name>` in place of the creator (owner decision of 2026-11-23). The PDP must know a key with the id `<name>`. The answer `unknown_subject` refuses each tool of an action, and the key is never an orphan ([access.md](access.md#the-keys-of-the-configuration-file)).
 - The PDP can ask for the approval of the creator for a use of the key ([The approval of a key of the page](#the-approval-of-a-key-of-the-page)). Then the standing questions above accept the reason `approval_required`: the creator holds the action, and the call follows the flow of the approval.
 
 ### The approval of a key of the page
@@ -385,12 +385,12 @@ A key of the page has a creator, and the creator is the subject of the PDP. So a
 - A call that needs no approval costs the question that it cost before. The PDP answers `approval_required` to the question of the call: then the tool does not run, and the result is `{"action": {"id", "status": "awaiting_approval", "code", "executed": false}}`, with `NOT EXECUTED` in the second item of `content`. The result has no `isError` member. The creator approves on the phone. The agent calls the tool again with the same arguments and one control argument (`approval_ref`, `lease_s` or `until`), and the tool runs one time.
 - `tools/list` gives `get_action_status` to each key that has a creator. The tool gives the verdict of a request of the creator and renews it for the agent.
 - The errors are `approval_denied`, `approval_expired`, `approval_unavailable`, `approval_rate_limited` and `invalid_argument`. A failure of the approval API gives HTTP `503`.
-- A key of the configuration has no creator and no PDP question. It needs no approval, and it has neither `get_action_status` nor the control arguments.
+- A key of the configuration file has the same flow in the mode `authzen`, with the subject `key:<name>` ([access.md](access.md#the-keys-of-the-configuration-file)). In the mode `open` there is no PDP: such a key needs no approval, and it has neither `get_action_status` nor the control arguments.
 - The tools `run_write_query` and `export_query` are in the identity mode only. A tool that uses no action asks no question in the mode `keys`, so it needs no approval.
 
 ### Budgets of the keys
 
-A key of the page uses the budget `queries` of its creator, as the Query page does for this person ([access.md](access.md#budgets)). Thus a person with a budget cannot use a key to run more queries than the budget gives.
+A key of the page uses the budget `queries` of its creator, as the Query page does for this person ([access.md](access.md#budgets)). Thus a person with a budget cannot use a key to run more queries than the budget gives. In the mode `authzen`, a key of the configuration file uses the budget of its own subject `key:<name>`: the rules below apply with this subject in place of the creator.
 
 - A use is one `tools/call` of a tool whose action is `query.run.read`: `run_query`, `explain_query`, `format_sql`, `explorer_names` and `query_execution`. Each call takes one unit, also for the tools that run no SQL of the person. The API tool calls its route in the process, and the route asks the PDP nothing, so a call never takes two units.
 - ChDash sends one Access Evaluation request for the creator, with `context.usage` equal to `{"units": 1}`, for `query.run.read` on the host of the call. The host of the call is the argument `host`, or the only host of the key. The questions of the other hosts of the key go first, with `context.permission_only` equal to `true` and without `context.usage` (ProcurAuth 5.5a). The question of the use never goes without `context.usage` before it (ProcurAuth 10.1).
@@ -410,7 +410,7 @@ The log line `mcp.tool_refused` has the outcome (`denied`, `budget_exceeded` or 
 
 ### Orphan keys and their adoption
 
-A key of the page is an orphan in the `authzen` mode in two cases:
+A key of the configuration file is never an orphan ([access.md](access.md#the-keys-of-the-configuration-file)). A key of the page is an orphan in the `authzen` mode in two cases:
 
 - `no_creator`: the key has no creator. This is a key of an older ChDash, or a key made in the `open` mode.
 - `creator_gone`: the PDP does not know the creator. The batch of the state of the key has a `false` decision with `"context": {"reason": "unknown_subject"}` (contract 11.5). It has no `true` decision and no failure. ChDash has no list of persons, so the PDP is the source. This is the case of a deleted user. A key whose tools use no action is never `creator_gone`, because ChDash asks the PDP nothing for it.
@@ -659,7 +659,7 @@ ChDash conforms to the ProcurAuth MCP binding in the mode `identity`, apart from
 | 3.4, 3.6a (`context.usage`) | Done for the tools of `query.run.read` and each request with no tool. ChDash declares the budgets `queries` and `requests`. |
 | 3.5 | Not applicable. ChDash has no call that asks the client for input. |
 | 3.5a, 5.7, 5.7a, 5.7b | Done, for every tool ([The approval of a person](#the-approval-of-a-person)). The tool `get_action_status` exists in this mode. |
-| 3.5a, 5.7, 5.7a, 5.7b (the mode `keys`) | Done for each key of the page, with its creator as the subject ([The approval of a key of the page](#the-approval-of-a-key-of-the-page)). A key of the configuration has no subject: it stays outside the approval. |
+| 3.5a, 5.7, 5.7a, 5.7b (the mode `keys`) | Done for each key of the page, with its creator as the subject ([The approval of a key of the page](#the-approval-of-a-key-of-the-page)). Done for each key of the configuration file in the mode `authzen`, with the subject `key:<name>` ([access.md](access.md#the-keys-of-the-configuration-file)). |
 | 7.3 | Done. The mode ignores the standalone keys. |
 | 7.4 | Done in both modes. The 401 and the 429 have an empty body. |
 
@@ -1651,7 +1651,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 
   ChDash sends it only when the client can read it. This applies to a request of `2026-07-28`. It also applies to a request with `MCP-Protocol-Version: 2025-06-18` (or later), and to a request without this header.
 
-  A request with an older version (`2025-03-26`, `2024-11-05`) gets the text only, so its response is half the size. The endpoint has no session, so the header of each request gives the protocol version. In the identity mode, and for a key of the page that has a creator, each tool declares an `outputSchema` (contract 4.5): one schema for each kind of tool (the tools that return rows, `get_action_status` and the others). Each schema has the member `action` of contract 9.4 and the error object, so a result that waits and a tool error both follow it. The schema of the other keys declares none.
+  A request with an older version (`2025-03-26`, `2024-11-05`) gets the text only, so its response is half the size. The endpoint has no session, so the header of each request gives the protocol version. In the identity mode, for a key of the page that has a creator, and for a key of the configuration file in the mode `authzen`, each tool declares an `outputSchema` (contract 4.5): one schema for each kind of tool (the tools that return rows, `get_action_status` and the others). Each schema has the member `action` of contract 9.4 and the error object, so a result that waits and a tool error both follow it. The schema of the other keys declares none.
 
   The response is written once into one buffer and moved to the answer. The copies of the result in memory are the JSON of the tool and the body of the response. The limit of the size of a result is `mcp.max_result_bytes` (1 MiB by default).
 

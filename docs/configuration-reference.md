@@ -324,7 +324,7 @@ and `url` of the section `access.pdp`. `--print-config` shows the value of each 
 |---|---|---|---|---|
 | `token_env` | environment variable name |  | letters, digits and _ | The variable that holds the token of the key: mcp_ and 43 base64url characters. It is a secret. Give exactly one of token_env and token_file. The token is never written in the file. |
 | `token_file` | file path |  |  | The file that holds the token of the key, without its last line end: mcp_ and 43 base64url characters. It is a secret. Give exactly one of token_env and token_file. The token is never written in the file. |
-| `subject` | text |  | 1 to 64 characters of A-Z a-z 0-9 . _ @ + - | The name of the user for whom the key operates. The call log shows it. |
+| `subject` | text |  | 1 to 64 characters of A-Z a-z 0-9 . _ @ + - | The name of the user for whom the key operates. The call log shows it. It is not the subject of the PDP: in the authzen mode, the PDP gets key:<name>. |
 | `tools` | list of texts | `[]` | names of tools, or * | The tools that the key can call. * is every read tool but the restricted tools. An empty list means no tool. |
 | `expires` | text |  | an RFC 3339 time | The time when the key stops. After it, a request with the key gets 401. Empty: the key does not expire. |
 

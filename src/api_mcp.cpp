@@ -822,12 +822,22 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     }
     caller = &auth.key;
   }
+  // A key of the configuration file in the authzen mode asks the PDP as the subject key:<name> (owner decision of 2026-11-23, docs/access.md,
+  // "The keys of the configuration file"): the PDP decides each call of the key, and an action can need an approval. The copy holds the subject
+  // in McpKey::creator for the gate of the keys; the key itself does not change. In the open mode there is no PDP (mcp_creator_ is null).
+  McpKey file_key;
+  if (mcp_creator_ && caller->source == "config") {
+    file_key = *caller;
+    file_key.creator = mcp_file_key_subject(caller->name);
+    caller = &file_key;
+  }
   const McpKey& key = *caller;
   // A key of the page in the authzen mode never has more than its creator (docs/mcp.md, "Keys and the access of humans"). A key with no
   // creator, or whose creator the PDP does not know (the reason "unknown_subject", contract 11.5), gets the answer of a key that does not
   // exist (contract 3.3) until a person adopts it; the log tells why. The other keys lose only the tools whose actions the creator lost.
+  // A key of the configuration file is never an orphan (McpCreatorAccess::state): the PDP refuses its tools one by one.
   std::optional<McpCreatorState> creator_state;
-  if (mcp_creator_ && key.source == "ui") {
+  if (mcp_creator_ && (key.source == "ui" || key.source == "config")) {
     creator_state = mcp_creator_->state(key);
     if (mcp_creator_orphan(creator_state->status)) {
       log_event(LogLevel::Warn, "mcp.key_refused",

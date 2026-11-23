@@ -3,11 +3,12 @@ of humans"; ProcurAuth section 17, MCP binding 3.5a, 5.7, 5.7a, 5.7b).
 
 Instances (the tests skip without them; in the official run, CHDASH_REQUIRE_FIXTURES=1 makes a missing one a failure):
 - APPROVAL_KEYS_BASE_URL: tests/config/approval.keys.hcl (the compose service chdash_approval_keys): the mode keys with the authzen mode. A key of the
-  page has a creator, and the creator is the subject of each question to the PDP. The key `standalone` of the configuration has no creator.
+  page has a creator, and the creator is the subject of each question to the PDP. The key `standalone` of the configuration file has the subject
+  key:standalone (owner decision of 2026-11-23, docs/access.md "The keys of the configuration file").
 - APPROVAL_KEYS_PDP_URL: a fake portal of its own (tests/otel-fixture/fake_pdp.py): the approval gate and the approval API.
 
 A key of the page has the lazy flow of the identity mode for its creator. The write tool and the export tool exist in the identity mode only.
-A key of the configuration has no subject and no PDP: it stays outside the approval.
+A key of the configuration file has the same flow, with the subject key:<name>.
 """
 from __future__ import annotations
 
@@ -30,8 +31,9 @@ AUDIENCE = "db"
 HEADER = "X-Identity-Token"
 MODERN = "2026-07-28"
 CREATOR = "integrator"
-# The token of the key `standalone` of the configuration (the file mcp-key-second-host).
+# The token of the key `standalone` of the configuration (the file mcp-key-second-host), and its subject for the PDP (ProcurAuth 3.2).
 STANDALONE = "mcp_5ec0d000SecondHost0000000000000000000000000"
+STANDALONE_SUBJECT = "key:standalone"
 CACHE_TTL = 1.0
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "chdash-approval-keys/1"})
@@ -69,6 +71,21 @@ def questions() -> list[dict]:
         if request["path"] == "/access/v1/evaluation":
             out.append({"action": body["action"]["name"], "context": body.get("context") or {}, "subject": body["subject"]["id"],
                         "resource": body["resource"]})
+    return out
+
+
+def all_questions() -> list[dict]:
+    """Each evaluation that the PDP received, also the items of a batch, with the defaults of the batch filled in."""
+    out = []
+    for request in pdp("/control/received")["requests"]:
+        body = request["body"]
+        if request["path"] == "/access/v1/evaluation":
+            out.append({"action": body["action"]["name"], "context": body.get("context") or {}, "subject": body["subject"]["id"]})
+        elif request["path"] == "/access/v1/evaluations":
+            for item in body.get("evaluations") or []:
+                subject = item.get("subject", body.get("subject")) or {}
+                action = item.get("action", body.get("action")) or {}
+                out.append({"action": action.get("name"), "context": item.get("context", body.get("context")) or {}, "subject": subject.get("id")})
     return out
 
 
@@ -161,19 +178,72 @@ def test_a_key_that_needs_an_approval_keeps_its_tools_in_tools_list(key):
 
 
 @needs_keys
-def test_the_key_of_the_configuration_stays_outside_the_approval():
-    gate("*")
+def test_a_key_of_the_configuration_file_asks_the_pdp_as_its_own_subject_and_lists_the_controls():
+    # Owner decision of 2026-11-23: the use of a key of the configuration file can need an approval, so in the authzen mode it asks the PDP with the
+    # subject key:<name> (ProcurAuth 3.2). The attribute `subject` of the block is a label of the log, never the subject of the PDP.
     tools = {t["name"]: t for t in rpc(STANDALONE, "tools/list").json()["result"]["tools"]}
-    assert "get_action_status" not in tools and "run_write_query" not in tools
-    assert all("lease_s" not in t["inputSchema"]["properties"] for t in tools.values())
-    response = call(STANDALONE, "list_hosts", {})
-    assert response.json()["result"]["isError"] is False
-    # It has no subject: the PDP is not asked for a use of this key, and the tool runs as before.
-    before = len(questions())
+    assert {"list_hosts", "list_databases", "run_query", "get_action_status"} <= set(tools), set(tools)
+    assert "run_write_query" not in tools and "export_query" not in tools
+    controls = {"approval_ref", "lease_s", "until", "wait_s", "supersedes"}
+    for name, tool in tools.items():
+        if name != "get_action_status":
+            assert controls <= set(tool["inputSchema"]["properties"]), name
     response = call(STANDALONE, "list_databases", {"host": "local"})
     assert response.status_code == 200 and response.json()["result"]["isError"] is False, response.text
-    assert len(questions()) == before and received()["submissions"] == []
-    assert call(STANDALONE, "get_action_status", {"request_id": "apr_1"}).json()["error"]["code"] == -32602
+    subjects = {q["subject"] for q in all_questions()}
+    assert subjects == {STANDALONE_SUBJECT}, subjects
+    # A tool that needs no approval runs with no control argument and submits nothing.
+    assert received()["submissions"] == []
+
+
+@needs_keys
+def test_a_key_of_the_configuration_file_waits_for_the_approval_of_its_subject():
+    gate("explorer.read")
+    first = awaiting(call(STANDALONE, "list_databases", {"host": "local", "lease_s": 900}))
+    asked = [q for q in questions() if q["action"] == "explorer.read"]
+    assert asked and all(q["subject"] == STANDALONE_SUBJECT for q in asked), asked
+    body = received()["submissions"][0]["body"]
+    assert body["op"]["tool"] == "list_databases" and body["op"]["host"] == "local" and body["lease_s"] == 900
+    # The verdict tool reads the request of key:standalone.
+    assert structured(call(STANDALONE, "get_action_status", {"request_id": first["id"]})) == {"status": "pending"}
+    reads = [r for r in received()["reads"] if r["id"] == first["id"]]
+    assert reads and reads[-1]["query"]["subject"] == STANDALONE_SUBJECT, reads
+    decide(first["id"], "approve")
+    response = call(STANDALONE, "list_databases", {"host": "local", "lease_s": 900})
+    assert response.status_code == 200 and response.json()["result"]["isError"] is False, response.text
+    # A call of a tool of query.run.read is a use of the budget of key:standalone, with the approval.
+    gate("query.run.read")
+    action = awaiting(call(STANDALONE, "run_query", {"host": "local", "sql": "SELECT 1", "lease_s": 900}))
+    decide(action["id"], "approve")
+    response = call(STANDALONE, "run_query", {"host": "local", "sql": "SELECT 1", "lease_s": 900})
+    assert response.status_code == 200 and response.json()["result"]["isError"] is False, response.text
+    uses = [q for q in questions() if "usage" in q["context"]]
+    assert uses and all(q["subject"] == STANDALONE_SUBJECT for q in uses), uses
+
+
+@needs_keys
+def test_a_key_of_the_configuration_file_that_the_pdp_does_not_know_is_refused_tool_by_tool():
+    # unknown_subject never makes the key an orphan (no 401): the PDP refuses each tool of an action, and the tool with no action still works.
+    pdp("/control/answer", {"unknown_subjects": [STANDALONE_SUBJECT]})
+    time.sleep(CACHE_TTL + 0.2)
+    listed = {t["name"] for t in rpc(STANDALONE, "tools/list").json()["result"]["tools"]}
+    assert "list_hosts" in listed and "list_databases" not in listed and "run_query" not in listed, listed
+    refused = call(STANDALONE, "list_databases", {"host": "local"})
+    assert refused.status_code == 200 and refused.json()["error"]["code"] == -32602, refused.text
+    assert call(STANDALONE, "list_hosts", {}).json()["result"]["isError"] is False
+    keys = page("GET", "/api/mcp/keys").json()["keys"]
+    assert [k["orphan"] for k in keys if k["id"] == "standalone"] == [None], keys
+
+
+@needs_keys
+def test_a_key_of_the_configuration_file_cannot_apply_a_ceiling():
+    pdp("/control/answer", {"limits": {"explorer.read": {"max_rows": 10}}})
+    time.sleep(CACHE_TTL + 0.2)
+    refused = call(STANDALONE, "list_databases", {"host": "local"})
+    assert refused.status_code == 403, refused.text
+    error = refused.json()["error"]
+    assert error["code"] == -32001
+    assert error["message"] == "forbidden: the grant of this key has a limit that a key cannot apply. Use the identity mode of MCP", error
 
 
 # ---- the flow -----------------------------------------------------------------------------------------------------------------------------

@@ -17,8 +17,12 @@
 //   - the approval of a person (docs/access.md, "Approval of an action"): the creator of a key is the subject of the PDP, so a key has the same
 //     lazy flow as the identity mode (McpApprovalGate). A reason of ProcurAuth 17.1 on a question that the key asks for its creator does not
 //     make the action refused: the creator holds it, and the use needs an approval. The state of the key and the standing checks of a call
-//     accept such a reason; the question of the operation goes through the gate. A key of the configuration has no creator and no PDP: it
-//     asks nothing and needs no approval.
+//     accept such a reason; the question of the operation goes through the gate.
+//   - a key of the configuration file (an mcp_key block) in the authzen mode (owner decision of 2026-11-23, docs/access.md, "The keys of the
+//     configuration file"): the server gives it the subject key:<name> of ProcurAuth 3.2 (mcp_file_key_subject) in McpKey::creator, so the
+//     same rules apply: the state, the questions of a call, the budgets, the ceilings and the approval. The PDP must know a key with this id.
+//     "unknown_subject" never makes such a key an orphan: it refuses each tool of an action, as a plain false does. In the open mode there is
+//     no PDP: such a key asks nothing and needs no approval.
 // Pure code: the decisions come from a function that the server gives (PdpClient::decide), and the clock is a function too.
 
 #include "access_pdp.hpp"
@@ -56,6 +60,9 @@ enum class McpCreatorStatus {
 
 // "active", "unknown", "no_creator" or "creator_gone".
 const char* mcp_creator_status_name(McpCreatorStatus status);
+// The subject of the PDP for a key of the configuration file: "key:" and the name of the key (ProcurAuth 3.2). The name of a key has 1 to 32
+// characters of a-z, 0-9, "_" and "-" (mcp_valid_key_name), so it is a valid local part of a key subject.
+std::string mcp_file_key_subject(const std::string& name);
 // True for NoCreator and CreatorGone: the key is refused, and a person can adopt it.
 bool mcp_creator_orphan(McpCreatorStatus status);
 

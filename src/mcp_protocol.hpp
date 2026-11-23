@@ -51,6 +51,9 @@ inline constexpr const char* kMcpForbiddenMessage = "forbidden";
 // The mode keys: the creator of the key holds a grant with a limit that a key cannot apply. The message is fixed and names no value.
 inline constexpr const char* kMcpKeyCeilingMessage =
     "forbidden: the grant of the creator of this key has a limit that a key cannot apply. Use the identity mode of MCP";
+// The same refusal for a key of the configuration file in the authzen mode: the subject of the PDP is the key itself (key:<name>).
+inline constexpr const char* kMcpFileKeyCeilingMessage =
+    "forbidden: the grant of this key has a limit that a key cannot apply. Use the identity mode of MCP";
 inline constexpr const char* kMcpRateLimitedMessage = "rate_limited";
 inline constexpr const char* kMcpBudgetMessage = "The budget of this action is spent.";
 inline constexpr const char* kMcpUnavailableMessage = "the access check is not available";
