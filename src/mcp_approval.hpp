@@ -20,7 +20,10 @@
 //      usage. After `true` (an approval that can be used), it asks with usage and the effect; only a true answer to this question runs the tool.
 //   4. approval_required or approval_pending: the request goes to the approval API with the evaluation_id of the answer, and the call gives the
 //      result "awaiting_approval" (not an error, executed false). approval_denied and approval_expired are tool errors; nothing is sent after
-//      them. 409 no_device is approval_unavailable, 429 is approval_rate_limited; another failure of the approval API gives HTTP 503.
+//      them. The answers of the approval API map as the MCP binding 5.7a says: 409 no_device is approval_unavailable, 429 is
+//      approval_rate_limited, and 413 and 422 invalid_argument, invalid_lease and lease_required are invalid_argument. The binding 5.7a also
+//      adopts the three maps of ChDash: 422 explanation_required and 409 cannot_supersede are invalid_argument (a fault of the agent), and 422
+//      invalid_evaluation asks the PDP once more, then gives approval_expired. Another answer, or no answer, gives HTTP 503 and -32603.
 // The PEP learns the request id, the code and the verdict. It never reads an explanation, a comment of a refusal, the approver or the device,
 // and it sends no text of the agent except the control arguments.
 // Pure code: the PDP and the ClickHouse call are behind functions that the server gives, so the tests use fakes.

@@ -410,6 +410,8 @@ Rules:
 
 A grant can carry limits (ProcurAuth section 6). ChDash declares six limits of the kind ceiling and three of the kind budget ([Budgets](#budgets)). A ceiling is the most that one use of an action can take. The portal reads the declaration in the action document and shows the form of the values. The PDP gives the value of each ceiling in `context.limits` of a `true` answer. ChDash holds no value itself.
 
+In the action document, the `unit` of a ceiling is plural (`rows`, `bytes`, `seconds`), and the `unit` of a budget is singular (`query`, `export`, `request`).
+
 ### The six ceilings
 
 Each ceiling has the lowest value 1, because ClickHouse reads 0 as no limit. A grant never gives 0.
@@ -726,7 +728,7 @@ The PEP keeps no state. The agent calls the tool again after the approval. A cal
 | `422` with `invalid_evaluation` | The `evaluation_id` is late or not valid. ChDash asks the PDP once more and submits again. A second refusal gives the tool error `approval_expired`. |
 | Another status, no answer, a body that is not valid | HTTP 503 and `-32603`, as for a PDP that does not answer. ChDash fails closed. |
 
-These three codes are faults of the agent or of the time, so they are not an outage. The binding (5.7a) maps them to HTTP 503. ChDash maps them to a tool error, because a 503 hides the fault of the agent as a fault of the server (ChDash 1.5.0).
+These three codes are faults of the agent or of the time, so they are not an outage. ChDash maps them to a tool error, because a 503 hides the fault of the agent as a fault of the server (ChDash 1.5.0). The MCP binding 5.7a adopts these three maps.
 
 A command above `access.approval.max_command_bytes` is refused before the PDP gets it, with the tool error `invalid_argument`. ChDash hides and cuts nothing.
 

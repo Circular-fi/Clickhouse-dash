@@ -771,7 +771,7 @@ McpGateResult McpApprovalGate::call(const std::string& subject, const McpToolInf
       case PdpApprovalReply::Status::RateLimited:
         return answer(mcp_approval_error("approval_rate_limited", submitted.retry_after), effect, "approval_rate_limited");
       case PdpApprovalReply::Status::InvalidArgument: return answer(mcp_approval_error("invalid_argument"), effect, "invalid_argument");
-      // A fault of the agent, not of the service: a tool error, never an HTTP 503 (spec question 47, portal approval API).
+      // A fault of the agent, not of the service: a tool error, never an HTTP 503 (spec question 47; the MCP binding 5.7a adopts this map).
       case PdpApprovalReply::Status::ExplanationRequired:
         return answer(mcp_approval_error("invalid_argument", 0,
                                          "The owner asks for the intent of the agent with each request: give approval_ref in place of lease_s and until."),
