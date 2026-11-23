@@ -7,7 +7,11 @@ protection against side channels: it is for test keys only. The server verifies 
     key = Ed25519Key(seed)          # 32 bytes
     key = P256Key(secret)           # an integer in [1, n-1]
     key.public_pem()                # the SubjectPublicKeyInfo in PEM, for access.identity.public_keys
-    make_token(key, claims)         # a compact JWS: Ed25519 or ES256
+    key.kid()                       # the RFC 7638 thumbprint of the public key: the kid of a PEM key for ChDash
+    make_token(key, claims)         # a compact JWS: Ed25519 or ES256, with the kid of the key in the header
+
+The server has more than one test key, so each token needs the kid of its key (ProcurAuth 9.4). make_token puts it in the header. A header
+{"kid": None} removes it, for a test of a token without kid.
 """
 
 import base64
@@ -94,6 +98,9 @@ class Ed25519Key:
         der = bytes.fromhex("302a300506032b6570032100") + self.public
         return _pem(der)
 
+    def kid(self) -> str:
+        return _thumbprint({"crv": "Ed25519", "kty": "OKP", "x": b64url(self.public)})
+
 
 # ---- P-256 (ECDSA, RFC 6979) ----------------------------------------------------------------------------------------------
 
@@ -170,6 +177,9 @@ class P256Key:
         der += self.point[0].to_bytes(32, "big") + self.point[1].to_bytes(32, "big")
         return _pem(der)
 
+    def kid(self) -> str:
+        return _thumbprint({"crv": "P-256", "kty": "EC", "x": b64url(self.point[0].to_bytes(32, "big")), "y": b64url(self.point[1].to_bytes(32, "big"))})
+
 
 # ---- JWS ------------------------------------------------------------------------------------------------------------------
 
@@ -184,11 +194,20 @@ def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def make_token(key, claims: dict, header: dict | None = None) -> str:
-    head = {"alg": key.alg, "typ": "JWT"}
+def _thumbprint(members: dict) -> str:
+    """RFC 7638: the SHA-256 of the required members of the JWK, in the order of their names, without a space."""
+    text = json.dumps(members, separators=(",", ":"), sort_keys=True)
+    return b64url(hashlib.sha256(text.encode()).digest())
+
+
+def make_token(key, claims: dict | str, header: dict | None = None) -> str:
+    """A compact JWS. `claims` is a dict, or the JSON text of the claims as it goes in the token (for a number that json.dumps cannot
+    write, for example 1e9). The header has the kid of the key, unless `header` gives another kid or None."""
+    head = {"alg": key.alg, "typ": "JWT", "kid": key.kid()}
     if header:
         head.update(header)
-        # A value None removes the member (for example a header without typ).
+        # A value None removes the member (for example a header without typ, or a token without kid).
         head = {k: v for k, v in head.items() if v is not None}
-    signing_input = b64url(json.dumps(head, separators=(",", ":")).encode()) + "." + b64url(json.dumps(claims, separators=(",", ":")).encode())
+    payload = claims if isinstance(claims, str) else json.dumps(claims, separators=(",", ":"))
+    signing_input = b64url(json.dumps(head, separators=(",", ":")).encode()) + "." + b64url(payload.encode())
     return signing_input + "." + b64url(key.sign(signing_input.encode()))

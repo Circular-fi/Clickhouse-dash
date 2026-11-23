@@ -489,9 +489,14 @@ const ACCESS_KEY = crypto.createPrivateKey({
   type: 'pkcs8',
 });
 const b64url = (data) => Buffer.from(data).toString('base64url');
+// The configuration has more than one test key, so each token names its key: the kid is the RFC 7638 thumbprint of the public key (ProcurAuth 9.4).
+const ACCESS_KID = (() => {
+  const { crv, kty, x } = crypto.createPublicKey(ACCESS_KEY).export({ format: 'jwk' });
+  return b64url(crypto.createHash('sha256').update(JSON.stringify({ crv, kty, x })).digest());
+})();
 function identityToken(sub) {
   const now = Math.floor(Date.now() / 1000);
-  const input = `${b64url(JSON.stringify({ alg: 'Ed25519', typ: 'JWT' }))}.${b64url(JSON.stringify({ iss: 'https://access.test', sub, aud: 'db', iat: now - 5, exp: now + 240 }))}`;
+  const input = `${b64url(JSON.stringify({ alg: 'Ed25519', typ: 'JWT', kid: ACCESS_KID }))}.${b64url(JSON.stringify({ iss: 'https://access.test', sub, aud: 'db', iat: now - 5, exp: now + 240 }))}`;
   return `${input}.${b64url(crypto.sign(null, Buffer.from(input), ACCESS_KEY))}`;
 }
 const ALL_ACTIONS = ['query.run.read', 'query.run.write', 'query.export', 'library.read', 'library.write', 'explorer.read', 'system.read',

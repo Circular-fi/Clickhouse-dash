@@ -4,10 +4,12 @@
 #include "json_parse.hpp"
 
 #include <rapidjson/document.h>
+#include <rapidjson/memorystream.h>
+#include <rapidjson/reader.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <cmath>
 #include <cstring>
 #include <iterator>
 
@@ -99,16 +101,64 @@ bool has_control(std::string_view text) {
   return std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
 }
 
-// A NumericDate (RFC 7519): an integer or a number of seconds. nullopt for any other value.
-std::optional<int64_t> numeric_date(const rapidjson::Value& value) {
-  if (value.IsInt64()) return value.GetInt64();
-  if (value.IsUint64()) return std::nullopt;  // larger than int64: not a date
-  if (value.IsNumber()) {
-    const double seconds = value.GetDouble();
-    if (!std::isfinite(seconds) || std::fabs(seconds) > 9.0e15) return std::nullopt;
-    return static_cast<int64_t>(std::floor(seconds));
+// The claims that hold a date: iat, exp and nbf (RFC 7519, 4.1.4 to 4.1.6).
+constexpr std::array<const char*, 3> kDateClaims = {"iat", "exp", "nbf"};
+
+// The text of each date claim as the payload writes it, for the claims of the top level whose value is a number. A NumericDate of RFC 7519 can
+// have a fraction; the parsed value cannot show its text, so a second read of the payload keeps the text of the number (kParseNumbersAsStringsFlag).
+// The first member of a name wins, as FindMember does.
+struct DateClaimTexts : rapidjson::BaseReaderHandler<rapidjson::UTF8<>, DateClaimTexts> {
+  std::array<std::optional<std::string>, kDateClaims.size()> texts;
+  std::array<bool, kDateClaims.size()> seen{};
+  int depth = 0;
+  int slot = -1;  // the date claim of the next value, or -1
+
+  bool Default() {
+    slot = -1;
+    return true;
   }
-  return std::nullopt;
+  bool StartObject() {
+    ++depth;
+    slot = -1;
+    return true;
+  }
+  bool EndObject(rapidjson::SizeType) {
+    --depth;
+    return true;
+  }
+  bool StartArray() {
+    ++depth;
+    slot = -1;
+    return true;
+  }
+  bool EndArray(rapidjson::SizeType) {
+    --depth;
+    return true;
+  }
+  bool Key(const char* text, rapidjson::SizeType length, bool) {
+    slot = -1;
+    if (depth != 1) return true;
+    const std::string_view name(text, length);
+    for (size_t i = 0; i < kDateClaims.size(); ++i) {
+      if (name != kDateClaims[i] || seen[i]) continue;
+      seen[i] = true;
+      slot = static_cast<int>(i);
+    }
+    return true;
+  }
+  bool RawNumber(const char* text, rapidjson::SizeType length, bool) {
+    if (slot >= 0) texts[static_cast<size_t>(slot)].emplace(text, length);
+    slot = -1;
+    return true;
+  }
+};
+
+// ProcurAuth 9.3, 9.4 (the ruling of 2026-11-23): a date claim is a whole number of seconds written with digits only. A fraction (1.5, 1.0),
+// an exponent (1e9), a sign (-1, -0), a text and a number above int64 give nullopt. `text` is the number as the payload writes it.
+std::optional<int64_t> numeric_date(const rapidjson::Value& value, const std::optional<std::string>& text) {
+  if (!value.IsInt64() || !text || text->empty()) return std::nullopt;
+  if (!std::all_of(text->begin(), text->end(), [](char c) { return c >= '0' && c <= '9'; })) return std::nullopt;
+  return value.GetInt64();
 }
 
 IdentityResult refused(const char* reason) {
@@ -352,8 +402,8 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
       std::string_view(typ->value.GetString(), typ->value.GetStringLength()) != "JWT") {
     return refused("malformed");
   }
-  // ProcurAuth 9.4: `kid` selects the key. A `kid` that is not a text stops the token. A `kid` that no key has is refused.
-  // Without `kid`, each key of the algorithm is tried.
+  // ProcurAuth 9.4: `kid` selects the key. A `kid` that is not a text stops the token. A `kid` that no key has is refused. When the set holds more
+  // than one key, the edge puts `kid` in each token: a token without it is refused. With one key, a token without `kid` uses this key.
   std::string kid;
   bool has_kid = false;
   if (const auto kid_member = header.FindMember("kid"); kid_member != header.MemberEnd()) {
@@ -362,6 +412,8 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
     has_kid = true;
     const bool known = std::any_of(options_.keys.begin(), options_.keys.end(), [&](const IdentityKey& key) { return key.kid == kid; });
     if (!known) return refused("kid");
+  } else if (options_.keys.size() > 1) {
+    return refused("kid");
   }
 
   bool signed_ok = false;
@@ -374,10 +426,15 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
   }
   if (!signed_ok) return refused("signature");
 
+  const std::string_view payload(reinterpret_cast<const char*>(payload_bytes.data()), payload_bytes.size());
   rapidjson::Document claims;
-  if (!parse_json_bounded(claims, std::string_view(reinterpret_cast<const char*>(payload_bytes.data()), payload_bytes.size())) ||
-      !claims.IsObject()) {
-    return refused("malformed");
+  if (!parse_json_bounded(claims, payload) || !claims.IsObject()) return refused("malformed");
+  // The text of the date claims. The first read accepted the payload (its depth is bounded), so this read of the same text succeeds.
+  DateClaimTexts dates;
+  {
+    rapidjson::Reader reader;
+    rapidjson::MemoryStream stream(payload.data(), payload.size());
+    if (!reader.Parse<rapidjson::kParseNumbersAsStringsFlag | rapidjson::kParseIterativeFlag>(stream, dates)) return refused("malformed");
   }
   const auto iss = claims.FindMember("iss");
   if (iss == claims.MemberEnd() || !iss->value.IsString() ||
@@ -400,8 +457,8 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
   const auto exp_member = claims.FindMember("exp");
   const auto iat_member = claims.FindMember("iat");
   if (exp_member == claims.MemberEnd() || iat_member == claims.MemberEnd()) return refused("max_age");
-  const auto exp = numeric_date(exp_member->value);
-  const auto iat = numeric_date(iat_member->value);
+  const auto iat = numeric_date(iat_member->value, dates.texts[0]);
+  const auto exp = numeric_date(exp_member->value, dates.texts[1]);
   if (!exp || !iat) return refused("malformed");
   // ProcurAuth 9.4: a token is refused only when now > exp + skew.
   if (now_unix - options_.clock_skew_s > *exp) return refused("expired");
@@ -409,7 +466,7 @@ IdentityResult IdentityVerifier::verify_uncached(std::string_view token, int64_t
   // The claims are whole seconds: a life of d seconds is at most max_age_ms when d <= max_age_ms / 1000 (the division rounds down).
   if (*exp < *iat || (*exp - *iat) > options_.max_age_ms / 1000) return refused("max_age");
   if (const auto nbf_member = claims.FindMember("nbf"); nbf_member != claims.MemberEnd()) {
-    const auto nbf = numeric_date(nbf_member->value);
+    const auto nbf = numeric_date(nbf_member->value, dates.texts[2]);
     if (!nbf) return refused("malformed");
     if (*nbf > now_unix + options_.clock_skew_s) return refused("not_yet_valid");
   }

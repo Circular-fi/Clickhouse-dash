@@ -277,10 +277,63 @@ void test_identity_token() {
   CHECK(uncached.verify(good, kNow + 350).ok);
   CHECK_EQ(uncached.verify(good, kNow + 351).reason, std::string("expired"));
 
-  // Two keys: a token of each is accepted (a rotation).
-  const IdentityVerifier both = verifier(keys_of(key.pem() + other.pem()));
-  CHECK(both.verify(key.token(claims()), kNow).ok);
-  CHECK(both.verify(other.token(claims()), kNow).ok);
+  // Two keys: a token of each is accepted with the kid of its key (a rotation). A token without kid is refused (ProcurAuth 9.4).
+  const auto two = keys_of(key.pem() + other.pem());
+  const IdentityVerifier both = verifier(two);
+  CHECK(two.size() == 2);
+  if (two.size() == 2) {
+    const auto with_kid = [](const std::string& kid) { return R"({"alg":"Ed25519","typ":"JWT","kid":")" + kid + "\"}"; };
+    CHECK(both.verify(key.token(claims(), with_kid(two[0].kid)), kNow).ok);
+    CHECK(both.verify(other.token(claims(), with_kid(two[1].kid)), kNow).ok);
+  }
+  CHECK_EQ(both.verify(key.token(claims()), kNow).reason, std::string("kid"));
+  CHECK_EQ(both.verify(other.token(claims()), kNow).reason, std::string("kid"));
+  // One key: a token without kid is verified with this key.
+  CHECK(check.verify(key.token(claims()), kNow).ok);
+}
+
+// ProcurAuth 9.3, 9.4 (the ruling of 2026-11-23): iat, exp and nbf are whole numbers written with digits only. A fraction, an exponent, a sign
+// and a number above int64 give `malformed`, also when the value is a whole number (1.0, 1e3, -0).
+void test_identity_numeric_dates() {
+  const TestKey key(7);
+  const IdentityVerifier check = verifier(keys_of(key.pem()), 0);
+  const auto reason = [&](const std::string& iat, const std::string& exp, const std::string& extra = "") {
+    const std::string text = R"({"iss":"https://issuer","aud":"db","sub":"alice","iat":)" + iat + R"(,"exp":)" + exp + extra + "}";
+    const IdentityResult result = check.verify(key.token(text), kNow);
+    return result.ok ? std::string("ok") : result.reason;
+  };
+  const std::string iat = std::to_string(kNow - 10);
+  const std::string exp = std::to_string(kNow + 290);
+  CHECK_EQ(reason(iat, exp), std::string("ok"));
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":)" + iat), std::string("ok"));
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":0)"), std::string("ok"));
+  // A fraction, also .0, and an exponent.
+  CHECK_EQ(reason(iat + ".5", exp), std::string("malformed"));
+  CHECK_EQ(reason(iat + ".0", exp), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp + ".0"), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp + ".999"), std::string("malformed"));
+  CHECK_EQ(reason(iat, "18000002900e-1"), std::string("malformed"));
+  CHECK_EQ(reason(iat, "1.80000029e9"), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp + "e0"), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp + "E0"), std::string("malformed"));
+  // A sign: -0 is the value 0, but it is written with a sign.
+  CHECK_EQ(reason("-0", exp), std::string("malformed"));
+  CHECK_EQ(reason("-" + iat, exp), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":-0)"), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":-1)"), std::string("malformed"));
+  // nbf with a fraction or an exponent, and a text.
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":)" + iat + ".5"), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":1e3)"), std::string("malformed"));
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":")" + iat + "\""), std::string("malformed"));
+  CHECK_EQ(reason("\"" + iat + "\"", exp), std::string("malformed"));
+  // Above int64, and above uint64.
+  CHECK_EQ(reason(iat, "9223372036854775808"), std::string("malformed"));
+  CHECK_EQ(reason(iat, "18446744073709551616"), std::string("malformed"));
+  // A whole nbf in the future past the skew is still refused as not yet valid.
+  CHECK_EQ(reason(iat, exp, R"(,"nbf":)" + std::to_string(kNow + 61)), std::string("not_yet_valid"));
+  // The first member of a name counts, as for the other claims; a member of the same name in a nested object does not count.
+  CHECK_EQ(reason(iat, exp, R"(,"x":{"iat":1.5,"nbf":-1})"), std::string("ok"));
+  CHECK_EQ(reason(iat, exp, R"(,"x":[{"exp":1e9}])"), std::string("ok"));
 }
 
 void test_es256_token() {
@@ -354,9 +407,9 @@ void test_identity_kid() {
   // The kid selects the key: a token signed by the first key with the kid of the second key does not verify.
   CHECK_EQ(reason(key, "\"" + keys[1].kid + "\""), std::string("signature"));
   CHECK_EQ(reason(other, "\"" + keys[0].kid + "\""), std::string("signature"));
-  // Without kid, each key of the algorithm is tried.
-  CHECK(check.verify(key.token(claims()), kNow).ok);
-  CHECK(check.verify(other.token(claims()), kNow).ok);
+  // Without kid: the set holds two keys, so the token is refused with the reason kid (ProcurAuth 9.4). No key is tried.
+  CHECK_EQ(check.verify(key.token(claims()), kNow).reason, std::string("kid"));
+  CHECK_EQ(check.verify(other.token(claims()), kNow).reason, std::string("kid"));
   // A kid of an Ed25519 key with the algorithm ES256: no key of that algorithm has the kid.
   const std::string es256_header = R"({"alg":"ES256","typ":"JWT","kid":")" + keys[0].kid + "\"}";
   CHECK_EQ(check.verify(key.token(claims(), es256_header), kNow).reason, std::string("signature"));
@@ -529,7 +582,8 @@ void test_jwk_set() {
     CHECK(check.verify(other.token(claims(), header(set[1].kid)), kNow).ok);
     CHECK_EQ(check.verify(other.token(claims(), header("portal-1")), kNow).reason, std::string("signature"));
   }
-  CHECK(check.verify(key.token(claims()), kNow).ok);
+  // The set holds two keys: a token without kid is refused (ProcurAuth 9.4).
+  CHECK_EQ(check.verify(key.token(claims()), kNow).reason, std::string("kid"));
 }
 
 // ---- the actions and the routes ------------------------------------------------------------------------------------------
@@ -2572,6 +2626,7 @@ int main() {
   RUN(test_es256_token);
   RUN(test_identity_typ);
   RUN(test_identity_kid);
+  RUN(test_identity_numeric_dates);
   RUN(test_identity_clock_skew);
   RUN(test_identity_token_size);
   RUN(test_jwk_set);

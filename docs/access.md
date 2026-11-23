@@ -99,7 +99,7 @@ With `mode = "authzen"` and `server.listen_host = "0.0.0.0"`, ChDash also writes
 - A JWK has an optional `kid`. The `use` member has no effect. The `alg` member is optional. If it is present, it must be `Ed25519` (or `EdDSA`) for `OKP` and `ES256` for `EC`.
 - A JWK with a private member (`d`), or with another `kty` or `crv`, stops the start. The error does not show the member value.
 
-The `kid` of a key is the `kid` that the JWK declares. A PEM key, or a JWK without `kid`, has the RFC 7638 thumbprint of the key as `kid`. Two keys cannot have the same `kid` in a JWK Set.
+The `kid` of a key is the `kid` that the JWK declares. A PEM key, or a JWK without `kid`, has the RFC 7638 thumbprint of the key as `kid`. Two keys cannot have the same `kid` in a JWK Set. With more than one key, each token must have the `kid` of its key (ProcurAuth 9.4). For a PEM key, this `kid` is the thumbprint that `--print-config` shows.
 
 `--print-config` shows each value with its source. It shows the keys as their type and their JWK thumbprint (RFC 7638), for example `["Ed25519 kid=kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"]`. It shows the token of the PDP as `<hidden>`. [configuration-reference.md](configuration-reference.md) is the generated list of the keys.
 
@@ -110,12 +110,12 @@ The identity token is a JWT (RFC 7519) in the compact JWS form. ChDash verifies 
 | Item | Rule |
 |---|---|
 | Header | `alg` is `Ed25519` or `ES256` (P-256, SHA-256). The name `EdDSA` is deprecated (RFC 9864, 4.1.2): a token with it is refused. A header with `crit` is refused. `typ` is required and must be exactly `JWT` (the comparison is case-sensitive): an absent `typ`, `jwt`, `JOSE` and `at+jwt` are refused. ChDash never fetches a key: `jku`, `x5u` and `jwk` have no effect. |
-| `kid` | When it is present, it must be a text, and ChDash verifies the token with the configured key of this `kid` only (refer to [Public keys](#public-keys)). A `kid` that is not a text gives `malformed`. A `kid` that no configured key has gives `kid`. When it is absent, ChDash tries each configured key of the algorithm, so a rotation can use two keys. |
-| Signature | It must be valid for the selected key, or for one of the configured keys when `kid` is absent. |
+| `kid` | When it is present, it must be a text, and ChDash verifies the token with the configured key of this `kid` only (refer to [Public keys](#public-keys)). A `kid` that is not a text gives `malformed`. A `kid` that no configured key has gives `kid`. When the configuration holds more than one key, `kid` is required: a token without it gives `kid` (ProcurAuth 9.4). With one key, a token without `kid` is verified with this key. |
+| Signature | It must be valid for the key that `kid` selects, or for the one configured key when `kid` is absent. |
 | `iss` | It must be equal to `identity.issuer`. |
 | `aud` | A text equal to `identity.audience`, or a list that contains it. |
-| `iat`, `exp` | Both are required. ChDash refuses a token only when the current time is after `exp + identity.clock_skew`. `iat` can be `identity.clock_skew` in the future at most. `exp - iat` must not be more than `identity.max_age`: the tolerance does not change this limit. |
-| `nbf` | When it is present, it can be `identity.clock_skew` in the future at most. |
+| `iat`, `exp` | Both are required. Each is a whole number of seconds, written with digits only. A fraction (`1.5`, `1.0`), an exponent (`1e9`), a sign (`-1`, `-0`) and a text give `malformed`. ChDash refuses a token only when the current time is after `exp + identity.clock_skew`. `iat` can be `identity.clock_skew` in the future at most. `exp - iat` must not be more than `identity.max_age`: the tolerance does not change this limit. |
+| `nbf` | Optional. When it is present, it follows the rule of `iat` and `exp`: a whole number written with digits only. ChDash refuses the token when `nbf` is later than the current time plus `identity.clock_skew` (`not_yet_valid`). |
 | `sub` | The name of the human: 1 to 256 bytes, no control character. It is the AuthZEN subject `id`. The limit of 256 bytes and the refusal of control characters are deliberate: the `sub` goes into the PDP questions, the logs and the traces. |
 | Size | The token has 16384 bytes at most (16 KiB). A longer token gives `malformed`. |
 
@@ -945,4 +945,4 @@ The ProcurAuth runner tests ChDash as a PEP with the cases of the series U. Run 
 
 The hosts (two hosts, a grant on one host, a grant on one database of one host, the one-level grant of 1.0.8, `readonly = 1` for each host) have tests at two levels. `test_host_hierarchy` of `tests/native/access_test.cpp` uses a PDP of the tests with the prefix rule (`tests/native/access_grants.hpp`). The tests of the hosts in `test_access.py` use the fake PDP, which applies the same rule (`tests/otel-fixture/fake_pdp.py`).
 
-`tests/native/access_test.cpp` (CMake option `CHDASH_BUILD_ACCESS_TESTS`, target `chdash_access_test`) checks the signatures against the vectors of RFC 8032, RFC 8037, RFC 6979 and RFC 7515, the PEM keys, each rule of the identity token, the rule of each route, and the client of the PDP on a fake transport (the body, the headers, the cache, fail closed, the reason `unknown_subject`). `tests/backend-functional/identity_tokens.py` signs the test tokens in pure Python, with the test keys of `tests/config/secrets/access-identity-keys.pem`.
+`tests/native/access_test.cpp` (CMake option `CHDASH_BUILD_ACCESS_TESTS`, target `chdash_access_test`) checks the signatures against the vectors of RFC 8032, RFC 8037, RFC 6979 and RFC 7515, the PEM keys, each rule of the identity token, the rule of each route, and the client of the PDP on a fake transport (the body, the headers, the cache, fail closed, the reason `unknown_subject`). `tests/backend-functional/identity_tokens.py` signs the test tokens in pure Python, with the test keys of `tests/config/secrets/access-identity-keys.pem`. The file holds more than one key, so each test token has the `kid` of its key (the RFC 7638 thumbprint).

@@ -160,7 +160,8 @@ def test_a_request_without_a_token_gets_401():
     assert "Location" not in response.headers
 
 
-# Old id u03. It covers ProcurAuth U03 (signature), U42 (typ) and U50 (kid), and other defects of 9.4.
+# Old id u03. It covers ProcurAuth U03 (signature), U42 (typ) and U50 (kid), and other defects of 9.4: a token without kid when the
+# configuration has two keys, and a NumericDate that is not a whole number written with digits only.
 @needs_access
 def test_a_token_that_is_not_valid_gets_401():
     now = int(time.time())
@@ -177,6 +178,15 @@ def test_a_token_that_is_not_valid_gets_401():
         "typ at+jwt": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"typ": "at+jwt"}),
         "kid unknown": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"kid": "unknown"}),
         "kid not a text": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"kid": 5}),
+        # The configuration has two keys, so a token without kid is refused (ProcurAuth 9.4).
+        "kid absent": make_token(ED25519, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"kid": None}),
+        "kid absent es256": make_token(P256, {"iss": ISSUER, "sub": "alice", "aud": AUDIENCE, "iat": now - 5, "exp": now + 240}, {"kid": None}),
+        # iat, exp and nbf are whole numbers written with digits only: no fraction, no exponent, no sign.
+        "iat fraction": token(iat=now - 5.5),
+        "exp fraction zero": token(exp=float(now + 240)),
+        "exp exponent": make_token(ED25519, f'{{"iss":"{ISSUER}","sub":"alice","aud":"{AUDIENCE}","iat":{now - 5},"exp":{now + 240}e0}}'),
+        "nbf fraction": token(nbf=now - 5.5),
+        "nbf sign": make_token(ED25519, f'{{"iss":"{ISSUER}","sub":"alice","aud":"{AUDIENCE}","iat":{now - 5},"exp":{now + 240},"nbf":-0}}'),
         "max_age": token(iat=now - 5, exp=now + 3600),
         "no subject": token(sub=None),
         "no iat": token(iat=None),
@@ -189,7 +199,7 @@ def test_a_token_that_is_not_valid_gets_401():
     # The valid forms: Ed25519, ES256, an audience in a list.
     # The tolerance: a token that expired 30 s ago is valid, because clock_skew is 60 s.
     for name, value in {"ed25519": token(), "es256": token(key=P256), "list": token(aud=["x", AUDIENCE]),
-                        "exp in the skew": token(iat=now - 100, exp=now - 30)}.items():
+                        "exp in the skew": token(iat=now - 100, exp=now - 30), "nbf whole": token(nbf=now - 5)}.items():
         response = call("GET", "/api/version", tok=value)
         assert response.status_code == 200, (name, response.status_code, response.text)
 

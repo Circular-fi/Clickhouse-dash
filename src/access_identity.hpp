@@ -6,7 +6,8 @@
 //
 // The public keys come from the configuration as PEM text (one or more SubjectPublicKeyInfo blocks) or as a JWK Set (RFC 7517).
 // ChDash never fetches a key: a `jku`, `x5u` or `jwk` member of the token header has no effect.
-// The header `typ` must be "JWT". The header `kid`, when present, selects the key.
+// The header `typ` must be "JWT". The header `kid`, when present, selects the key. With more than one key, `kid` is required (ProcurAuth 9.4).
+// The claims `iat`, `exp` and `nbf` are whole numbers of seconds, written with digits only: no fraction, no exponent and no sign.
 
 #include "signature_verify.hpp"
 
