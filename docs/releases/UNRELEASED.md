@@ -1,6 +1,6 @@
 # Unreleased
 
-Base: release 1.5.1. These changes are on the branch `align-2026-11`. No release has them yet. They follow the rulings of the owner on the alignment of ChDash with ProcurAuth (decisions 188 and 195 of ProcurAuth, and the rulings of 2026-11-23).
+Base: release 1.5.1. These changes are on the branches `align-2026-11` (the first lot) and `phase2-2026-11` (the second lot). No release has them yet. They follow the rulings of the owner on the alignment of ChDash with ProcurAuth (decisions 188, 195 and 203 to 213 of ProcurAuth, and the rulings of 2026-11-23). The second lot follows the release 1.1 of ProcurAuth.
 
 ## What changed
 
@@ -10,6 +10,9 @@ Base: release 1.5.1. These changes are on the branch `align-2026-11`. No release
 - **The other run action has `context.permission_only`.** A run asks the action of its use with `context.usage`, then the other run action to know `readonly` and the ceilings of the other class. This second question now has `context.permission_only` equal to `true` (ProcurAuth 5.5a). The PDP thus ignores `confirm` for it: a grant of `query.run.write` with `confirm` no longer gives `readonly = 1` to a read.
 - **ChDash refuses a token without `kid` when the configuration has more than one key** (ProcurAuth 9.4). The reason in the log is `kid`. Before, ChDash tried each key. With one key, ChDash still verifies a token without `kid` with this key.
 - **`iat`, `exp` and `nbf` are whole numbers written with digits only.** A fraction, an exponent and a sign give `401` (the reason `malformed`). Before, ChDash accepted a number with a fraction up to 9e15 and rounded it down. ChDash still refuses a token when `nbf` is later than its clock plus `identity.clock_skew`.
+- **A route that runs no action asks `access` on the service** (ProcurAuth 10.0 step 2 and 10.1c, decision 210). The health probes `/livez`, `/readyz` and `/healthz` still need no token and ask nothing. Each other route needs the identity token: `/metrics` too, which needed nothing before. The routes that run no action ask the action `access` on the resource `service`, with no usage and no approval. Before, they needed the token only. These routes are the shells of the pages, the files of `/static/`, the redirects, `/metrics`, `GET /api/version`, `GET /api/hosts`, `GET /api/hosts/stream`, `GET /api/health`, `GET /api/mcp/meta` and the two cancel routes. A refusal gives `403` with the action `access` (the HTML `403` page for the address of a page), and no valid answer gives `503`. A reason of 17.1 for `access` is not a valid answer (`503`). The answer has no usage, so the cache of the PDP client keeps it for `pdp.cache_ttl`: the files of a page cost one question to the PDP for each subject and each period. The mode `open` does not change. The mode `keys` of `/mcp` does not change.
+- **The metadata member `procurauth_directory_max_age_seconds`** (ProcurAuth 3.9 and 10.7b, decision 208). ChDash reads it as it reads the members `procurauth_approval_*`: a value that is not a whole number from 1 is ignored. The start writes it in the line `access.pdp_metadata` (`directory_max_age_seconds`, `0` when it is absent). ChDash takes no decision from it.
+- **A key of the configuration file asks the PDP in the mode `authzen`** (owner decision of 2026-11-23: the use of such a key can need an approval). An `mcp_key` block, or a `key` block of the older form, of the mode `keys` asks the PDP with the subject `key:<name>` (ProcurAuth 3.2). The rules of a key of the page apply with this subject in place of the creator: the state of the key, the questions of a call, the budget `queries`, the ceilings (a key applies none: a ceiling refuses the call) and the flow of an approval. `tools/list` gives such a key the control arguments and `get_action_status`. The answer `unknown_subject` refuses each tool of an action (`-32602`), and the key is never an orphan. A ceiling gives HTTP `403` with `-32001` and the message `forbidden: the grant of this key has a limit that a key cannot apply. Use the identity mode of MCP`. Before, such a key asked the PDP nothing. The mode `open` has no PDP: there, such a key works as before.
 
 ## Documentation
 
@@ -19,13 +22,23 @@ Base: release 1.5.1. These changes are on the branch `align-2026-11`. No release
 - `config.example.hcl` shows the block `access.approval` and the key `mcp.unauthenticated_rate_limit_per_minute`.
 - `docs/conformance.md` and the workflow `conformance.yml` give the true date (2026-11-13) and the release (1.5.1) of the last result. The ProcurAuth commit `1bdfe61` is a normal commit, not a merge commit.
 - `PRODUCT.md` and the home page give the true size of an archive: about 10 MB (9.8 MB to 10.1 MB for the four archives of 1.5.1).
+- `docs/access.md` has the new sections "Routes with no action" (rewritten) and "The keys of the configuration file". `docs/mcp.md`, `docs/operations.md` and `SECURITY.md` say that `/metrics` needs the token in the mode `authzen`, and that a key of the configuration file asks the PDP. The mode `open` has no access control and no PDP, so nothing of this lot changes there.
+- The description of the keys `server.metrics` and `mcp_key.subject` in `src/config_keys.def`, and the generated `docs/configuration-reference.md`, say the same.
+- `docs/conformance.md`, `tests/README.md`, `tests/conformance/expected.txt` and the workflow `conformance.yml` name the new pin and the new result. `tests/conformance/effect-vectors.json` is the copy of the vectors of ProcurAuth 1.1 (three new vectors in the group V01).
 
 ## Upgrade
 
 - An edge that signs with one of several keys must put `kid` in each token. For a PEM key, the `kid` is its RFC 7638 thumbprint, which `--print-config` shows. The portal puts `kid` in each token.
 - An edge must write `iat`, `exp` and `nbf` as whole numbers.
 - A PDP must not give a reason of 17.1 to a question with `context.permission_only`, and must give an `evaluation_id` of 1024 bytes at most.
+- In the mode `authzen`, a system of monitoring reads `/metrics` through the edge, with a key that holds `access` on the service. The platform keeps the health probes `/livez`, `/readyz` and `/healthz`, which need no token.
+- The PDP must give `access` on the service to each subject that uses the pages: the portal does. A PDP that refuses `access` now refuses the files of the pages too.
+- In the mode `authzen`, make a key in the PDP for each key of the configuration file, with the id `<name>` of its block, and give it its grants. Until then, each tool of an action of that key is refused (`-32602`). The tools with no action (`list_hosts`, `mcp_analysis_my_limits`, `mcp_analysis_my_usage`) keep working.
 
 ## Conformance
 
-The run of `tests/conformance/run.sh` used the runner of the ProcurAuth commit `1bdfe61`, the pin that does not change in this lot. Each of the three variants ran in strict mode: 117 cases, 116 passed, 0 failed, 1 skipped (U117). The stricter rules of this lot break no case of this runner. The binary was a build of the branch with the test toolchain of `tests/Dockerfile.sanitize`, without sanitizers, not the static release binary.
+First lot: the run of `tests/conformance/run.sh` used the runner of the ProcurAuth commit `1bdfe61`. Each of the three variants ran in strict mode: 117 cases, 116 passed, 0 failed, 1 skipped (U117). The stricter rules of that lot break no case of this runner.
+
+Second lot: the pin is now the commit `c820b4a` of the ProcurAuth release v1.1 (`.github/workflows/conformance.yml`, `pinned_commit` of `tests/conformance/run.sh`). The profiles have the operations `read_health` (`GET /livez`, no token) and `use_no_action` (`GET /metrics`). Each of the three variants ran in strict mode: 127 cases, 126 passed, 0 failed, 1 skipped (U117, no tool that asks for input). The cases U118 to U126 passed already with the first lot. U127 failed before the change of the routes with no action, and it passes now. `tests/conformance/expected.txt` stays empty.
+
+The binaries of both runs were builds of the branch with the test toolchain of `tests/Dockerfile.sanitize`, without sanitizers, not the static release binary.
