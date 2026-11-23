@@ -11,8 +11,9 @@
 //   - fails closed: no answer before the timeout, a status that is not 200 or a body that is not an answer gives false, with
 //     AccessDecision::failed (ProcurAuth 10.3: the route answers 503, not 403);
 //   - reads the whole answer of each decision (PdpAnswer): the decision, the reason (ProcurAuth 11.1), retry_after of
-//     budget_exceeded, the ceilings of context.limits (7.3) and context.usage.units (6.12). A member of this protocol with a bad
-//     type or value makes the whole body not valid: every question of the call fails;
+//     budget_exceeded, the ceilings of context.limits (7.3, at most 2^53-1), the evaluation_id (17.1, at most 1024 bytes) and
+//     context.usage.units (6.12). A member of this protocol with a bad type or value makes the whole body not valid: every question of the
+//     call fails. A reason of 17.1 for a question with context.permission_only (5.5a) makes the body not valid too;
 //   - sends the chain of each resource (properties.ancestors, access_resource.hpp) after the type and the id, and
 //     "context": {"match": "subtree"} for a question of the navigation (AccessMatch);
 //   - keeps the whole answer of the PDP for cache_ttl at most (subject, action, the path of the resource and the match are the key),
@@ -428,6 +429,8 @@ public:
   // decision to its questions only. After a request that got no answer (a timeout or a connection error), the later requests of the call
   // are not sent: each of their questions is failed, without a new wait. A call of several requests has one deadline, batch_timeout: a
   // request never waits past it, and when the deadline cuts the call, every decision of the call is failed (also the answered ones).
+  // A question with permission_only that gets a reason of 17.1 makes its request not valid (ProcurAuth 5.5a, 10.3): each question of that
+  // request is failed.
   std::vector<AccessDecision> decide(const std::string& subject, const std::vector<AccessQuestion>& questions, const PdpCallContext& context);
 
   // The question of one use of an action that lists a budget (ProcurAuth 6.4): ONE Access Evaluation with context.usage = {"units": 1}.

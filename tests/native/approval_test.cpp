@@ -1947,17 +1947,19 @@ void test_export_other_permission_order_and_ceilings() {
   }
   {
     // Spec question 53: the approval follows the action of the use alone. A PDP of the protocol never gives a reason of 17.1 for a question with
-    // permission_only. A PDP that does (a fault) starts no approval: the call is refused with a tool error, and the PDP gets no question with an effect.
+    // permission_only. PdpClient::decide treats such an answer as not valid (binding 3.7, decision 195): the decision of the other permission is a
+    // failure. The call gets HTTP 503 and -32603, it starts no approval, and the PDP gets no question with an effect and no question of the use.
     asked.clear();
     other.limits.clear();
     other.allowed = false;
-    other.reason = PdpReason::ApprovalRequired;
+    other.failed = true;
     McpCallInfo info;
     const McpAccess refused = access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1","lease_s":900})"), &info);
-    CHECK(refused == McpAccess::Allowed && info.answered && info.answered->is_error && code_of(*info.answered) == "scope_needs_approval");
+    CHECK(refused == McpAccess::Failed && !info.answered);
     CHECK(script.submitted.empty() && script.asked.empty());
     CHECK_EQ(asked.size(), size_t(1));  // only the question of the other permission
     // A plain false for the other permission stays the answer of a tool that does not exist.
+    other.failed = false;
     other.reason = PdpReason::None;
     McpCallInfo plain;
     CHECK(access.call("alice", exporter, args_of(R"({"host":"prod","sql":"SELECT 1"})"), &plain) == McpAccess::Denied && !plain.answered);

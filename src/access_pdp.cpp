@@ -883,6 +883,13 @@ bool PdpClient::ask_chunk(const std::string& subject, const std::vector<AccessQu
   std::vector<PdpAnswer> decisions;
   call.error = check_result(result, elapsed, context, call.path, timeout);
   if (call.error.empty() && !parse_answer(result.body, asked.size(), &decisions)) call.error = "the answer is not a valid AuthZEN answer";
+  // ProcurAuth 5.5a and 10.3, MCP binding 3.7 (decision 195): a question with context.permission_only never gets a reason of 17.1. Such an answer
+  // is not valid, as a bad member is: every question of the request fails, and nothing is kept.
+  for (size_t k = 0; call.error.empty() && k < asked.size(); ++k) {
+    if (asked[k].permission_only && pdp_reason_is_approval(decisions[k].reason)) {
+      call.error = "a reason of ProcurAuth 17.1 for a question with context.permission_only (5.5a)";
+    }
+  }
 
   const bool answered = result.error.empty();
   if (call.error.empty()) {

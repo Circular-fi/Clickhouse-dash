@@ -1195,6 +1195,49 @@ void test_pdp_cache_answers() {
   CHECK_EQ(short_calls.size(), short_before);
 }
 
+// ProcurAuth 5.5a and 10.3, MCP binding 3.7 (decision 195): a question with permission_only never gets a reason of 17.1. Such an answer is not
+// valid: each question of its request fails (the route answers 503), nothing is kept, and the line access.pdp_failed says why. The same reason
+// for a question without the member stays the reason of a refusal (17.7a).
+void test_pdp_permission_only_reason_of_approval() {
+  std::vector<FakeTransport::Call> calls;
+  auto transport = std::make_unique<FakeTransport>(&calls);
+  FakeTransport* fake = transport.get();
+  PdpOptions options;
+  options.cache_ttl = std::chrono::seconds(60);
+  PdpClient client(options, std::move(transport));
+  const auto q = [](int n) { return AccessQuestion{"query.run.write", access_host_resource("db", "h" + std::to_string(n))}; };
+  int n = 0;
+  for (const char* reason : {"approval_required", "approval_pending", "approval_denied", "approval_expired"}) {
+    AccessQuestion plain = q(++n);
+    AccessQuestion other = q(++n);
+    other.permission_only = true;
+    // A batch: the plain question is true, the other permission gets a reason of 17.1. The whole request is not valid.
+    fake->answer = ok(std::string(R"({"evaluations":[{"decision":true},{"decision":false,"context":{"reason":")") + reason + R"("}}]})");
+    std::ostringstream captured;
+    std::streambuf* const previous = std::cerr.rdbuf(captured.rdbuf());
+    const auto both = client.decide("alice", {plain, other}, PdpCallContext{});
+    std::cerr.rdbuf(previous);
+    CHECK(both.size() == 2 && both[0].failed && both[1].failed && !both[0].allowed);
+    CHECK(captured.str().find("\"event\":\"access.pdp_failed\"") != std::string::npos &&
+          captured.str().find("context.permission_only") != std::string::npos);
+    CHECK_EQ(client.cached_entries(), size_t(0));
+    // One question alone: the same.
+    fake->answer = ok(std::string(R"({"decision":false,"context":{"reason":")") + reason + R"("}})");
+    const AccessDecision alone = client.decide("alice", {other}, PdpCallContext{})[0];
+    CHECK(alone.failed && access_outcome(alone) == AccessOutcome::Failed);
+    // Without the member, the reason is the answer: a refusal that cannot wait, not a failure.
+    const AccessDecision use = client.decide("alice", {plain}, PdpCallContext{})[0];
+    CHECK(!use.failed && use.reason != PdpReason::None && pdp_reason_is_approval(use.reason));
+    CHECK_EQ(access_refusal(use, "query.run.write").error_code, std::string("approval_cannot_wait"));
+  }
+  // A plain false and a true answer for the other permission stay valid.
+  AccessQuestion other = q(++n);
+  other.permission_only = true;
+  fake->answer = ok(R"({"decision":false,"context":{"reason":"invalid_resource"}})");
+  const AccessDecision denied = client.decide("alice", {other}, PdpCallContext{})[0];
+  CHECK(!denied.failed && !denied.allowed && denied.reason == PdpReason::InvalidResource);
+}
+
 // The resources of the hosts (contract 11.4): the encoded ids, the path, the valid ids, and the cache that keeps two hosts apart.
 void test_resources() {
   CHECK_EQ(access_encode_id("analytics"), std::string("analytics"));
@@ -2541,6 +2584,7 @@ int main() {
   RUN(test_pdp_answer_context);
   RUN(test_access_outcome);
   RUN(test_pdp_cache_answers);
+  RUN(test_pdp_permission_only_reason_of_approval);
   RUN(test_resources);
   RUN(test_host_hierarchy);
   RUN(test_navigation_pages);

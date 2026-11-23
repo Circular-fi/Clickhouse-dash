@@ -169,23 +169,20 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
   const bool use = decide_use_ && question->match == AccessMatch::Node && access_action_has_budget(question->action, features_);
   // export_query needs two permissions (ProcurAuth 5.5a, 10.1a): the export and the run of the statement. The other permission is asked first,
   // without usage and without effect, and only after the check of the arguments and of the control arguments (contract 9.4, step 1 and 2: a
-  // call with a bad argument asks the PDP nothing). A `false` answer, also with a reason of 17.1, refuses the call before the use takes a unit (17.7).
+  // call with a bad argument asks the PDP nothing). A `false` answer refuses the call before the use takes a unit (17.7).
   // The ceilings of that permission lower the ceilings of the call, as the ceilings of its own action do (ProcurAuth 5.5a).
   const bool needs_other = std::string_view(tool.name) == kMcpExportTool && question->match == AccessMatch::Node;
   PdpLimits other_limits;
-  bool scope_needs_approval = false;
   const auto other_stop = [&]() -> std::optional<AccessDecision> {
     if (!needs_other) return std::nullopt;
     AccessQuestion scope{"query.run.read", question->resource};
     scope.permission_only = true;  // 5.5a: the PDP ignores `confirm` for it and answers a plain decision
     std::vector<AccessDecision> other = decide_(subject, {scope});
     other.resize(1);
+    // ProcurAuth 5.5a (spec question 53): the approval follows the action of the use alone (query.export). A reason of 17.1 for this question is
+    // an answer that is not valid (binding 3.7, decision 195): PdpClient::decide gives a failed decision, and the call gets HTTP 503 and -32603.
     if (other.front().failed) return other.front();
     if (!other.front().allowed) {
-      // ProcurAuth 5.5a (spec question 53): the approval follows the action of the use alone (query.export). The question carries
-      // context.permission_only, so a PDP of the protocol never gives a reason of 17.1 for it. A PDP that does is not valid (10.3): the call is
-      // refused with a tool error that says so, and never starts an approval.
-      scope_needs_approval = pdp_reason_is_approval(other.front().reason);
       AccessDecision denied;
       denied.source = "pdp";
       return denied;
@@ -215,12 +212,6 @@ McpAccess McpSubjectAccess::call(const std::string& subject, const McpToolInfo& 
     std::vector<AccessDecision> decisions = decide_(subject, {*question});
     decisions.resize(1);
     decision = decisions.front();
-  }
-  if (scope_needs_approval && info) {
-    info->answered = mcp_tool_error("scope_needs_approval",
-                                    "The grant for the scope of this call (query.run.read) asks for an approval. An approval covers only the action of the tool "
-                                    "(query.export), so the call is refused. Ask the owner for a grant of query.run.read without confirm.");
-    return McpAccess::Allowed;
   }
   switch (access_outcome(decision)) {
     case AccessOutcome::Allowed: break;
