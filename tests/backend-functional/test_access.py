@@ -1567,8 +1567,9 @@ def test_the_mcp_page_lists_the_visible_hosts_and_fails_closed():
     for host in ("other", "nosuch"):
         refused = make_mcp_key(tok, f"hidden-{uuid.uuid4().hex[:8]}", ["system_overview"], ["*"], host=host)
         assert refused.status_code == 403 and refused.json()["action"] == "system.read", (host, refused.text)
+    # The meta of MCP runs no action: it asks access on the service first (ProcurAuth 10.1c), so its failure names the action access.
     answer(status=500)
-    assert_pdp_unavailable(mcall("GET", "/api/mcp/meta"), "hosts")
+    assert_pdp_unavailable(mcall("GET", "/api/mcp/meta"), "access")
 
 
 @needs_mcp
