@@ -822,9 +822,9 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     }
     caller = &auth.key;
   }
-  // A key of the configuration file in the authzen mode asks the PDP as the subject key:<name> (owner decision of 2026-11-23, docs/access.md,
-  // "The keys of the configuration file"): the PDP decides each call of the key, and an action can need an approval. The copy holds the subject
-  // in McpKey::creator for the gate of the keys; the key itself does not change. In the open mode there is no PDP (mcp_creator_ is null).
+  // In the authzen mode, a key of the configuration file asks the PDP as the subject key:<name> (owner decision of 2026-11-23, docs/access.md,
+  // "The keys of the configuration file"). The PDP decides each call of the key, and an action can need an approval. The copy holds the subject
+  // in McpKey::creator for the gate of the keys. The key itself does not change. In the open mode there is no PDP (mcp_creator_ is null).
   McpKey file_key;
   if (mcp_creator_ && caller->source == "config") {
     file_key = *caller;

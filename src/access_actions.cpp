@@ -258,7 +258,7 @@ AccessRule access_rule(std::string_view method_in, std::string_view path) {
   if (path == "/livez" || path == "/readyz" || path == "/healthz" || path == "/.well-known/procurauth/actions" || path == "/mcp") {
     return rule(AccessRuleKind::Exempt);
   }
-  // The metrics run no action, and they are not a health probe: they name the hosts and count the requests (ProcurAuth 10.1c).
+  // The metrics run no action. They are not a health probe, because they name the hosts and count the requests (ProcurAuth 10.1c).
   if (path == "/metrics") return rule(AccessRuleKind::NoAction);
   // The route of the options (ProcurAuth 5.6) lists the children that the person of the token can see: it needs the token (the edge makes
   // it for the person who fills the form of the grants), and it asks only its own questions.
@@ -275,7 +275,7 @@ AccessRule access_rule(std::string_view method_in, std::string_view path) {
   }
   // The stream of a run is the use of the run: the query id comes from a request that the rule of its route checked.
   if (path == "/api/query/stream" && method == "GET") return rule(AccessRuleKind::Identity);
-  // The cancel of a run and of a Deep Analyze stops a run and runs no action: the query id and the cancel token come from a request that the
+  // The cancel of a run and of a Deep Analyze stops a run and runs no action. The query id and the cancel token come from a request that the
   // rule of its route checked.
   if ((path == "/api/query/cancel" && method == "POST") || (path == "/api/query/deep-analysis/cancel" && method == "POST")) {
     return rule(AccessRuleKind::NoAction);

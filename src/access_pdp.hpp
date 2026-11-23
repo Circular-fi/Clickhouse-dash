@@ -347,7 +347,7 @@ struct PdpEndpoints {
   std::optional<uint64_t> approval_lease_max_seconds;
   std::optional<uint64_t> approval_wait_max_seconds;
   // procurauth_directory_max_age_seconds (ProcurAuth 3.9, 10.7b): the age bound of the directory of the PDP, in seconds. ChDash writes it in the
-  // log line access.pdp_metadata and takes no decision from it. A member that is not a whole number from 1 is ignored, as for the members above.
+  // log line access.pdp_metadata, and it takes no decision from it. A member that is not a whole number from 1 is ignored, as above.
   std::optional<uint64_t> directory_max_age_seconds;
 };
 

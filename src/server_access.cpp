@@ -111,9 +111,9 @@ bool any_failed(const std::vector<AccessDecision>& decisions) {
 
 bool is_write_method(const std::string& method) { return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE"; }
 
-// The refusal of the action `access` on a route that runs no action (ProcurAuth 10.1c). The address of a page (a GET that is not under
-// /api/ or /static/, and not /metrics) gets an HTML page with no script and no data: the 503 page when the PDP gave no valid answer, else the
-// 403 page that names the action `access`. Any other route, and a spent budget, get the JSON refusal (10.3).
+// The refusal of the action `access` on a route that runs no action (ProcurAuth 10.1c). The address of a page is a GET that is not under
+// /api/ or /static/, and not /metrics. It gets an HTML page with no script and no data. This is the 503 page when the PDP gave no valid
+// answer, else the 403 page that names the action `access`. Any other route, and a spent budget, get the JSON refusal (10.3).
 void refuse_entry(const httplib::Request& req, httplib::Response& res, const AccessDecision& decision, const std::string& request_id) {
   const AccessOutcome outcome = access_outcome(decision);
   const bool page = (req.method == "GET" || req.method == "HEAD") && req.path.rfind("/api/", 0) != 0 && req.path.rfind("/static/", 0) != 0 &&
@@ -454,7 +454,7 @@ bool Server::check_access(const httplib::Request& req, httplib::Response& res, c
       return false;
     case AccessRuleKind::NoAction: {
       // ProcurAuth 10.1c: the action `access` on the service, with no usage and no approval. The question has no usage, so the cache of the
-      // PDP client keeps its answer for pdp.cache_ttl, for this subject (10.1): a page that loads many files asks the PDP once in that time.
+      // PDP client keeps its answer for pdp.cache_ttl, for this subject (10.1). Thus a page with many files asks the PDP once in that time.
       // The PDP client treats a reason of 17.1 for `access` as an answer that is not valid (503).
       const auto decisions = access_decide({AccessQuestion{"access", access_service_resource(cfg_.access.audience)}});
       if (decisions.front().allowed) return false;

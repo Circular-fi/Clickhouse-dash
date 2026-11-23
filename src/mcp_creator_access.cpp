@@ -118,8 +118,8 @@ McpCreatorState McpCreatorAccess::state(const McpKey& key) {
     return false;
   };
   // Only the reason "unknown_subject" makes an orphan (contract 11.5). A plain false is "no permission": the creator keeps the key. A key of the
-  // configuration file is never an orphan: its subject is the key itself (mcp_file_key_subject), so "unknown_subject" refuses each tool of an
-  // action, as a plain false does, and nobody can adopt the key.
+  // configuration file is never an orphan, because its subject is the key itself (mcp_file_key_subject). For it, "unknown_subject" refuses
+  // each tool of an action, as a plain false does. Nobody can adopt such a key.
   if (!failed && !any_allowed && unknown_subject && key.source != "config") {
     out.status = McpCreatorStatus::CreatorGone;
   } else {
