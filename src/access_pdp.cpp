@@ -132,17 +132,20 @@ PdpReason reason_of(const rapidjson::Value& value) {
   return PdpReason::Other;
 }
 
-// The longest evaluation_id that the client accepts and sends back (ProcurAuth 17.1: a text that only the PDP reads). The portal seals the facts of
-// the question in it (the encoded path of the resource: up to about 3 KiB), and the protocol states no bound (spec question 41). The same value
-// is the bound of the answer and of the submission, because the client sends back what it accepted.
-constexpr size_t kMaxEvaluationIdBytes = 4096;
+// The longest evaluation_id (ProcurAuth 17.1, decision 188): 1024 bytes. The id is a text that only the PDP reads. An answer with a longer id is
+// not valid (10.3): the call gives HTTP 503. The client sends back only an id that it accepted, so the same value bounds the submission.
+constexpr size_t kMaxEvaluationIdBytes = 1024;
 
-// context.limits of a true decision (ProcurAuth 7.3): an object of whole numbers from 0, with no name two times.
+// The largest whole number of a limit (ProcurAuth 6, decision 188): 2^53-1, the largest integer that is safe in JSON.
+constexpr uint64_t kMaxLimitValue = 9007199254740991ULL;
+
+// context.limits of a true decision (ProcurAuth 7.3): an object of whole numbers from 0 to 2^53-1, with no name two times. A larger value makes
+// the answer not valid (decision 188).
 bool limits_of(const rapidjson::Value& value, PdpLimits* limits) {
   if (!value.IsObject()) return false;
   for (const auto& member : value.GetObject()) {
     // IsUint64 is false for a negative number, a fraction and a number written with a decimal point or an exponent.
-    if (!member.value.IsUint64()) return false;
+    if (!member.value.IsUint64() || member.value.GetUint64() > kMaxLimitValue) return false;
     if (!limits->emplace(std::string(text_of(member.name)), member.value.GetUint64()).second) return false;
   }
   return true;
@@ -178,12 +181,11 @@ bool decision_of(const rapidjson::Value& value, PdpAnswer* answer) {
   error_of(members, answer);
   if (!answer->decision) {
     // A false decision: its reason, and retry_after of budget_exceeded. ChDash ignores its limits and its usage (ProcurAuth 7.6).
-    // The evaluation_id (ProcurAuth 17.1) is a text. The client keeps it for the submission and never reads it. A text of another type makes the
-    // answer not valid. A text above kMaxEvaluationIdBytes is not kept: the client could not send it back, so the false answer stays a denial
-    // that cannot start an approval (the call is refused, never an outage of the whole answer).
+    // The evaluation_id (ProcurAuth 17.1) is a text of 1 to 1024 bytes. The client keeps it for the submission and never reads it. Another
+    // type, an empty text and a longer text make the answer not valid (10.3, decision 188): the call gives HTTP 503.
     if (const auto id = members.FindMember("evaluation_id"); id != members.MemberEnd()) {
-      if (!id->value.IsString() || id->value.GetStringLength() == 0) return false;
-      if (id->value.GetStringLength() <= kMaxEvaluationIdBytes) answer->evaluation_id.assign(id->value.GetString(), id->value.GetStringLength());
+      if (!id->value.IsString() || id->value.GetStringLength() == 0 || id->value.GetStringLength() > kMaxEvaluationIdBytes) return false;
+      answer->evaluation_id.assign(id->value.GetString(), id->value.GetStringLength());
     }
     const auto reason = members.FindMember("reason");
     if (reason == members.MemberEnd()) return true;

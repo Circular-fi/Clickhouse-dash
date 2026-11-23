@@ -959,7 +959,22 @@ void test_pdp_answer_context() {
   CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":1000,"max_duration":0}}})", 1, &d));
   CHECK(d[0].decision && d[0].limits.size() == 2 && d[0].limits.at("max_rows") == 1000 && d[0].limits.at("max_duration") == 0);
   CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{}}})", 1, &d) && d[0].limits.empty());
-  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":18446744073709551615}}})", 1, &d));
+  // A value of a limit is at most 2^53-1 (ProcurAuth 6, decision 188). A larger value makes the answer not valid.
+  CHECK(PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":9007199254740991}}})", 1, &d) &&
+        d[0].limits.at("max_rows") == 9007199254740991ULL);
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":9007199254740992}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":18446744073709551615}}})", 1, &d));
+  CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":18446744073709551616}}})", 1, &d));
+  // The evaluation_id of a false answer is a text of 1 to 1024 bytes (ProcurAuth 17.1, decision 188). In a batch, a bad one makes the whole body
+  // not valid, as any bad member does.
+  const auto with_id = [](size_t bytes) {
+    return R"({"evaluations":[{"decision":true},{"decision":false,"context":{"reason":"approval_pending","evaluation_id":")" + std::string(bytes, 'v') +
+           R"("}}]})";
+  };
+  CHECK(PdpClient::parse_answer(with_id(1024), 2, &d) && d[1].evaluation_id.size() == 1024);
+  CHECK(PdpClient::parse_answer(with_id(1), 2, &d) && d[1].evaluation_id == "v");
+  CHECK(!PdpClient::parse_answer(with_id(1025), 2, &d));
+  CHECK(!PdpClient::parse_answer(with_id(0), 2, &d));
   // Bad types and values of the limits of a true answer: the answer is not valid.
   CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":-1}}})", 1, &d));
   CHECK(!PdpClient::parse_answer(R"({"decision":true,"context":{"limits":{"max_rows":1.5}}})", 1, &d));

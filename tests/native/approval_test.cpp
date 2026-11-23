@@ -339,16 +339,18 @@ void test_client_question_and_answers() {
     d = client.decide_approval("key:k1", effect_question(), false, false, context);
     CHECK(d.reason == reason && !d.failed);
   }
-  // The bound of the evaluation_id is 4096 bytes. A longer id is not kept: the answer stays a denial that cannot start an approval, and the
-  // answers of the other questions of the batch stay valid.
+  // The bound of the evaluation_id is 1024 bytes (ProcurAuth 17.1, decision 188). A longer id makes the answer not valid (10.3): the decision
+  // fails, so the call gives HTTP 503. An empty id is not valid either.
   transport->script = {{"POST /access/v1/evaluation",
-                        http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":")" + std::string(4096, 'e') + R"("}})")}};
+                        http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":")" + std::string(1024, 'e') + R"("}})")}};
   d = client.decide_approval("key:k1", effect_question(), false, false, context);
-  CHECK(!d.allowed && !d.failed && d.reason == PdpReason::ApprovalRequired && d.evaluation_id.size() == 4096);
+  CHECK(!d.allowed && !d.failed && d.reason == PdpReason::ApprovalRequired && d.evaluation_id.size() == 1024);
   transport->script = {{"POST /access/v1/evaluation",
-                        http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":")" + std::string(4097, 'e') + R"("}})")}};
+                        http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":")" + std::string(1025, 'e') + R"("}})")}};
   d = client.decide_approval("key:k1", effect_question(), false, false, context);
-  CHECK(!d.allowed && !d.failed && d.reason == PdpReason::ApprovalRequired && d.evaluation_id.empty());
+  CHECK(d.failed && !d.allowed && d.evaluation_id.empty());
+  transport->script = {{"POST /access/v1/evaluation", http(200, R"({"decision":false,"context":{"reason":"approval_pending","evaluation_id":""}})")}};
+  CHECK(client.decide_approval("key:k1", effect_question(), false, false, context).failed);
   // A malformed answer fails closed: a bad evaluation_id, a bad status, no answer.
   transport->script = {{"POST /access/v1/evaluation", http(200, R"({"decision":false,"context":{"reason":"approval_required","evaluation_id":7}})")}};
   CHECK(client.decide_approval("key:k1", effect_question(), false, false, context).failed);

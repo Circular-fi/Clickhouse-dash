@@ -92,7 +92,7 @@ struct AccessQuestion {
 // "node" or "subtree".
 const char* access_match_name(AccessMatch match);
 
-// The ceilings of a true answer (ProcurAuth 7.3): the name of each ceiling and its value, a whole number from 0.
+// The ceilings of a true answer (ProcurAuth 7.3): the name of each ceiling and its value, a whole number from 0 to 2^53-1.
 using PdpLimits = std::map<std::string, uint64_t>;
 
 // The reason of a false answer (ProcurAuth 11.1). A true answer has None. A reason that this list does not know, or a reason that is
@@ -127,7 +127,7 @@ struct PdpAnswer {
   // The seconds of retry_after of a false decision with budget_exceeded: a whole number from 1. Empty for another answer.
   std::optional<uint64_t> retry_after;
   // context.evaluation_id of a false decision with the reason approval_required or approval_pending (ProcurAuth 17.1): a text that only the PDP
-  // reads. The client gives it back in the submission and never reads it. At most 4096 bytes: a longer one is not kept.
+  // reads. The client gives it back in the submission and never reads it. 1 to 1024 bytes: another value makes the answer not valid.
   std::string evaluation_id;
   // context.limits of a true decision. Always empty for a false decision: ChDash ignores the limits of a false answer (7.6).
   PdpLimits limits;
