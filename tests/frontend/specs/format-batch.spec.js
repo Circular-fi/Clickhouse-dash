@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { openApp, runQuery, waitForTerminal } from '../helpers/app.js';
 
-// A format batch gives a status for each statement (ARCH-B-124, README.md "POST /api/format").
+// A format batch gives a status for each statement (ARCH-B-124, docs/http-api.md "SQL format").
 // The statements that formatted replace their text in the editor.
 // The statement that did not format keeps its text as typed, and it is reported.
 // A run with Format on run goes on.

@@ -1,4 +1,4 @@
-"""A format batch answers a status for each statement (README.md, "POST /api/format"; ARCH-B-124): a statement that fails does not
+"""A format batch answers a status for each statement (docs/http-api.md, "SQL format"; ARCH-B-124): a statement that fails does not
 fail the others, the single-statement form keeps its HTTP error, and a batch that is refused as a whole has its HTTP status.
 
 API_BASE_URL is an instance of tests/config/CH_HOSTS.local.hcl.

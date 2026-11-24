@@ -29,8 +29,10 @@ docker compose up -d
 ```bash
 cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target chdash
-./build/chdash
+./build/chdash --config /path/to/config.hcl
 ```
+
+The default build embeds the frontend files into the binary.
 
 ### Run tests
 

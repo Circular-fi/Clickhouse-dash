@@ -8,6 +8,7 @@
   // [file without .md, title in the menu]
   const DOCS = [
     ["Get started", [
+      ["overview", "Overview"],
       ["configuration", "Configuration"],
       ["configuration-reference", "Configuration keys"],
       ["operations", "Operations"],
@@ -34,6 +35,7 @@
       ["server-telemetry", "Server telemetry (OTLP)"],
     ]],
     ["Reference", [
+      ["http-api", "HTTP API"],
       ["telemetry", "Native TCP telemetry"],
       ["wasm", "WebAssembly kernels"],
       ["ui-foundations", "UI foundations"],

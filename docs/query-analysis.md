@@ -29,6 +29,8 @@ There is no subject, no token fingerprint and no check of the ownership for each
 
 `POST /api/query/analysis` resolves a completed record by `query_id + host_id`. All callers of the panel share the permissions of the `runner_uri` of that host.
 
+The registry keeps the record of a run after the backend removes the SSE session of that run. Thus Analyze, Execution and Deep Analyze can find a completed run.
+
 The successful response is ordinary `application/json`. These rules apply to it:
 
 - The response keeps the span-heavy trace data under `trace_compact` as positional JSON. It does not repeat span objects.

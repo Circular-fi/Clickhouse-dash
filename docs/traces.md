@@ -164,6 +164,18 @@ Do not add `prj_timestamp` by default. A benchmark used a local table with about
 
 New parts populate projection indexes automatically. For historical parts, materialize only the projections that you actually add. On large production datasets, materialize them partition by partition. Do not rewrite all history at once.
 
+If the tables already hold historical data, materialize the two projections one time:
+
+```sql
+ALTER TABLE otel.otel_traces
+    MATERIALIZE PROJECTION prj_traceid;
+
+ALTER TABLE otel.otel_traces_trace_id_ts
+    MATERIALIZE PROJECTION prj_start;
+```
+
+The materialization is asynchronous by default. Add `SETTINGS mutations_sync=1` when the command must wait for the end.
+
 The Trace Explorer uses the trace index first when no trace-duration filter is active. These rules apply:
 
 - Unfiltered searches read the newest trace IDs directly from `otel_traces_trace_id_ts`.

@@ -267,6 +267,22 @@ In the two models, the credentials of the configured host limit the access to Cl
 
 Every caller who has an action on a given panel and host therefore has the same ClickHouse permissions. These are the permissions of its `runner_uri` (with `readonly = 1` without `query.run.write`). If you need different sets of data permissions, expose different deployments or hosts that use different runners.
 
+`runner_uri` defines what the queries can see. The backend uses it for these items:
+
+- The health check of the host.
+- The autocomplete of databases, tables and columns.
+- The SQL formatter.
+- The queries of the people.
+
+The backend uses `system_uri` for these items:
+
+- The catalogs of the whole server.
+- The diagnostics.
+- The final statistics of a run.
+- The cancel of a query.
+
+Thus a failure of the system account does not mark a host as down when the host can still run queries.
+
 The server still signs short-lived internal capability tokens with a random secret that it creates at start. These tokens are not user identities. For example, `/api/query/cancel` requires the signed token that the server issued for that query.
 
 Cancel tokens carry `purpose=cancel`, the host ID, the query ID, `iat` and `exp`. `query.cancel_token_ttl_ms` has the default value of 48 hours. When ChDash restarts, it changes the signing secret. Older capabilities become invalid before their nominal expiry.

@@ -45,7 +45,7 @@ The server sends a `tick` every 250 ms while the query runs. The Query page ends
 
 The host of a run is fixed when the run starts. Every statement of a batch, the history entry and the diagnostics use that host. The host picker is disabled while the run continues.
 
-The number of `result_rows`, `tick`, `keepalive` and `message` events can differ between releases. This does not change the query semantics. The tests compare these items:
+The number of `result_rows`, `tick`, `keepalive` and `message` events can differ between releases. It can also change with the size of the result batches, the duration of the query and the work of the scheduler. This does not change the query semantics. The tests compare these items:
 
 - Rows.
 - Row order.
