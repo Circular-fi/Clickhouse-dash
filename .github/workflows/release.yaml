@@ -536,3 +536,27 @@ jobs:
           else
             gh release create "${TAG}" out/*.tar.gz out/SHA256SUMS --title "${TAG}" --generate-notes --verify-tag
           fi
+
+  # The conformance bench of ProcurAuth tests this release. It never blocks the release: this job is the last one, and its
+  # failure changes no other result. The app token can start one workflow of ProcurAuth/procurauth and nothing else.
+  bench:
+    name: Start the conformance bench
+    needs: [prepare, release]
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Make the token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.BENCH_APP_ID }}
+          private-key: ${{ secrets.BENCH_APP_PRIVATE_KEY }}
+          owner: ProcurAuth
+          repositories: procurauth
+      - name: Start the bench
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh workflow run bench.yml --repo ProcurAuth/procurauth --ref main -f project=clickhouse-dash -f tag="$TAG"
