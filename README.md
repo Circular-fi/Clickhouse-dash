@@ -2,6 +2,8 @@
 
 A lightweight real-time ClickHouse query dashboard.
 
+> The source of this program is [`Circular-fi/Clickhouse-dash`](https://github.com/Circular-fi/Clickhouse-dash). The repository [`ProcurAuth/clickhouse-dash`](https://github.com/ProcurAuth/clickhouse-dash) is a read-only copy of its branch `main` and of its releases. See [Source and mirror](#source-and-mirror).
+
 **[Home page](https://circular-fi.github.io/Clickhouse-dash/)** · **[Documentation](https://circular-fi.github.io/Clickhouse-dash/documentation.html)** · **[Download v1.6.0](https://github.com/Circular-fi/Clickhouse-dash/releases/latest)**
 
 <p align="center">
@@ -243,6 +245,17 @@ For this reason, a failure of the system account does not mark a host as down wh
 [`docs/wasm.md`](docs/wasm.md) describes the WebAssembly kernels, their measures and how to rebuild them. The sanitizer, clang-tidy and release smoke test runs are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 [`docs/post-run-download.md`](docs/post-run-download.md) describes the post-run browser archives. [`docs/massive-export.md`](docs/massive-export.md) describes the direct ZIP64 stream exports.
+
+## Source and mirror
+
+The repository `Circular-fi/Clickhouse-dash` is the source. Each change starts there. The issues and the pull requests are there too.
+
+The repository `ProcurAuth/clickhouse-dash` is a mirror. It holds the branch `main`, with the same commits as the source, and a copy of each release. It has no other branch, no issue and no pull request. Nobody pushes to it: a rule of the repository refuses each push, except the push of the workflow `mirror` of the source.
+
+- The workflow `mirror` runs on each push to `main` in the source, and when a release ends. It pushes the same commit to the mirror. It copies each release that the mirror does not have yet: the title, the notes and the files.
+- If the two branches differ, the push fails and the mirror stays as it is. The run of the workflow `mirror` in the source shows the failure.
+- A release of the mirror does not have the attestation of the build. Check an archive against the source: `gh attestation verify ARCHIVE --repo Circular-fi/Clickhouse-dash`.
+- To report a problem or to send a change, use the source.
 
 ## Development and support
 

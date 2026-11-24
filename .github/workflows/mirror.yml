@@ -1,0 +1,88 @@
+name: Mirror
+
+# Copy the branch main and the releases to the read-only mirror ProcurAuth/clickhouse-dash.
+# The push of main is a plain push, with no force. It fails when the two branches differ, and then the mirror stays
+# as it is. The two main branches have the same commits, so they have the same hash.
+# A release of the mirror has the title, the notes and the files of the release of this repository. It does not have
+# the attestation of the build. Check an archive with the attestation of this repository:
+#   gh attestation verify <archive> --repo Circular-fi/Clickhouse-dash
+# The job runs on a push to main, when the workflow Release ends, and on request.
+# The token comes from the GitHub App "ProcurAuth Dash mirror". Only the mirror has this app.
+# The mirror has no Actions, so it never runs this file.
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+env:
+  MIRROR: ProcurAuth/clickhouse-dash
+
+jobs:
+  mirror:
+    name: Copy main and the releases
+    if: github.repository == 'Circular-fi/Clickhouse-dash' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Make the token of the mirror
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.MIRROR_APP_ID }}
+          private-key: ${{ secrets.MIRROR_APP_PRIVATE_KEY }}
+          owner: ProcurAuth
+          repositories: clickhouse-dash
+      - name: Push main
+        shell: bash
+        env:
+          MIRROR_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$MIRROR_TOKEN" | base64 -w0)" \
+            push "https://github.com/${MIRROR}.git" HEAD:refs/heads/main
+      - name: Copy the releases that the mirror does not have
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIRROR_TOKEN: ${{ steps.token.outputs.token }}
+          SOURCE: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          latest="$(gh release view --repo "$SOURCE" --json tagName --jq .tagName)"
+          # The oldest release first, so the order of the mirror is the order of the source.
+          gh release list --repo "$SOURCE" --limit 200 --json tagName,isDraft --jq '.[] | select(.isDraft | not) | .tagName' | tac |
+          while read -r tag; do
+            if GH_TOKEN="$MIRROR_TOKEN" gh release view "$tag" --repo "$MIRROR" >/dev/null 2>&1; then
+              continue
+            fi
+            echo "copy $tag"
+            work="$(mktemp -d)"
+            gh release view "$tag" --repo "$SOURCE" --json name,body,isPrerelease > "$work/release.json"
+            jq -r '.body // ""' "$work/release.json" > "$work/notes.md"
+            mkdir "$work/files"
+            gh release download "$tag" --repo "$SOURCE" --dir "$work/files" || true
+            sha="$(git rev-list -n 1 "refs/tags/$tag")"
+            flags=()
+            [ "$(jq -r .isPrerelease "$work/release.json")" = true ] && flags+=(--prerelease)
+            [ "$tag" = "$latest" ] && flags+=(--latest) || flags+=(--latest=false)
+            files=("$work"/files/*)
+            [ -e "${files[0]}" ] || files=()
+            GH_TOKEN="$MIRROR_TOKEN" gh release create "$tag" "${files[@]}" --repo "$MIRROR" --target "$sha" \
+              --title "$(jq -r '.name // empty' "$work/release.json" | grep . || echo "$tag")" --notes-file "$work/notes.md" "${flags[@]}"
+            rm -rf "$work"
+          done
